@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from app.database import Base, engine
-from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente
+from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos
 
 Base.metadata.create_all(bind=engine)
 
@@ -21,7 +21,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for r in [auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente]:
+for r in [auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos]:
     app.include_router(r.router)
 
 

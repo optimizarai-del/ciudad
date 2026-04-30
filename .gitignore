@@ -38,3 +38,5 @@ desktop.ini
 # Secrets (el .env base SÍ se sube como referencia, sin valores reales)
 backend/.env.local
 backend/.env.production
+frontend/.env
+frontend/.env.local

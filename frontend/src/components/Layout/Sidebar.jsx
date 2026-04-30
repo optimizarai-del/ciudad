@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutGrid, Building2, FileText, Users,
-  Calculator, Bot, TrendingUp, Settings
+  Calculator, Bot, TrendingUp, Settings, BarChart2
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import Logo from '../Logo'
@@ -20,7 +20,7 @@ export default function Sidebar() {
   const { isAdmin, isFinanzas } = useAuth()
 
   return (
-    <aside className="w-60 shrink-0 border-r border-border bg-white min-h-[calc(100vh-3rem)] py-5 px-3 flex flex-col">
+    <aside className="w-60 shrink-0 border-r border-[#E5E5E5] dark:border-[#2A2A2A] bg-white dark:bg-[#0F0F0F] min-h-[calc(100vh-3rem)] py-5 px-3 flex flex-col">
 
       <div className="section-label !mt-0">General</div>
       <Item to="/dashboard"   icon={LayoutGrid} label="Dashboard" />
@@ -30,6 +30,7 @@ export default function Sidebar() {
 
       <div className="section-label">Herramientas</div>
       <Item to="/calculadora" icon={Calculator} label="Calculadora" />
+      <Item to="/indices"     icon={BarChart2}  label="Índices" />
       <Item to="/agente"      icon={Bot}        label="Agente IA" />
 
       {isFinanzas && (

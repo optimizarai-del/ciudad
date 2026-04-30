@@ -3,7 +3,7 @@ import Sidebar from './Sidebar'
 
 export default function Layout({ children, fullWidth = false }) {
   return (
-    <div className="min-h-screen bg-bg">
+    <div className="min-h-screen bg-[#F7F7F7] dark:bg-[#0A0A0A] transition-colors duration-300">
       <HUD />
       <div className="flex">
         <Sidebar />

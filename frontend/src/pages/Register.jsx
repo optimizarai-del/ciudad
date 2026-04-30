@@ -32,11 +32,11 @@ export default function Register() {
   }
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center p-6">
+    <div className="min-h-screen bg-[#F7F7F7] dark:bg-[#0A0A0A] flex items-center justify-center p-6 transition-colors duration-300">
       <div className="w-full max-w-md animate-fade-in">
         <div className="mb-10 text-center">
           <Logo size="md" className="justify-center" />
-          <p className="text-muted text-[13px] mt-2">Creá tu cuenta</p>
+          <p className="text-[#737373] dark:text-[#9A9A9A] text-[13px] mt-2">Creá tu cuenta</p>
         </div>
 
         <div className="card p-8 shadow-card">
@@ -76,7 +76,7 @@ export default function Register() {
 
         <p className="text-[13px] text-muted text-center mt-6">
           ¿Ya tenés cuenta?{' '}
-          <Link to="/login" className="text-primary font-medium hover:underline">Iniciar sesión</Link>
+          <Link to="/login" className="text-[#0A0A0A] dark:text-white font-medium hover:underline">Iniciar sesión</Link>
         </p>
       </div>
     </div>

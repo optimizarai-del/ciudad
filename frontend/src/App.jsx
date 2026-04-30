@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { ThemeProvider } from './context/ThemeContext'
 import ProtectedRoute from './components/Layout/ProtectedRoute'
 
 import Login       from './pages/Login'
@@ -12,9 +13,11 @@ import Calculadora from './pages/Calculadora'
 import Agente      from './pages/Agente'
 import Finanzas    from './pages/Finanzas'
 import Equipo      from './pages/Equipo'
+import Indices     from './pages/Indices'
 
 export default function App() {
   return (
+    <ThemeProvider>
     <AuthProvider>
       <BrowserRouter>
         <Routes>
@@ -41,6 +44,9 @@ export default function App() {
           <Route path="/agente" element={
             <ProtectedRoute><Agente /></ProtectedRoute>
           } />
+          <Route path="/indices" element={
+            <ProtectedRoute><Indices /></ProtectedRoute>
+          } />
 
           {/* Finanzas */}
           <Route path="/finanzas" element={
@@ -58,5 +64,6 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </AuthProvider>
+    </ThemeProvider>
   )
 }

@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useTheme } from '../context/ThemeContext'
+import { Sun, Moon } from 'lucide-react'
 import Logo from '../components/Logo'
 
 export default function Login() {
   const { login } = useAuth()
+  const { isDark, toggle } = useTheme()
   const nav = useNavigate()
   const [form, setForm] = useState({ email: '', password: '' })
   const [err, setErr] = useState('')
@@ -24,11 +27,10 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen grid lg:grid-cols-[1.15fr_1fr] bg-bg">
+    <div className="min-h-screen grid lg:grid-cols-[1.15fr_1fr] bg-[#F7F7F7] dark:bg-[#0A0A0A] transition-colors duration-300">
 
       {/* ── Izquierda: hero ── */}
-      <div className="hidden lg:flex flex-col justify-between p-14 xl:p-20 bg-primary relative overflow-hidden">
-        {/* Texturas sutiles */}
+      <div className="hidden lg:flex flex-col justify-between p-14 xl:p-20 bg-[#0A0A0A] dark:bg-[#0F0F0F] relative overflow-hidden">
         <div className="absolute inset-0 opacity-[0.03]"
           style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '32px 32px' }} />
 
@@ -54,15 +56,25 @@ export default function Login() {
       </div>
 
       {/* ── Derecha: form ── */}
-      <div className="flex flex-col justify-center px-6 py-12 lg:px-16 xl:px-20 bg-white">
+      <div className="flex flex-col justify-center px-6 py-12 lg:px-16 xl:px-20 bg-white dark:bg-[#0F0F0F] relative">
+
+        {/* Theme toggle */}
+        <button
+          onClick={toggle}
+          className="absolute top-5 right-5 p-2 rounded-full text-[#737373] dark:text-[#9A9A9A] hover:bg-[#F0F0F0] dark:hover:bg-[#1E1E1E] transition"
+          title={isDark ? 'Modo claro' : 'Modo noche'}
+        >
+          {isDark ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
+
         <div className="w-full max-w-sm mx-auto animate-fade-in">
 
           <div className="lg:hidden mb-10">
             <Logo size="md" />
           </div>
 
-          <h2 className="hero-title text-4xl text-primary mb-2">Iniciar sesión</h2>
-          <p className="text-muted text-[15px] font-light mb-10">Bienvenido de vuelta.</p>
+          <h2 className="hero-title text-4xl text-[#0A0A0A] dark:text-[#F5F5F5] mb-2">Iniciar sesión</h2>
+          <p className="text-[#737373] dark:text-[#9A9A9A] text-[15px] font-light mb-10">Bienvenido de vuelta.</p>
 
           <form onSubmit={handle} className="space-y-5">
             <div>
@@ -84,11 +96,11 @@ export default function Login() {
           </form>
 
           {/* Demo box */}
-          <div className="mt-8 p-4 rounded-2xl bg-neutral-100 border border-border">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold mb-2">Demo</p>
+          <div className="mt-8 p-4 rounded-2xl bg-[#F5F5F5] dark:bg-[#1A1A1A] border border-[#E5E5E5] dark:border-[#2A2A2A]">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[#737373] dark:text-[#7A7A7A] font-semibold mb-2">Demo</p>
             <div className="space-y-1">
-              <p className="text-[13px] text-primary font-mono">admin@ciudad.com</p>
-              <p className="text-[13px] text-primary font-mono">ciudad1234</p>
+              <p className="text-[13px] text-[#0A0A0A] dark:text-[#E0E0E0] font-mono">admin@ciudad.com</p>
+              <p className="text-[13px] text-[#0A0A0A] dark:text-[#E0E0E0] font-mono">ciudad1234</p>
             </div>
             <button
               onClick={() => setForm({ email: 'admin@ciudad.com', password: 'ciudad1234' })}
@@ -97,9 +109,9 @@ export default function Login() {
             </button>
           </div>
 
-          <p className="text-[13px] text-muted text-center mt-8">
+          <p className="text-[13px] text-[#737373] dark:text-[#9A9A9A] text-center mt-8">
             ¿No tenés cuenta?{' '}
-            <Link to="/register" className="text-primary font-medium hover:underline">Registrarse</Link>
+            <Link to="/register" className="text-[#0A0A0A] dark:text-white font-medium hover:underline">Registrarse</Link>
           </p>
         </div>
       </div>
