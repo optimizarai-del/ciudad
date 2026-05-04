@@ -221,3 +221,44 @@ class ConsultaIA(Base):
     respuesta = Column(Text)
     user_id = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LeadEstado(str, Enum):
+    nuevo = "nuevo"
+    interesado = "interesado"
+    a_contactar = "a_contactar"
+    descartado = "descartado"
+
+class LeadCanal(str, Enum):
+    telegram = "telegram"
+    instagram = "instagram"
+    web = "web"
+
+class Lead(Base):
+    __tablename__ = "leads"
+    id = Column(Integer, primary_key=True)
+    canal = Column(SQLEnum(LeadCanal), default=LeadCanal.telegram)
+    canal_id = Column(String, index=True)          # chat_id telegram / ig user_id
+    canal_username = Column(String)
+    nombre = Column(String)
+    telefono = Column(String)
+    email = Column(String)
+    estado = Column(SQLEnum(LeadEstado), default=LeadEstado.nuevo)
+    operacion = Column(String)                      # alquiler/venta/vender
+    tipo_propiedad = Column(String)
+    zona = Column(String)
+    habitaciones = Column(String)
+    presupuesto = Column(String)
+    notas_crm = Column(Text)
+    ultima_actividad = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    mensajes = relationship("MensajeConversacion", back_populates="lead", cascade="all, delete")
+
+class MensajeConversacion(Base):
+    __tablename__ = "mensajes_conversacion"
+    id = Column(Integer, primary_key=True)
+    lead_id = Column(Integer, ForeignKey("leads.id"))
+    lead = relationship("Lead", back_populates="mensajes")
+    rol = Column(String)   # "user" | "assistant"
+    contenido = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)

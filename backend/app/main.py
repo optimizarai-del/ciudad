@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from app.database import Base, engine
-from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos
+from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -23,6 +23,8 @@ app.add_middleware(
 
 for r in [auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos]:
     app.include_router(r.router)
+
+app.include_router(agente_router.router)
 
 
 @app.get("/health")
