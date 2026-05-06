@@ -18,7 +18,7 @@ def register(data: schemas.UserCreate, db: Session = Depends(get_db)):
         email=data.email,
         telefono=data.telefono,
         password_hash=hash_pw(data.password),
-        role=models.UserRole.admin if is_first else models.UserRole(data.role or "operador"),
+        role=models.UserRole.admin if is_first else models.UserRole(data.role or "alquileres"),
     )
     db.add(user); db.commit(); db.refresh(user)
     token = create_token({"sub": str(user.id)})

@@ -7,6 +7,7 @@ load_dotenv()
 
 from app.database import Base, engine
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
+from app.routers import cobranza, ventas_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -25,6 +26,8 @@ for r in [auth, users, propiedades, clientes, contratos, calculadora, dashboard,
     app.include_router(r.router)
 
 app.include_router(agente_router.router)
+app.include_router(cobranza.router)
+app.include_router(ventas_router.router)
 
 
 @app.get("/health")

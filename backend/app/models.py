@@ -10,8 +10,9 @@ from app.database import Base
 
 class UserRole(str, Enum):
     admin = "admin"
-    operador = "operador"
-    finanzas = "finanzas"
+    gerencia = "gerencia"
+    alquileres = "alquileres"
+    ventas = "ventas"
     agente_ia = "agente_ia"
 
 
@@ -86,7 +87,7 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     telefono = Column(String)
     password_hash = Column(String, nullable=False)
-    role = Column(SQLEnum(UserRole), default=UserRole.operador)
+    role = Column(SQLEnum(UserRole), default=UserRole.alquileres)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

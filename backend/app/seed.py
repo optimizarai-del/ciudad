@@ -45,17 +45,17 @@ def run():
         )
         operador = models.User(
             nombre="Nicolás Torres",
-            email="operador@ciudad.com",
+            email="alquileres@ciudad.com",
             telefono="+54 9 11 5500-0002",
             password_hash=hash_pw("ciudad1234"),
-            role=models.UserRole.operador,
+            role=models.UserRole.alquileres,
         )
         finanzas = models.User(
             nombre="Valentina Díaz",
-            email="finanzas@ciudad.com",
+            email="ventas@ciudad.com",
             telefono="+54 9 11 5500-0003",
             password_hash=hash_pw("ciudad1234"),
-            role=models.UserRole.finanzas,
+            role=models.UserRole.ventas,
         )
         agente = models.User(
             nombre="Mateo Sánchez",
@@ -595,7 +595,7 @@ def run():
         db.commit()
 
         print("Seed demo completado:")
-        print("   -> 4 usuarios  (admin / operador / finanzas / agente - todos: ciudad1234)")
+        print("   -> 4 usuarios  (admin / alquileres / ventas / agente - todos: ciudad1234)")
         print("   -> 12 clientes")
         print("   -> 16 propiedades")
         print("   -> 12 contratos  (vigentes / borrador / vencido / boleto)")

@@ -9,7 +9,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     telefono: Optional[str] = None
-    role: Optional[str] = "operador"
+    role: Optional[str] = "alquileres"
 
 
 class UserOut(BaseModel):

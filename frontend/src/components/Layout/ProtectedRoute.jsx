@@ -1,8 +1,15 @@
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 
-export default function ProtectedRoute({ children, requireAdmin = false, requireFinanzas = false }) {
+export default function ProtectedRoute({
+  children,
+  requireAdmin = false,
+  requireFinanzas = false,
+  requireAlquileres = false,
+  requireVentas = false,
+}) {
   const { user, loading, isAdmin, isFinanzas } = useAuth()
+
   if (loading) return (
     <div className="min-h-screen bg-bg flex items-center justify-center">
       <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
@@ -11,5 +18,18 @@ export default function ProtectedRoute({ children, requireAdmin = false, require
   if (!user) return <Navigate to="/login" replace />
   if (requireAdmin && !isAdmin) return <Navigate to="/dashboard" replace />
   if (requireFinanzas && !isFinanzas) return <Navigate to="/dashboard" replace />
+
+  if (requireAlquileres) {
+    const role = user?.role || ''
+    const allowed = ['admin', 'gerencia', 'alquileres'].includes(role)
+    if (!allowed) return <Navigate to="/dashboard" replace />
+  }
+
+  if (requireVentas) {
+    const role = user?.role || ''
+    const allowed = ['admin', 'gerencia', 'ventas'].includes(role)
+    if (!allowed) return <Navigate to="/dashboard" replace />
+  }
+
   return children
 }

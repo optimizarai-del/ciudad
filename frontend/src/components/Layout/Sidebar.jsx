@@ -1,55 +1,86 @@
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutGrid, Building2, FileText, Users,
-  Calculator, Bot, TrendingUp, Settings, BarChart2
+  LayoutDashboard, Building2, FileText, Users, Calculator,
+  BarChart2, Bot, TrendingUp, Settings, DollarSign,
+  Home, CreditCard, Store, ChevronRight
 } from 'lucide-react'
-import { useAuth } from '../../context/AuthContext'
-import Logo from '../Logo'
+import { useRole } from '../../context/RoleContext'
 
-const Item = ({ to, icon: Icon, label }) => (
-  <NavLink to={to}
+const NavItem = ({ to, icon: Icon, label }) => (
+  <NavLink
+    to={to}
     className={({ isActive }) =>
-      `nav-link ${isActive ? 'nav-link-active' : ''}`
-    }>
-    <Icon size={15} strokeWidth={1.8} />
+      `flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
+        isActive
+          ? 'bg-black dark:bg-white text-white dark:text-black'
+          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-black dark:hover:text-white'
+      }`
+    }
+  >
+    <Icon size={16} />
     {label}
   </NavLink>
 )
 
+const Section = ({ label, children }) => (
+  <div className="mb-4">
+    <p className="px-3 mb-1 text-[10px] font-bold tracking-widest uppercase text-gray-400 dark:text-gray-600">
+      {label}
+    </p>
+    <div className="space-y-0.5">{children}</div>
+  </div>
+)
+
 export default function Sidebar() {
-  const { isAdmin, isFinanzas } = useAuth()
+  const { hasAlquileres, hasVentas, isAdmin, isGerencia, role } = useRole()
 
   return (
-    <aside className="w-60 shrink-0 border-r border-[#E5E5E5] dark:border-[#2A2A2A] bg-white dark:bg-[#0F0F0F] min-h-[calc(100vh-3rem)] py-5 px-3 flex flex-col">
+    <aside className="w-60 h-full bg-white dark:bg-[#0A0A0A] border-r border-gray-100 dark:border-gray-900 flex flex-col py-4 px-3">
 
-      <div className="section-label !mt-0">General</div>
-      <Item to="/dashboard"   icon={LayoutGrid} label="Dashboard" />
-      <Item to="/propiedades" icon={Building2}  label="Propiedades" />
-      <Item to="/contratos"   icon={FileText}   label="Contratos" />
-      <Item to="/clientes"    icon={Users}      label="Clientes" />
-
-      <div className="section-label">Herramientas</div>
-      <Item to="/calculadora" icon={Calculator} label="Calculadora" />
-      <Item to="/indices"     icon={BarChart2}  label="Índices" />
-      <Item to="/agente"      icon={Bot}        label="Agente IA" />
-
-      {isFinanzas && (
-        <>
-          <div className="section-label">Finanzas</div>
-          <Item to="/finanzas" icon={TrendingUp} label="Finanzas" />
-        </>
+      {/* Alquileres section */}
+      {hasAlquileres && (
+        <Section label="Alquileres">
+          <NavItem to="/alquileres/dashboard"  icon={LayoutDashboard} label="Dashboard" />
+          <NavItem to="/alquileres/propiedades" icon={Home}           label="Propiedades" />
+          <NavItem to="/alquileres/contratos"   icon={FileText}       label="Contratos" />
+          <NavItem to="/alquileres/cobranza"    icon={CreditCard}     label="Cobranza" />
+          <NavItem to="/alquileres/clientes"    icon={Users}          label="Clientes" />
+          <NavItem to="/calculadora"            icon={Calculator}     label="Calculadora" />
+        </Section>
       )}
 
+      {/* Ventas section */}
+      {hasVentas && (
+        <Section label="Ventas">
+          <NavItem to="/ventas/dashboard"    icon={TrendingUp}  label="Dashboard" />
+          <NavItem to="/ventas/propiedades"  icon={Building2}   label="Propiedades" />
+          <NavItem to="/ventas/tokko"        icon={Store}       label="Portal Tokko" />
+          <NavItem to="/ventas/clientes"     icon={Users}       label="Clientes Ventas" />
+        </Section>
+      )}
+
+      {/* Herramientas */}
+      <Section label="Herramientas">
+        <NavItem to="/indices" icon={BarChart2} label="Índices" />
+        <NavItem to="/agente"  icon={Bot}       label="Agente IA" />
+      </Section>
+
+      {/* Admin */}
       {isAdmin && (
-        <>
-          <div className="section-label">Administración</div>
-          <Item to="/equipo" icon={Settings} label="Equipo" />
-        </>
+        <Section label="Administración">
+          <NavItem to="/dashboard"   icon={LayoutDashboard} label="Dashboard Maestro" />
+          <NavItem to="/finanzas"    icon={DollarSign}      label="Finanzas" />
+          <NavItem to="/equipo"      icon={Settings}        label="Equipo" />
+        </Section>
       )}
 
-      <div className="mt-auto pt-6 px-3">
-        <Logo size="xs" tagline />
-      </div>
+      {/* Gerencia (not admin) */}
+      {isGerencia && !isAdmin && (
+        <Section label="Gerencia">
+          <NavItem to="/dashboard"   icon={LayoutDashboard} label="Dashboard Maestro" />
+        </Section>
+      )}
+
     </aside>
   )
 }
