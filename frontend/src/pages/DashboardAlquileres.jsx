@@ -18,7 +18,7 @@ function MetricCard({ label, value, sub, icon: Icon, color = 'black' }) {
         <Icon size={16} className="text-gray-300 dark:text-gray-700" />
       </div>
       <p className={`text-3xl font-black ${colors[color]}`}>{value}</p>
-      {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+      {sub && <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{sub}</p>}
     </div>
   )
 }
@@ -56,7 +56,7 @@ export default function DashboardAlquileres() {
       <div className="p-6 space-y-6">
         {/* Header */}
         <div>
-          <p className="text-xs font-semibold tracking-widest text-gray-400 uppercase mb-1">Alquileres</p>
+          <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Alquileres</p>
           <h1 className="text-3xl font-black capitalize">{mesLabel}</h1>
         </div>
 
@@ -104,15 +104,15 @@ export default function DashboardAlquileres() {
           <div className="card p-5">
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm font-semibold">Cobranza del mes</p>
-              <p className="text-sm text-gray-400">${(cobranza.total_esperado/1000).toFixed(0)}K total</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500">${(cobranza.total_esperado/1000).toFixed(0)}K total</p>
             </div>
-            <div className="h-3 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+            <div className="h-3 bg-gray-100 dark:bg-[#1E1E1E] rounded-full overflow-hidden">
               <div
                 className="h-full bg-black dark:bg-white rounded-full transition-all duration-500"
                 style={{ width: `${cobranza.porcentaje_cobrado}%` }}
               />
             </div>
-            <div className="flex justify-between mt-2 text-xs text-gray-400">
+            <div className="flex justify-between mt-2 text-xs text-gray-400 dark:text-gray-500">
               <span className="text-green-600 dark:text-green-400 font-medium">${(cobranza.cobrado/1000).toFixed(0)}K cobrado</span>
               <span>${(cobranza.pendiente/1000).toFixed(0)}K pendiente</span>
             </div>
@@ -125,10 +125,10 @@ export default function DashboardAlquileres() {
             <p className="text-sm font-semibold mb-3">Contratos por vencer (próximos 60 días)</p>
             <div className="space-y-2">
               {proximas.slice(0, 5).map(a => (
-                <div key={a.contrato_id} className="flex items-center justify-between py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
+                <div key={a.contrato_id} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-[#2A2A2A] last:border-0">
                   <div>
                     <p className="text-sm font-medium">{a.codigo}</p>
-                    <p className="text-xs text-gray-400">{a.propiedad_direccion}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500">{a.propiedad_direccion}</p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                     a.dias_restantes <= 30

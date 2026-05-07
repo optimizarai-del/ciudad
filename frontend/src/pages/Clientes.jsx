@@ -80,7 +80,7 @@ export default function Clientes() {
         ) : (
           <div className="card overflow-hidden">
             <table className="w-full">
-              <thead className="bg-neutral-50 border-b border-border">
+              <thead className="bg-neutral-50 dark:bg-[#141414] border-b border-border dark:border-[#2A2A2A]">
                 <tr>
                   <th className="th">Nombre</th>
                   <th className="th hidden md:table-cell">Contacto</th>
@@ -91,7 +91,7 @@ export default function Clientes() {
               </thead>
               <tbody className="divide-y divide-border">
                 {filtered.map(c => (
-                  <tr key={c.id} className="hover:bg-neutral-50 transition">
+                  <tr key={c.id} className="hover:bg-neutral-50 dark:hover:bg-[#1A1A1A] transition">
                     <td className="td">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-primary text-white grid place-items-center text-[11px] font-semibold shrink-0">
@@ -127,7 +127,7 @@ export default function Clientes() {
                     </td>
                     <td className="td">
                       <div className="flex gap-1">
-                        <button className="p-1.5 rounded-lg hover:bg-neutral-100 text-muted hover:text-primary transition"
+                        <button className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-[#1E1E1E] text-muted hover:text-primary transition"
                           onClick={() => { setEditing(c); setOpen(true) }}>
                           <Pencil size={13} />
                         </button>
@@ -154,7 +154,7 @@ function FilterPill({ active, onClick, label }) {
   return (
     <button onClick={onClick}
       className={`px-4 py-1.5 rounded-full text-[12px] font-medium tracking-tight transition capitalize
-        ${active ? 'bg-primary text-white' : 'bg-white border border-border text-muted hover:bg-neutral-50'}`}>
+        ${active ? 'bg-primary text-white dark:bg-white dark:text-primary' : 'bg-white dark:bg-[#141414] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#1A1A1A]'}`}>
       {label}
     </button>
   )

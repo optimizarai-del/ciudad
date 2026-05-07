@@ -69,7 +69,7 @@ export default function Cobranza() {
       <div className="p-6 space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <p className="text-xs font-semibold tracking-widest text-gray-400 uppercase mb-1">Alquileres</p>
+            <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Alquileres</p>
             <h1 className="text-3xl font-black">Cobranza</h1>
           </div>
           <div className="flex items-center gap-2">
@@ -102,7 +102,7 @@ export default function Cobranza() {
               className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors
                 ${filtro === f
                   ? 'bg-black dark:bg-white text-white dark:text-black'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
                 }`}>
               {f === 'todos' ? 'Todos' : (ESTADO_CONFIG[f]?.label || f)}
               <span className="ml-1 opacity-60">{cuentas[f] ?? 0}</span>
@@ -113,9 +113,9 @@ export default function Cobranza() {
         {/* Tabla */}
         <div className="card overflow-hidden">
           {loading ? (
-            <div className="p-8 text-center text-sm text-gray-400">Cargando...</div>
+            <div className="p-8 text-center text-sm text-gray-400 dark:text-gray-500">Cargando...</div>
           ) : filtrados.length === 0 ? (
-            <div className="p-8 text-center text-sm text-gray-400">No hay contratos para este período.</div>
+            <div className="p-8 text-center text-sm text-gray-400 dark:text-gray-500">No hay contratos para este período.</div>
           ) : (
             <table className="w-full">
               <thead>
@@ -136,12 +136,12 @@ export default function Cobranza() {
                     <tr key={p.contrato_id} className="border-b border-gray-50 dark:border-gray-900 hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors">
                       <td className="td">
                         <p className="font-medium text-sm">{p.propiedad}</p>
-                        <p className="text-xs text-gray-400">{p.contrato_codigo} · {p.propiedad_ciudad}</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">{p.contrato_codigo} · {p.propiedad_ciudad}</p>
                       </td>
                       <td className="td">
                         <p className="text-sm">{p.inquilino}</p>
                         {p.inquilino_email && (
-                          <p className="text-xs text-gray-400 flex items-center gap-1 truncate max-w-[180px]">
+                          <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1 truncate max-w-[180px]">
                             <Mail size={10} />{p.inquilino_email}
                           </p>
                         )}
@@ -149,7 +149,7 @@ export default function Cobranza() {
                       <td className="td hidden lg:table-cell">
                         <p className="text-sm">{p.propietario || '—'}</p>
                         {p.comision_porc > 0 && (
-                          <p className="text-xs text-gray-400">Comisión {p.comision_porc}%</p>
+                          <p className="text-xs text-gray-400 dark:text-gray-500">Comisión {p.comision_porc}%</p>
                         )}
                       </td>
                       <td className="td text-right">
@@ -198,7 +198,7 @@ export default function Cobranza() {
 function Stat({ label, value, color = '' }) {
   return (
     <div className="card p-4">
-      <p className="text-xs text-gray-400 mb-1">{label}</p>
+      <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">{label}</p>
       <p className={`text-2xl font-black ${color}`}>{value}</p>
     </div>
   )
@@ -267,7 +267,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Período</label>
-              <input className="input bg-neutral-50" value={mes} disabled />
+              <input className="input bg-neutral-50 dark:bg-[#1A1A1A]" value={mes} disabled />
             </div>
             <div>
               <label className="label">Fecha de pago</label>

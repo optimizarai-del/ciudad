@@ -119,7 +119,7 @@ export default function Propiedades() {
               <div key={p.id} className="card p-6 card-hover flex flex-col gap-4">
                 {/* Header */}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="w-10 h-10 rounded-2xl bg-neutral-100 grid place-items-center shrink-0">
+                  <div className="w-10 h-10 rounded-2xl bg-neutral-100 dark:bg-[#1E1E1E] grid place-items-center shrink-0">
                     <Home size={16} className="text-muted" />
                   </div>
                   <div className="flex gap-1.5 ml-auto">
@@ -207,7 +207,7 @@ function FilterPill({ active, onClick, label }) {
   return (
     <button onClick={onClick}
       className={`px-4 py-1.5 rounded-full text-[12px] font-medium tracking-tight transition
-        ${active ? 'bg-primary text-white' : 'bg-white border border-border text-muted hover:bg-neutral-50'}`}>
+        ${active ? 'bg-primary text-white dark:bg-white dark:text-primary' : 'bg-white dark:bg-[#141414] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#1A1A1A]'}`}>
       {label}
     </button>
   )

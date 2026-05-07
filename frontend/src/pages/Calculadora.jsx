@@ -71,7 +71,7 @@ export default function Calculadora() {
                   {sugerencias.map(p => (
                     <button key={p.id}
                       onClick={() => { setBusqueda(p.direccion); setPropId(p.id); }}
-                      className="w-full text-left px-4 py-3 text-[13px] hover:bg-neutral-50 border-b border-border last:border-0 transition">
+                      className="w-full text-left px-4 py-3 text-[13px] hover:bg-neutral-50 dark:hover:bg-[#1A1A1A] border-b border-border dark:border-[#2A2A2A] last:border-0 transition">
                       <span className="font-medium">{p.direccion}</span>
                       <span className="text-muted ml-2">{p.ciudad} · {p.tipo}</span>
                     </button>

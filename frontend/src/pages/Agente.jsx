@@ -54,9 +54,9 @@ function LeadCard({ lead, selected, onClick }) {
             <span className="text-sm font-medium truncate">
               {lead.nombre || lead.canal_username || `Lead #${lead.id}`}
             </span>
-            <span className="text-xs text-gray-400 flex-shrink-0">{timeAgo(lead.ultima_actividad)}</span>
+            <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">{timeAgo(lead.ultima_actividad)}</span>
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">{lead.ultimo_mensaje || '—'}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 dark:text-gray-500 truncate mt-0.5">{lead.ultimo_mensaje || '—'}</p>
           <div className="mt-1.5"><EstadoBadge estado={lead.estado} /></div>
         </div>
       </div>
@@ -82,7 +82,7 @@ function ConversationPanel({ lead, onEstadoChange }) {
   }, [detalle?.conversacion])
 
   if (!lead) return (
-    <div className="flex-1 flex items-center justify-center text-gray-400">
+    <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500">
       <div className="text-center">
         <MessageCircle size={40} className="mx-auto mb-3 opacity-20" />
         <p className="text-sm">Seleccioná un lead para ver la conversación</p>
@@ -96,7 +96,7 @@ function ConversationPanel({ lead, onEstadoChange }) {
       <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
         <div>
           <h3 className="font-semibold text-sm">{detalle?.nombre || detalle?.canal_username || `Lead #${lead.id}`}</h3>
-          <p className="text-xs text-gray-400">{detalle?.telefono || detalle?.canal_id || ''}</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500">{detalle?.telefono || detalle?.canal_id || ''}</p>
         </div>
         <div className="flex items-center gap-2">
           <EstadoBadge estado={lead.estado} />
@@ -114,7 +114,7 @@ function ConversationPanel({ lead, onEstadoChange }) {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
-        {loading && <p className="text-center text-xs text-gray-400">Cargando...</p>}
+        {loading && <p className="text-center text-xs text-gray-400 dark:text-gray-500">Cargando...</p>}
         {detalle?.conversacion?.map((m, i) => (
           <div key={i} className={`flex ${m.rol === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm ${
@@ -123,7 +123,7 @@ function ConversationPanel({ lead, onEstadoChange }) {
                 : 'bg-black dark:bg-white text-white dark:text-black rounded-bl-sm'
             }`}>
               <p className="whitespace-pre-wrap">{m.contenido}</p>
-              <p className={`text-[10px] mt-1 ${m.rol === 'user' ? 'text-gray-400' : 'opacity-50'}`}>
+              <p className={`text-[10px] mt-1 ${m.rol === 'user' ? 'text-gray-400 dark:text-gray-500' : 'opacity-50'}`}>
                 {new Date(m.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
               </p>
             </div>
@@ -232,7 +232,7 @@ function ChannelCard({ name, icon: Icon, active, description, badge }) {
     <div className={`p-3 rounded-xl border ${active ? 'border-green-200 dark:border-green-900' : 'border-gray-100 dark:border-gray-800'}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Icon size={16} className={active ? 'text-green-500' : 'text-gray-400'} />
+          <Icon size={16} className={active ? 'text-green-500' : 'text-gray-400 dark:text-gray-500'} />
           <span className="text-sm font-medium">{name}</span>
         </div>
         {active
@@ -240,7 +240,7 @@ function ChannelCard({ name, icon: Icon, active, description, badge }) {
           : <span className="text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full">{badge || 'Pendiente config.'}</span>
         }
       </div>
-      <p className="text-xs text-gray-400 mt-1">{description}</p>
+      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{description}</p>
     </div>
   )
 }
@@ -283,7 +283,7 @@ export default function Agente() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="text-xs font-semibold tracking-widest text-gray-400 uppercase mb-1">Agente IA</p>
+            <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Agente IA</p>
             <h1 className="text-3xl font-black">Leads & Conversaciones</h1>
           </div>
           <button onClick={cargar} className="btn-ghost p-2"><RefreshCw size={16} /></button>
@@ -314,7 +314,7 @@ export default function Agente() {
               { label: 'A contactar', value: stats.a_contactar, icon: AlertCircle },
             ].map(({ label, value, icon: Icon }) => (
               <div key={label} className="card p-3">
-                <p className="text-xs text-gray-400 mb-1">{label}</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">{label}</p>
                 <p className="text-2xl font-black">{value}</p>
               </div>
             ))}
@@ -339,9 +339,9 @@ export default function Agente() {
               </select>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-              {loading && <p className="text-center text-xs text-gray-400 mt-4">Cargando...</p>}
+              {loading && <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-4">Cargando...</p>}
               {!loading && leads.length === 0 && (
-                <p className="text-center text-xs text-gray-400 mt-8">No hay leads aún.<br />Empezá a usar el bot de Telegram.</p>
+                <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-8">No hay leads aún.<br />Empezá a usar el bot de Telegram.</p>
               )}
               {leads.map(lead => (
                 <LeadCard
@@ -368,7 +368,7 @@ export default function Agente() {
 
             {/* Canales */}
             <div className="card p-4 space-y-2">
-              <p className="text-xs font-semibold tracking-widest text-gray-400 uppercase mb-2">Canales</p>
+              <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-2">Canales</p>
               <ChannelCard
                 name="Telegram"
                 icon={MessageCircle}

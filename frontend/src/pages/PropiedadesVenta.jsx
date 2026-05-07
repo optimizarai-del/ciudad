@@ -29,14 +29,14 @@ export default function PropiedadesVenta() {
       <div className="p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold tracking-widest text-gray-400 uppercase mb-1">Ventas</p>
+            <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Ventas</p>
             <h1 className="text-3xl font-black">Propiedades en Venta</h1>
           </div>
-          <p className="text-sm text-gray-400">{filtradas.length} propiedades</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500">{filtradas.length} propiedades</p>
         </div>
 
         <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
@@ -62,11 +62,11 @@ export default function PropiedadesVenta() {
                 <tr key={p.id} className="border-b border-gray-50 dark:border-gray-900 hover:bg-gray-50 dark:hover:bg-gray-900/50">
                   <td className="td">
                     <p className="font-medium text-sm">{p.direccion}</p>
-                    <p className="text-xs text-gray-400">{p.ciudad}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500">{p.ciudad}</p>
                   </td>
                   <td className="td">
                     <span className="text-sm">{TIPO_LABELS[p.tipo] || p.tipo}</span>
-                    {p.ambientes && <span className="text-xs text-gray-400 ml-1">· {p.ambientes} amb.</span>}
+                    {p.ambientes && <span className="text-xs text-gray-400 dark:text-gray-500 ml-1">· {p.ambientes} amb.</span>}
                   </td>
                   <td className="td text-right">
                     <p className="font-semibold text-sm">
@@ -84,7 +84,7 @@ export default function PropiedadesVenta() {
                   <td className="td text-center">
                     {p.tokko_id
                       ? <span className="text-xs text-green-600 dark:text-green-400 font-medium">✓ Publicado</span>
-                      : <span className="text-xs text-gray-400">—</span>
+                      : <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
                     }
                   </td>
                 </tr>

@@ -14,7 +14,7 @@ export default function DashboardVentas() {
     <Layout>
       <div className="p-6 space-y-6">
         <div>
-          <p className="text-xs font-semibold tracking-widest text-gray-400 uppercase mb-1">Ventas</p>
+          <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Ventas</p>
           <h1 className="text-3xl font-black">Dashboard Ventas</h1>
         </div>
 
@@ -27,7 +27,7 @@ export default function DashboardVentas() {
           ].map(({ label, value, icon: Icon, color }) => (
             <div key={label} className="card p-5">
               <div className="flex items-start justify-between mb-3">
-                <p className="text-xs font-semibold tracking-widest uppercase text-gray-400">{label}</p>
+                <p className="text-xs font-semibold tracking-widest uppercase text-gray-400 dark:text-gray-500">{label}</p>
                 <Icon size={16} className="text-gray-300 dark:text-gray-700" />
               </div>
               <p className={`text-3xl font-black ${color || ''}`}>{value}</p>
@@ -44,7 +44,7 @@ export default function DashboardVentas() {
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="font-medium text-sm">{p.direccion}</p>
-                      <p className="text-xs text-gray-400 mt-0.5 capitalize">{p.tipo} · {p.ambientes} amb. · {p.superficie_m2}m²</p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 capitalize">{p.tipo} · {p.ambientes} amb. · {p.superficie_m2}m²</p>
                     </div>
                     <p className="text-sm font-bold text-green-700 dark:text-green-400">
                       {p.precio_venta ? `USD ${Number(p.precio_venta).toLocaleString()}` : 'Consultar'}

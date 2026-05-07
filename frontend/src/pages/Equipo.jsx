@@ -56,7 +56,7 @@ export default function Equipo() {
             </div>
           ) : (
             <table className="w-full">
-              <thead className="bg-neutral-50 border-b border-border">
+              <thead className="bg-neutral-50 dark:bg-[#141414] border-b border-border dark:border-[#2A2A2A]">
                 <tr>
                   <th className="th">Usuario</th>
                   <th className="th hidden md:table-cell">Email</th>
@@ -67,7 +67,7 @@ export default function Equipo() {
               </thead>
               <tbody className="divide-y divide-border">
                 {list.map(u => (
-                  <tr key={u.id} className="hover:bg-neutral-50 transition">
+                  <tr key={u.id} className="hover:bg-neutral-50 dark:hover:bg-[#1A1A1A] transition">
                     <td className="td">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-primary text-white grid place-items-center text-[11px] font-semibold shrink-0">
@@ -101,7 +101,7 @@ export default function Equipo() {
                     <td className="td">
                       <button
                         onClick={() => setEditing(u)}
-                        className="p-1.5 rounded-lg hover:bg-neutral-100 text-muted hover:text-primary transition"
+                        className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-[#1E1E1E] text-muted hover:text-primary transition"
                       >
                         <Pencil size={13} />
                       </button>
@@ -141,7 +141,7 @@ export default function Equipo() {
                   { label: 'Agente IA',     perms: [true, true, true, true] },
                   { label: 'Equipo',        perms: [true, false, false, false] },
                 ].map(row => (
-                  <tr key={row.label} className="hover:bg-neutral-50 transition">
+                  <tr key={row.label} className="hover:bg-neutral-50 dark:hover:bg-[#1A1A1A] transition">
                     <td className="py-2.5 pr-4 font-medium">{row.label}</td>
                     {row.perms.map((ok, i) => (
                       <td key={i} className="text-center py-2.5 px-3">
