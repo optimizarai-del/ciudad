@@ -25,6 +25,36 @@ def status(user=Depends(get_current_user)):
     return {"configurado": bool(TOKKO_KEY), "url": TOKKO_URL}
 
 
+@router.get("/propiedades")
+def listar_sincronizadas(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Lista las propiedades que ya fueron importadas desde Tokko (tokko_id no nulo)."""
+    rows = (
+        db.query(models.Propiedad)
+        .filter(models.Propiedad.tokko_id.isnot(None))
+        .filter(models.Propiedad.tokko_id != "")
+        .order_by(models.Propiedad.id.desc())
+        .all()
+    )
+    return [
+        {
+            "id": p.id,
+            "tokko_id": p.tokko_id,
+            "codigo": p.codigo,
+            "direccion": p.direccion,
+            "ciudad": p.ciudad,
+            "tipo": p.tipo.value if hasattr(p.tipo, "value") else p.tipo,
+            "modalidad": p.modalidad.value if hasattr(p.modalidad, "value") else p.modalidad,
+            "estado": p.estado.value if hasattr(p.estado, "value") else p.estado,
+            "ambientes": p.ambientes,
+            "superficie_m2": p.superficie_m2,
+            "precio_alquiler": p.precio_alquiler,
+            "precio_venta": p.precio_venta,
+            "tokko_sync_at": p.tokko_sync_at.isoformat() if p.tokko_sync_at else None,
+        }
+        for p in rows
+    ]
+
+
 @router.get("/preview")
 async def preview(user=Depends(get_current_user), db: Session = Depends(get_db)):
     if not TOKKO_KEY:

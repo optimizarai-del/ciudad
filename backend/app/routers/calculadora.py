@@ -6,16 +6,23 @@ from sqlalchemy import or_
 from app.database import get_db
 from app.security import get_current_user
 from app import models, schemas
+from app.services.indices_service import (
+    get_tasas_mensuales,
+    IPC_MENSUAL_FALLBACK,
+    ICL_MENSUAL_FALLBACK,
+)
 
 router = APIRouter(prefix="/api/calculadora", tags=["calculadora"])
 
-# Tabla demo de IPC mensual aprox. (Argentina, valores ilustrativos)
-# En producción se reemplaza con feed real INDEC/BCRA
-IPC_MENSUAL_DEMO = 0.04   # 4% mensual
-ICL_MENSUAL_DEMO = 0.05   # 5% mensual
 
-
-def _factor_ajuste(indice: str, periodicidad: int, meses_transcurridos: int, porc_fijo: float) -> float:
+def _factor_ajuste(
+    indice: str,
+    periodicidad: int,
+    meses_transcurridos: int,
+    porc_fijo: float,
+    ipc_mensual: float,
+    icl_mensual: float,
+) -> float:
     """Factor multiplicador acumulado según periodos cumplidos."""
     if indice == "sin_ajuste" or meses_transcurridos < periodicidad:
         return 1.0
@@ -23,14 +30,14 @@ def _factor_ajuste(indice: str, periodicidad: int, meses_transcurridos: int, por
     if indice == "fijo":
         tasa_periodo = (porc_fijo or 0) / 100.0
     elif indice == "icl":
-        tasa_periodo = (1 + ICL_MENSUAL_DEMO) ** periodicidad - 1
+        tasa_periodo = (1 + icl_mensual) ** periodicidad - 1
     else:  # ipc por default
-        tasa_periodo = (1 + IPC_MENSUAL_DEMO) ** periodicidad - 1
+        tasa_periodo = (1 + ipc_mensual) ** periodicidad - 1
     return (1 + tasa_periodo) ** periodos
 
 
 @router.post("/", response_model=schemas.CalculoOut)
-def calcular(data: schemas.CalculoIn, db: Session = Depends(get_db), user=Depends(get_current_user)):
+async def calcular(data: schemas.CalculoIn, db: Session = Depends(get_db), user=Depends(get_current_user)):
     # 1. Resolver propiedad
     prop = None
     if data.propiedad_id:
@@ -53,6 +60,11 @@ def calcular(data: schemas.CalculoIn, db: Session = Depends(get_db), user=Depend
         .first()
     )
 
+    # 3. Cargar tasas reales desde INDEC/BCRA (con cache)
+    tasas = await get_tasas_mensuales()
+    ipc_mensual = tasas["ipc_mensual"]
+    icl_mensual = tasas["icl_mensual"]
+
     base_alquiler = float(prop.precio_alquiler or 0)
     factor = 1.0
     indice_aplicado = "sin_ajuste"
@@ -63,13 +75,15 @@ def calcular(data: schemas.CalculoIn, db: Session = Depends(get_db), user=Depend
         fecha_obj = data.fecha or date.today()
         if contrato.fecha_inicio and fecha_obj > contrato.fecha_inicio:
             meses = (fecha_obj.year - contrato.fecha_inicio.year) * 12 + (fecha_obj.month - contrato.fecha_inicio.month)
+            indice_aplicado = contrato.indice_ajuste.value if hasattr(contrato.indice_ajuste, "value") else contrato.indice_ajuste
             factor = _factor_ajuste(
-                contrato.indice_ajuste.value if hasattr(contrato.indice_ajuste, "value") else contrato.indice_ajuste,
+                indice_aplicado,
                 contrato.periodicidad_meses or 3,
                 meses,
                 contrato.porcentaje_fijo or 0,
+                ipc_mensual,
+                icl_mensual,
             )
-            indice_aplicado = contrato.indice_ajuste.value if hasattr(contrato.indice_ajuste, "value") else contrato.indice_ajuste
             periodos_aplicados = meses // (contrato.periodicidad_meses or 3)
 
     alquiler_act = round(base_alquiler * factor, 2)
@@ -77,6 +91,23 @@ def calcular(data: schemas.CalculoIn, db: Session = Depends(get_db), user=Depend
     inmob = float(prop.impuesto_inmobiliario or 0)
     municipal = float(prop.tasa_municipal or 0)
     total = round(alquiler_act + expensas + inmob + municipal, 2)
+
+    # Nota dinámica según fuente real / fallback
+    if indice_aplicado == "ipc":
+        usa_real = tasas.get("ipc_ok", False)
+        nota = (
+            f"IPC mensual {round(ipc_mensual*100,2)}% (fuente {tasas.get('ipc_fuente')}). "
+            + (f"Período {tasas.get('ipc_periodo')}." if tasas.get("ipc_periodo") else "")
+        )
+    elif indice_aplicado == "icl":
+        usa_real = tasas.get("icl_ok", False)
+        nota = (
+            f"ICL mensual {round(icl_mensual*100,2)}% (fuente {tasas.get('icl_fuente')}). "
+            + (f"Última fecha {tasas.get('icl_fecha')}." if tasas.get("icl_fecha") else "")
+        )
+    else:
+        usa_real = False
+        nota = "Cálculo sin ajuste o con porcentaje fijo del contrato."
 
     return {
         "propiedad": {
@@ -101,6 +132,11 @@ def calcular(data: schemas.CalculoIn, db: Session = Depends(get_db), user=Depend
             "indice": indice_aplicado,
             "periodos_aplicados": periodos_aplicados,
             "fecha_calculo": str(data.fecha or date.today()),
-            "nota": "Cálculo demo con índices ilustrativos (IPC 4% mensual, ICL 5% mensual). Reemplazar con feed real en Fase 2.",
+            "indice_real": usa_real,
+            "ipc_mensual_pct": round(ipc_mensual * 100, 2),
+            "icl_mensual_pct": round(icl_mensual * 100, 2),
+            "ipc_fuente": tasas.get("ipc_fuente"),
+            "icl_fuente": tasas.get("icl_fuente"),
+            "nota": nota,
         },
     }

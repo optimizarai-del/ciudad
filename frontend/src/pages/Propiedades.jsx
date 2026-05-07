@@ -151,7 +151,9 @@ export default function Propiedades() {
 
                 {p.tokko_id && (
                   <div className="flex items-center gap-1.5">
-                    <span className="chip-muted text-[10px]">Tokko {p.tokko_id}</span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#B8893A]/10 text-[#8F6A2A] border border-[#B8893A]/30">
+                      <RefreshCw size={9} /> Tokko · {p.tokko_id}
+                    </span>
                   </div>
                 )}
 

@@ -168,10 +168,23 @@ export default function Calculadora() {
             {resultado.contrato && (
               <div className="card p-5 flex items-start gap-3">
                 <Info size={15} className="text-muted shrink-0 mt-0.5" />
-                <div className="text-[13px] text-muted">
-                  <span className="font-medium text-primary">Contrato {resultado.contrato.codigo || `#${resultado.contrato.id}`}</span>
-                  {' '}— ajuste {resultado.contrato.indice?.toUpperCase()} cada {resultado.contrato.periodicidad_meses} meses
-                  {resultado.detalle.periodos_aplicados > 0 && ` · ${resultado.detalle.periodos_aplicados} períodos aplicados`}.
+                <div className="text-[13px] text-muted flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-primary">
+                      Contrato {resultado.contrato.codigo || `#${resultado.contrato.id}`}
+                    </span>
+                    <span>— ajuste {resultado.contrato.indice?.toUpperCase()} cada {resultado.contrato.periodicidad_meses} meses</span>
+                    {resultado.detalle.indice_real ? (
+                      <span className="chip-success text-[10px]">
+                        Índice real · {resultado.detalle.indice === 'icl' ? 'BCRA' : 'INDEC'}
+                      </span>
+                    ) : (
+                      <span className="chip-warn text-[10px]">Estimación demo</span>
+                    )}
+                    {resultado.detalle.periodos_aplicados > 0 && (
+                      <span>· {resultado.detalle.periodos_aplicados} períodos aplicados</span>
+                    )}
+                  </div>
                   <p className="mt-1 text-[11px] opacity-70">{resultado.detalle.nota}</p>
                 </div>
               </div>
