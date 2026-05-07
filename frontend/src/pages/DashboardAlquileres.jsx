@@ -42,8 +42,11 @@ export default function DashboardAlquileres() {
     }).catch(console.error)
   }, [])
 
+  // Mismo criterio que Dashboard panel principal: 'críticas' = ≤7 días,
+  // 'próximas' = todo lo demás (incluye 'pronto' 8-30d Y 'normal' 31-60d).
+  // Antes este dashboard sólo mostraba 'pronto' y se perdían los de >30 días.
   const criticas = alertas.filter(a => a.urgencia === 'critico')
-  const proximas = alertas.filter(a => a.urgencia === 'pronto')
+  const proximas = alertas.filter(a => a.urgencia !== 'critico')
 
   const hoy = new Date()
   const mesLabel = hoy.toLocaleString('es-AR', { month: 'long', year: 'numeric' })
