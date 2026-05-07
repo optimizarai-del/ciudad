@@ -34,15 +34,15 @@ export default function Login() {
         <div className="absolute inset-0 opacity-[0.03]"
           style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '32px 32px' }} />
 
-        <Logo size="md" color="light" />
+        <Logo size="md" color="light" tagline />
 
         <div className="relative z-10 max-w-lg animate-slide-up">
           <div className="text-[11px] uppercase tracking-[0.22em] text-white/40 font-semibold mb-6">
-            Inmuebles · Contratos · Gestión
+            Negocios Inmobiliarios
           </div>
           <h1 className="hero-title text-6xl xl:text-7xl text-white mb-6">
-            Tu cartera<br />
-            <span className="text-white/40">inmobiliaria.</span>
+            Vivir<br />
+            <span style={{ color: '#B8893A' }}>mejor.</span>
           </h1>
           <p className="text-white/50 text-lg leading-relaxed font-light max-w-md">
             Gestioná alquileres, ventas, contratos y calculadoras de costos
@@ -51,7 +51,7 @@ export default function Login() {
         </div>
 
         <div className="text-white/20 text-[11px] tracking-[0.15em] uppercase">
-          © CIUDAD. 2026
+          © CIUDAD — Negocios Inmobiliarios · 2026
         </div>
       </div>
 

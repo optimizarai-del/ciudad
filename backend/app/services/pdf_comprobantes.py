@@ -10,7 +10,7 @@ from datetime import date
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 )
 from reportlab.lib.colors import HexColor
 
@@ -24,7 +24,7 @@ def _doc(buffer: BytesIO, codigo: str):
     return SimpleDocTemplate(
         buffer, pagesize=A4,
         leftMargin=20 * mm, rightMargin=20 * mm,
-        topMargin=30 * mm, bottomMargin=18 * mm,
+        topMargin=34 * mm, bottomMargin=18 * mm,
         title=codigo, author="CIUDAD.",
     )
 
@@ -130,8 +130,6 @@ def generar_pdf_comprobante_inquilino(ctx: dict) -> bytes:
             "no quedando saldo pendiente para el período indicado.",
             sty["CiudadClause"],
         ),
-        Spacer(1, 14 * mm),
-        KeepTogether(_firmas_recibo("CIUDAD. — Recibido por", "Conformidad inquilino/a")),
     ]
 
     doc.build(
@@ -246,16 +244,13 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
         ]
 
     story += [
-        Spacer(1, 10 * mm),
+        Spacer(1, 8 * mm),
         Paragraph(
             f"Por la presente se informa la liquidación correspondiente al período "
-            f"{ctx.get('periodo','—')}. El neto a liquidar será depositado/transferido "
-            f"conforme a los datos bancarios oportunamente provistos. La comisión "
-            f"inmobiliaria se aplica únicamente sobre el alquiler.",
+            f"{ctx.get('periodo','—')}. La comisión inmobiliaria se aplica "
+            f"únicamente sobre el alquiler.",
             sty["CiudadClause"],
         ),
-        Spacer(1, 14 * mm),
-        KeepTogether(_firmas_recibo("CIUDAD. — Administrador", "Conformidad propietario/a")),
     ]
 
     doc.build(
@@ -268,17 +263,3 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
     return pdf
 
 
-def _firmas_recibo(rol_a: str, rol_b: str):
-    sty = _styles()
-    data = [
-        ["", ""],
-        ["_______________________", "_______________________"],
-        [Paragraph(rol_a, sty["CiudadSign"]), Paragraph(rol_b, sty["CiudadSign"])],
-    ]
-    t = Table(data, colWidths=[85 * mm, 85 * mm])
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, 0), 30),
-    ]))
-    return t

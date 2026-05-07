@@ -2,6 +2,7 @@
 Generación de PDF de contratos con reportlab.
 Tres plantillas: alquiler vivienda (Ley 27.551 / DNU 70/2023), alquiler comercial, boleto compraventa.
 """
+import os
 from io import BytesIO
 from datetime import date
 
@@ -10,9 +11,26 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib.colors import HexColor, black, white
 from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_RIGHT
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
 )
+
+
+# Branding CIUDAD
+BRAND_NAME = "CIUDAD"
+BRAND_TAGLINE = "Negocios Inmobiliarios"
+BRAND_SLOGAN = "#VIVIRMEJOR"
+
+# Logo (JPG fondo negro). Se carga una sola vez.
+_LOGO_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "logo-ciudad.jpg")
+_LOGO_PATH = os.path.abspath(_LOGO_PATH)
+
+def _logo():
+    try:
+        return ImageReader(_LOGO_PATH) if os.path.exists(_LOGO_PATH) else None
+    except Exception:
+        return None
 
 
 # Paleta CIUDAD.
@@ -72,20 +90,35 @@ def _header_footer(canvas, doc, codigo: str):
     canvas.saveState()
     width, height = A4
 
-    # Header band
+    # Header band negro
     canvas.setFillColor(COLOR_NOCHE)
-    canvas.rect(0, height - 22 * mm, width, 22 * mm, fill=1, stroke=0)
+    canvas.rect(0, height - 26 * mm, width, 26 * mm, fill=1, stroke=0)
 
+    # Logo a la izquierda (cuadrado, JPG con fondo negro encaja directo en la banda)
+    logo = _logo()
+    if logo:
+        canvas.drawImage(
+            logo, 16 * mm, height - 23 * mm, width=18 * mm, height=18 * mm,
+            preserveAspectRatio=True, mask='auto',
+        )
+
+    # Texto del header (al lado del logo)
+    text_x = 38 * mm
     canvas.setFillColor(white)
-    canvas.setFont("Helvetica-Bold", 16)
-    canvas.drawString(20 * mm, height - 12 * mm, "CIUDAD.")
-    canvas.setFont("Helvetica", 8)
-    canvas.drawString(20 * mm, height - 17 * mm, "Inmuebles · Contratos · Gestión")
-
-    canvas.setFont("Helvetica-Bold", 10)
-    canvas.drawRightString(width - 20 * mm, height - 12 * mm, codigo or "Contrato")
+    canvas.setFont("Helvetica-Bold", 15)
+    canvas.drawString(text_x, height - 13 * mm, BRAND_NAME)
     canvas.setFont("Helvetica", 7.5)
-    canvas.drawRightString(width - 20 * mm, height - 17 * mm,
+    canvas.drawString(text_x, height - 17 * mm, BRAND_TAGLINE.upper())
+    canvas.setFont("Helvetica-Bold", 7)
+    canvas.setFillColor(COLOR_COBRE)
+    canvas.drawString(text_x, height - 21 * mm, BRAND_SLOGAN)
+
+    # Código y fecha a la derecha
+    canvas.setFillColor(white)
+    canvas.setFont("Helvetica-Bold", 10)
+    canvas.drawRightString(width - 18 * mm, height - 13 * mm, codigo or "")
+    canvas.setFont("Helvetica", 7.5)
+    canvas.drawRightString(width - 18 * mm, height - 17 * mm,
                            f"Generado el {date.today().strftime('%d/%m/%Y')}")
 
     # Footer
@@ -93,8 +126,8 @@ def _header_footer(canvas, doc, codigo: str):
     canvas.rect(0, 0, width, 12 * mm, fill=1, stroke=0)
     canvas.setFillColor(COLOR_GRIS)
     canvas.setFont("Helvetica", 7)
-    canvas.drawString(20 * mm, 5 * mm, "CIUDAD. — Documento generado electrónicamente")
-    canvas.drawRightString(width - 20 * mm, 5 * mm, f"Página {doc.page}")
+    canvas.drawString(18 * mm, 5 * mm, f"{BRAND_NAME} — {BRAND_TAGLINE} · {BRAND_SLOGAN}")
+    canvas.drawRightString(width - 18 * mm, 5 * mm, f"Página {doc.page}")
     canvas.restoreState()
 
 
@@ -446,7 +479,7 @@ def generar_pdf_contrato(ctx: dict) -> bytes:
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
         leftMargin=20 * mm, rightMargin=20 * mm,
-        topMargin=30 * mm, bottomMargin=18 * mm,
+        topMargin=34 * mm, bottomMargin=18 * mm,
         title=codigo, author="CIUDAD.",
     )
     sty = _styles()
@@ -509,19 +542,11 @@ def generar_pdf_contrato(ctx: dict) -> bytes:
             f"En la Ciudad de {ctx['propiedad'].get('ciudad') or '________________'}, "
             f"a los {date.today().strftime('%d')} días del mes de "
             f"{['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][date.today().month-1]} "
-            f"de {date.today().year}, en prueba de conformidad y previa lectura las partes firman dos (2) "
-            f"ejemplares de un mismo tenor y a un solo efecto.",
+            f"de {date.today().year}, en prueba de conformidad y previa lectura "
+            f"se otorgan dos (2) ejemplares de un mismo tenor y a un solo efecto.",
             sty["CiudadClause"],
         ),
     ]
-
-    # Firmas
-    if tipo == "boleto_compraventa":
-        firma_a, firma_b = "FIRMA VENDEDOR/A", "FIRMA COMPRADOR/A"
-    else:
-        firma_a, firma_b = "FIRMA LOCADOR/A", "FIRMA LOCATARIO/A"
-
-    story += [KeepTogether(_firmas(firma_a, firma_b))]
 
     doc.build(
         story,

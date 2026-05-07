@@ -11,7 +11,11 @@ from app.routers import cobranza, ventas_router, comprobantes
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="CIUDAD. — Inmuebles · Contratos · Gestión", version="0.1.0")
+app = FastAPI(
+    title="CIUDAD — Negocios Inmobiliarios",
+    description="#VIVIRMEJOR — plataforma de gestión inmobiliaria",
+    version="0.1.0",
+)
 
 origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
 app.add_middleware(
@@ -33,7 +37,7 @@ app.include_router(comprobantes.router)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "brand": "CIUDAD."}
+    return {"status": "ok", "brand": "CIUDAD — Negocios Inmobiliarios", "slogan": "#VIVIRMEJOR"}
 
 
 @app.on_event("startup")
