@@ -155,8 +155,12 @@ export default function Calculadora() {
                   highlight
                 />
                 {resultado.expensas > 0 && <DesgloseFila label="Expensas" value={resultado.expensas} />}
-                {resultado.impuesto_inmobiliario > 0 && <DesgloseFila label="Impuesto inmobiliario" value={resultado.impuesto_inmobiliario} />}
-                {resultado.tasa_municipal > 0 && <DesgloseFila label="Tasa municipal" value={resultado.tasa_municipal} />}
+                {(resultado.tasas_municipales ?? resultado.tasa_municipal) > 0 && (
+                  <DesgloseFila
+                    label="Tasas municipales"
+                    value={resultado.tasas_municipales ?? resultado.tasa_municipal}
+                  />
+                )}
                 <div className="border-t border-border pt-3 flex justify-between items-baseline">
                   <span className="font-semibold text-[14px]">Total</span>
                   <span className="font-bold text-xl tracking-tight">${resultado.total_mensual?.toLocaleString('es-AR')}</span>

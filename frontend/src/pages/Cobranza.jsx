@@ -207,8 +207,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
   const [form, setForm] = useState({
     monto_alquiler: item.monto_total || 0,
     monto_expensas: 0,
-    monto_impuestos: 0,
-    monto_municipal: 0,
+    monto_tasas_municipales: 0,
     monto_otros: 0,
     fecha_pago: new Date().toISOString().slice(0, 10),
     notas: '',
@@ -217,7 +216,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
   const [err, setErr] = useState('')
 
   const set = k => e => setForm({ ...form, [k]: e.target.value })
-  const total = ['monto_alquiler','monto_expensas','monto_impuestos','monto_municipal','monto_otros']
+  const total = ['monto_alquiler','monto_expensas','monto_tasas_municipales','monto_otros']
     .reduce((s, k) => s + (Number(form[k]) || 0), 0)
   const comision = (item.comision_porc || 0) * total / 100
   const neto = total - comision
@@ -231,8 +230,9 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
         fecha_pago: form.fecha_pago || null,
         monto_alquiler: Number(form.monto_alquiler) || 0,
         monto_expensas: Number(form.monto_expensas) || 0,
-        monto_impuestos: Number(form.monto_impuestos) || 0,
-        monto_municipal: Number(form.monto_municipal) || 0,
+        // El backend acepta los nombres legacy y los suma como tasas municipales
+        monto_municipal: Number(form.monto_tasas_municipales) || 0,
+        monto_impuestos: 0,
         monto_otros: Number(form.monto_otros) || 0,
         monto_total: total,
         notas: form.notas || null,
@@ -280,14 +280,13 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
               <input className="input" type="number" value={form.monto_expensas} onChange={set('monto_expensas')} />
             </div>
             <div>
-              <label className="label">Impuestos $</label>
-              <input className="input" type="number" value={form.monto_impuestos} onChange={set('monto_impuestos')} />
+              <label className="label">Tasas municipales $</label>
+              <input className="input" type="number"
+                value={form.monto_tasas_municipales}
+                onChange={set('monto_tasas_municipales')}
+                placeholder="ABL + alumbrado + inmobiliario" />
             </div>
             <div>
-              <label className="label">Tasa municipal $</label>
-              <input className="input" type="number" value={form.monto_municipal} onChange={set('monto_municipal')} />
-            </div>
-            <div className="col-span-2">
               <label className="label">Otros conceptos $</label>
               <input className="input" type="number" value={form.monto_otros} onChange={set('monto_otros')} />
             </div>

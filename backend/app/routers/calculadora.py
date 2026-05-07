@@ -88,9 +88,9 @@ async def calcular(data: schemas.CalculoIn, db: Session = Depends(get_db), user=
 
     alquiler_act = round(base_alquiler * factor, 2)
     expensas = float(prop.expensas or 0)
-    inmob = float(prop.impuesto_inmobiliario or 0)
-    municipal = float(prop.tasa_municipal or 0)
-    total = round(alquiler_act + expensas + inmob + municipal, 2)
+    # tasas_municipales agrupa lo que antes era impuesto_inmobiliario + tasa_municipal
+    tasas_municipales = float(prop.tasa_municipal or 0) + float(prop.impuesto_inmobiliario or 0)
+    total = round(alquiler_act + expensas + tasas_municipales, 2)
 
     # Nota dinámica según fuente real / fallback
     if indice_aplicado == "ipc":
@@ -125,8 +125,10 @@ async def calcular(data: schemas.CalculoIn, db: Session = Depends(get_db), user=
         "factor_ajuste": round(factor, 4),
         "alquiler_actualizado": alquiler_act,
         "expensas": expensas,
-        "impuesto_inmobiliario": inmob,
-        "tasa_municipal": municipal,
+        # mantenemos los nombres legacy (todo en tasa_municipal, inmobiliario en 0)
+        "impuesto_inmobiliario": 0,
+        "tasa_municipal": tasas_municipales,
+        "tasas_municipales": tasas_municipales,
         "total_mensual": total,
         "detalle": {
             "indice": indice_aplicado,

@@ -72,7 +72,8 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
         else:
             estado = "pendiente"
             base = float(c.monto_inicial or (prop.precio_alquiler if prop else 0) or 0)
-            extras = (prop.expensas if prop else 0) + (prop.impuesto_inmobiliario if prop else 0) + (prop.tasa_municipal if prop else 0)
+            tasas = (prop.tasa_municipal if prop else 0) + (prop.impuesto_inmobiliario if prop else 0)
+            extras = (prop.expensas if prop else 0) + (tasas or 0)
             monto_total = round(base + (extras or 0), 2)
             fecha_venc = None
             fecha_pago = None
@@ -208,12 +209,13 @@ def registrar_pago(
     fecha_pago = data.fecha_pago or date.today()
     periodo = data.periodo or f"{fecha_pago.year}-{fecha_pago.month:02d}"
 
-    # Monto total auto si vino vacío
+    # Monto total auto si vino vacío.
+    # Tasas municipales agrupa lo que históricamente se separaba en impuestos + municipal.
+    tasas_municipales = float(data.monto_impuestos or 0) + float(data.monto_municipal or 0)
     items = [
         ("Alquiler", data.monto_alquiler),
         ("Expensas", data.monto_expensas),
-        ("Impuesto inmobiliario", data.monto_impuestos),
-        ("Tasa municipal", data.monto_municipal),
+        ("Tasas municipales", tasas_municipales),
         ("Otros conceptos", data.monto_otros),
     ]
     items_no_cero = [(l, v) for l, v in items if v and v > 0]

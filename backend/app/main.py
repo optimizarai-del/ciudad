@@ -66,3 +66,34 @@ def _migrar_estados_contrato():
         db.rollback()
     finally:
         db.close()
+
+
+@app.on_event("startup")
+def _unificar_tasas_municipales():
+    """
+    Migración: ahora tasa_municipal = tasa_municipal + impuesto_inmobiliario.
+    Lo hacemos una sola vez (marca: ciudad_settings.tasas_unificadas).
+    """
+    from sqlalchemy import text
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS ciudad_settings (
+                key VARCHAR PRIMARY KEY,
+                value VARCHAR
+            )
+        """))
+        ya = db.execute(text("SELECT value FROM ciudad_settings WHERE key='tasas_unificadas'")).first()
+        if not ya:
+            db.execute(text("""
+                UPDATE propiedades
+                SET tasa_municipal = COALESCE(tasa_municipal, 0) + COALESCE(impuesto_inmobiliario, 0),
+                    impuesto_inmobiliario = 0
+            """))
+            db.execute(text("INSERT INTO ciudad_settings (key, value) VALUES ('tasas_unificadas', '1')"))
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()

@@ -26,7 +26,7 @@ const empty = {
   codigo:'', direccion:'', ciudad:'', provincia:'', tipo:'departamento',
   modalidad:'alquiler', estado:'disponible', superficie_m2:'', ambientes:'',
   descripcion:'', precio_alquiler:'', precio_venta:'', expensas:'',
-  impuesto_inmobiliario:'', tasa_municipal:'', tokko_id:'', propietario_id:'',
+  tasa_municipal:'', tokko_id:'', propietario_id:'',
 }
 
 export default function Propiedades() {
@@ -229,10 +229,16 @@ function Modal({ initial, clientes, onClose, onSaved }) {
     const payload = { ...form }
     // Convertir numéricos
     ;['superficie_m2','ambientes','precio_alquiler','precio_venta','expensas',
-      'impuesto_inmobiliario','tasa_municipal','propietario_id'].forEach(k => {
+      'tasa_municipal','propietario_id'].forEach(k => {
       if (payload[k] === '' || payload[k] === null) payload[k] = null
       else payload[k] = Number(payload[k]) || null
     })
+    // Si la propiedad fue cargada antes de la unificación, sumamos lo que tuviera en
+    // impuesto_inmobiliario al campo de tasas municipales y dejamos el otro en 0.
+    if (payload.impuesto_inmobiliario) {
+      payload.tasa_municipal = (Number(payload.tasa_municipal) || 0) + Number(payload.impuesto_inmobiliario)
+      payload.impuesto_inmobiliario = 0
+    }
     try {
       if (initial) await api.patch(`/api/propiedades/${initial.id}`, payload)
       else await api.post('/api/propiedades', payload)
@@ -334,12 +340,11 @@ function Modal({ initial, clientes, onClose, onSaved }) {
               <input className="input" type="number" value={form.expensas || ''} onChange={set('expensas')} />
             </div>
             <div>
-              <label className="label">Impuesto inmobiliario $</label>
-              <input className="input" type="number" value={form.impuesto_inmobiliario || ''} onChange={set('impuesto_inmobiliario')} />
-            </div>
-            <div>
-              <label className="label">Tasa municipal $</label>
-              <input className="input" type="number" value={form.tasa_municipal || ''} onChange={set('tasa_municipal')} />
+              <label className="label">Tasas municipales $</label>
+              <input className="input" type="number"
+                value={form.tasa_municipal || ''}
+                onChange={set('tasa_municipal')}
+                placeholder="Inmobiliario + ABL + alumbrado…" />
             </div>
             <div>
               <label className="label">ID Tokko (venta)</label>

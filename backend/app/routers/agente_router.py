@@ -21,7 +21,8 @@ from typing import Optional
 
 from app.database import get_db
 from app import models
-from app.services import agente_service, telegram_service
+from app.services import agente_service, telegram_service, agente_admin
+from app.services.admin_actions import TOOLS as TOOL_NAMES
 
 router = APIRouter(prefix="/api/agente", tags=["agente"])
 
@@ -54,6 +55,21 @@ async def telegram_webhook(request: Request, background: BackgroundTasks, db: Se
     if not text:
         return {"ok": True}
 
+    # Si el chat está en la whitelist de admins, ruteamos al agente administrativo.
+    # Los chats normales siguen yendo al flujo público de leads.
+    if agente_admin.es_admin(chat_id):
+        async def _process_admin():
+            await telegram_service.send_typing(chat_id)
+            try:
+                respuesta = await agente_admin.responder_admin_llm(text, db)
+            except Exception as e:
+                respuesta = f"⚠ Error al procesar: {type(e).__name__}: {e}"
+            # Telegram permite hasta ~4096 chars por mensaje; partimos si hace falta.
+            for parte in _split_telegram(respuesta):
+                await telegram_service.send_message(chat_id, parte)
+        background.add_task(_process_admin)
+        return {"ok": True, "modo": "admin"}
+
     async def _process():
         await telegram_service.send_typing(chat_id)
         oraciones = await agente_service.procesar_mensaje(
@@ -70,6 +86,20 @@ async def telegram_webhook(request: Request, background: BackgroundTasks, db: Se
 
     background.add_task(_process)
     return {"ok": True}
+
+
+def _split_telegram(text: str, limit: int = 3800) -> list[str]:
+    text = text or ""
+    if len(text) <= limit:
+        return [text or "Listo."]
+    parts, buf = [], ""
+    for line in text.splitlines(keepends=True):
+        if len(buf) + len(line) > limit:
+            parts.append(buf); buf = ""
+        buf += line
+    if buf:
+        parts.append(buf)
+    return parts
 
 
 # ── Instagram webhook ─────────────────────────────────────────────────────────
@@ -136,6 +166,28 @@ async def chat_test(req: ChatRequest, db: Session = Depends(get_db)):
         usar_debounce=False,
     )
     return {"respuesta": " ".join(oraciones), "oraciones": oraciones}
+
+
+@router.post("/admin/chat")
+async def chat_admin_test(req: ChatRequest, db: Session = Depends(get_db)):
+    """
+    Probar el agente administrativo SIN pasar por Telegram. Útil para QA y para
+    el panel de configuración. NO chequea whitelist — está protegido por auth
+    a nivel del frontend.
+    """
+    respuesta = await agente_admin.responder_admin_llm(req.mensaje, db)
+    return {"respuesta": respuesta}
+
+
+@router.get("/admin/status")
+def admin_status():
+    raw = os.getenv("TELEGRAM_ADMIN_CHATS", "")
+    chats = [c.strip() for c in raw.split(",") if c.strip()]
+    return {
+        "telegram_admin_chats": chats,
+        "anthropic_configurado": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "tools_disponibles": list(TOOL_NAMES),
+    }
 
 
 # ── Leads ─────────────────────────────────────────────────────────────────────
