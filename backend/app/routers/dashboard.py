@@ -37,15 +37,36 @@ def stats(mes: Optional[str] = None, db: Session = Depends(get_db), user=Depends
         hoy = date.today()
         mes = f"{hoy.year}-{hoy.month:02d}"
 
-    contratos_activos = db.query(models.Contrato).filter_by(estado=models.ContratoEstado.vigente).count()
     propiedades_ocupadas = db.query(models.Propiedad).filter_by(estado=models.PropiedadEstado.ocupada).count()
     propiedades_total = db.query(models.Propiedad).count()
     propiedades_disponibles = db.query(models.Propiedad).filter_by(estado=models.PropiedadEstado.disponible).count()
 
-    pagos_mes = db.query(models.Pago).filter(models.Pago.periodo == mes).all()
-    cobrado_mes = sum(p.monto_total or 0 for p in pagos_mes if p.estado == models.PagoEstado.pagado)
-    pendiente_cobro = sum(p.monto_total or 0 for p in pagos_mes if p.estado == models.PagoEstado.pendiente)
-    vencido_mes = sum(p.monto_total or 0 for p in pagos_mes if p.estado == models.PagoEstado.vencido)
+    contratos = db.query(models.Contrato).filter_by(estado=models.ContratoEstado.vigente).all()
+    contratos_activos = len(contratos)
+
+    cobrado_mes = pendiente_cobro = vencido_mes = 0.0
+    for c in contratos:
+        pago = (
+            db.query(models.Pago)
+            .filter(models.Pago.contrato_id == c.id, models.Pago.periodo == mes)
+            .order_by(models.Pago.id.desc())
+            .first()
+        )
+        if pago:
+            monto = pago.monto_total or 0
+            if pago.estado == models.PagoEstado.pagado:
+                cobrado_mes += monto
+            elif pago.estado == models.PagoEstado.vencido:
+                vencido_mes += monto
+            else:
+                pendiente_cobro += monto
+        else:
+            prop = c.propiedad
+            base = float(c.monto_inicial or (prop.precio_alquiler if prop else 0) or 0)
+            tasas = (prop.tasa_municipal if prop else 0) + (prop.impuesto_inmobiliario if prop else 0)
+            extras = (prop.expensas if prop else 0) + (tasas or 0)
+            pendiente_cobro += round(base + (extras or 0), 2)
+
     total_esperado = cobrado_mes + pendiente_cobro + vencido_mes
 
     return {

@@ -116,19 +116,50 @@ def marcar_cobrado(pago_id: int, db: Session = Depends(get_db), user=Depends(get
 
 @router.get("/resumen")
 def resumen_cobranza(mes: Optional[str] = None, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """
+    Suma cobrado/pendiente/vencido del mes.
+    Importante: los contratos vigentes que aún no tienen Pago registrado para
+    el período cuentan como `pendiente` (con el monto esperado calculado a
+    partir del contrato + costos de la propiedad). Si no fuera así, un mes
+    sin pagos cargados se reportaba erróneamente como "100% cobrado".
+    """
     if not mes:
         hoy = date.today()
         mes = f"{hoy.year}-{hoy.month:02d}"
 
-    pagos = db.query(models.Pago).filter(models.Pago.periodo == mes).all()
-    cobrado = sum(p.monto_total or 0 for p in pagos if p.estado == models.PagoEstado.pagado)
-    pendiente = sum(p.monto_total or 0 for p in pagos if p.estado == models.PagoEstado.pendiente)
-    vencido = sum(p.monto_total or 0 for p in pagos if p.estado == models.PagoEstado.vencido)
-    total = cobrado + pendiente + vencido
-
-    contratos_activos = db.query(models.Contrato).filter(
+    contratos = db.query(models.Contrato).filter(
         models.Contrato.estado == models.ContratoEstado.vigente
-    ).count()
+    ).all()
+
+    cobrado = pendiente = vencido = 0.0
+    pagos_count = 0
+
+    for c in contratos:
+        pago = (
+            db.query(models.Pago)
+            .filter(models.Pago.contrato_id == c.id, models.Pago.periodo == mes)
+            .order_by(models.Pago.id.desc())
+            .first()
+        )
+        if pago:
+            pagos_count += 1
+            monto = pago.monto_total or 0
+            if pago.estado == models.PagoEstado.pagado:
+                cobrado += monto
+            elif pago.estado == models.PagoEstado.vencido:
+                vencido += monto
+            else:
+                pendiente += monto
+        else:
+            # Sin pago registrado → estimación del esperado para que la barra
+            # de cobranza tenga base real.
+            prop = c.propiedad
+            base = float(c.monto_inicial or (prop.precio_alquiler if prop else 0) or 0)
+            tasas = (prop.tasa_municipal if prop else 0) + (prop.impuesto_inmobiliario if prop else 0)
+            extras = (prop.expensas if prop else 0) + (tasas or 0)
+            pendiente += round(base + (extras or 0), 2)
+
+    total = cobrado + pendiente + vencido
 
     return {
         "mes": mes,
@@ -137,8 +168,8 @@ def resumen_cobranza(mes: Optional[str] = None, db: Session = Depends(get_db), u
         "vencido": vencido,
         "total_esperado": total,
         "porcentaje_cobrado": round((cobrado / total * 100) if total > 0 else 0, 1),
-        "contratos_activos": contratos_activos,
-        "pagos_count": len(pagos),
+        "contratos_activos": len(contratos),
+        "pagos_count": pagos_count,
     }
 
 
