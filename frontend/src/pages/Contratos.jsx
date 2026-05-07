@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, DollarSign } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import HistorialPagos from '../components/HistorialPagos'
+import SearchBar from '../components/SearchBar'
 import api from '../utils/api'
 
-const TIPOS = ['alquiler_vivienda','alquiler_comercial','boleto_compraventa']
-const ESTADOS = ['borrador','vigente','vencido','rescindido','cerrado']
+const TIPOS = ['alquiler_vivienda','alquiler_comercial','boleto_compraventa','sena_alquiler']
+const ESTADOS = ['borrador','vigente','vencido','rescindido','reservado']
 const INDICES = ['ipc','icl','fijo','sin_ajuste']
 
 const ESTADO_CHIP = {
@@ -13,13 +14,14 @@ const ESTADO_CHIP = {
   borrador:   'chip-gray',
   vencido:    'chip-warn',
   rescindido: 'chip-danger',
-  cerrado:    'chip-muted',
+  reservado:  'chip-muted',
 }
 
 const TIPO_LABEL = {
   alquiler_vivienda:  'Alq. Vivienda',
   alquiler_comercial: 'Alq. Comercial',
   boleto_compraventa: 'Boleto C/V',
+  sena_alquiler:      'Seña Alquiler',
 }
 
 const empty = {
@@ -53,6 +55,7 @@ export default function Contratos() {
   const [propiedades, setProp]  = useState([])
   const [clientes, setClientes] = useState([])
   const [filtro, setFiltro]     = useState('todos')
+  const [busqueda, setBusqueda] = useState('')
   const [open, setOpen]         = useState(false)
   const [editing, setEditing]   = useState(null)
   const [historialContrato, setHistorialContrato] = useState(null)
@@ -64,7 +67,23 @@ export default function Contratos() {
   }
   useEffect(() => { load() }, [])
 
-  const filtered = filtro === 'todos' ? list : list.filter(c => c.estado === filtro)
+  const filtered = useMemo(() => {
+    let r = filtro === 'todos' ? list : list.filter(c => c.estado === filtro)
+    const q = busqueda.trim().toLowerCase()
+    if (q) {
+      r = r.filter(c => {
+        const prop = propiedades.find(p => p.id === c.propiedad_id)
+        const inq = clientes.find(cl => cl.id === c.inquilino_id)
+        const txt = [
+          c.codigo, c.tipo, c.estado, c.notas,
+          prop?.direccion, prop?.ciudad,
+          inq?.nombre, inq?.apellido, inq?.razon_social, inq?.documento,
+        ].filter(Boolean).join(' ').toLowerCase()
+        return txt.includes(q)
+      })
+    }
+    return r
+  }, [list, filtro, busqueda, propiedades, clientes])
 
   const del = async id => {
     if (!confirm('¿Eliminar contrato?')) return
@@ -93,6 +112,11 @@ export default function Contratos() {
             </button>
           </div>
         </header>
+
+        <div className="mb-4 max-w-md">
+          <SearchBar value={busqueda} onChange={setBusqueda}
+            placeholder="Buscar por código, propiedad, inquilino..." />
+        </div>
 
         <div className="flex flex-wrap gap-2 mb-8">
           <FilterPill active={filtro === 'todos'} onClick={() => setFiltro('todos')} label={`Todos (${list.length})`} />

@@ -27,6 +27,7 @@ TIPO_LABEL = {
     "alquiler_vivienda": "Contrato de Locación de Vivienda",
     "alquiler_comercial": "Contrato de Locación Comercial",
     "boleto_compraventa": "Boleto de Compraventa",
+    "sena_alquiler": "Reserva / Seña de Alquiler",
 }
 
 
@@ -379,10 +380,51 @@ def _plantilla_boleto_compraventa(story, ctx, sty):
     ]
 
 
+def _plantilla_sena_alquiler(story, ctx, sty):
+    c = ctx["contrato"]
+    monto = _money(c.get("monto_inicial"))
+    sena = _money(c.get("deposito"))
+
+    cl = lambda txt: Paragraph(txt, sty["CiudadClause"])
+    sec = lambda txt: Paragraph(txt, sty["CiudadSection"])
+
+    story += [
+        sec("PRIMERA — RESERVA"),
+        cl(f"EL/LA INTERESADO/A entrega en este acto a CIUDAD. y/o al/la PROPIETARIO/A, "
+           f"a cuenta de la futura locación del inmueble sito en "
+           f"<b>{ctx['propiedad'].get('direccion','—')}</b> ({ctx['propiedad'].get('ciudad','—')}), "
+           f"la suma de <b>{sena}</b> en concepto de seña y reserva. La operación queda "
+           f"sujeta a la aprobación del/la PROPIETARIO/A y al cumplimiento de los requisitos "
+           f"habituales (presentación de garantías, antecedentes y documentación)."),
+
+        sec("SEGUNDA — VALOR DEL ALQUILER"),
+        cl(f"De aceptarse la reserva, el canon locativo inicial será de <b>{monto}</b> mensuales, "
+           f"sujeto a las condiciones de ajuste y plazo que se establezcan en el contrato de "
+           f"locación definitivo."),
+
+        sec("TERCERA — IMPUTACIÓN DE LA SEÑA"),
+        cl("Aceptada la reserva por el/la PROPIETARIO/A, el monto entregado se imputará "
+           "íntegramente al primer canon locativo, depósito en garantía o gastos administrativos, "
+           "según se acuerde en el contrato definitivo."),
+
+        sec("CUARTA — RECHAZO O DESISTIMIENTO"),
+        cl("Si el/la PROPIETARIO/A rechaza la oferta, la seña será restituida en su totalidad "
+           "al/la INTERESADO/A dentro de las 72 horas. Si el/la INTERESADO/A desiste de la "
+           "operación una vez aceptada la reserva, perderá el monto entregado en concepto de "
+           "indemnización por la inmovilización del inmueble."),
+
+        sec("QUINTA — PLAZO DE RESPUESTA"),
+        cl("EL/LA PROPIETARIO/A cuenta con un plazo de hasta cinco (5) días hábiles desde la "
+           "presentación formal de esta reserva para aceptarla o rechazarla. Vencido ese plazo "
+           "sin respuesta, se considerará rechazada y la seña será restituida."),
+    ]
+
+
 PLANTILLAS = {
     "alquiler_vivienda": _plantilla_alquiler_vivienda,
     "alquiler_comercial": _plantilla_alquiler_comercial,
     "boleto_compraventa": _plantilla_boleto_compraventa,
+    "sena_alquiler": _plantilla_sena_alquiler,
 }
 
 

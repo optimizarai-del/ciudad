@@ -19,6 +19,7 @@ import DashboardAlquileres from './pages/DashboardAlquileres'
 import Cobranza           from './pages/Cobranza'
 import DashboardVentas    from './pages/DashboardVentas'
 import PropiedadesVenta   from './pages/PropiedadesVenta'
+import Propietarios       from './pages/Propietarios'
 
 export default function App() {
   return (
@@ -51,6 +52,9 @@ export default function App() {
         } />
         <Route path="/alquileres/clientes" element={
           <ProtectedRoute requireAlquileres><Clientes /></ProtectedRoute>
+        } />
+        <Route path="/alquileres/propietarios" element={
+          <ProtectedRoute requireAlquileres><Propietarios /></ProtectedRoute>
         } />
 
         {/* Ventas */}

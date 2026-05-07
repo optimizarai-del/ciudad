@@ -7,7 +7,7 @@ load_dotenv()
 
 from app.database import Base, engine
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
-from app.routers import cobranza, ventas_router
+from app.routers import cobranza, ventas_router, comprobantes
 
 Base.metadata.create_all(bind=engine)
 
@@ -28,6 +28,7 @@ for r in [auth, users, propiedades, clientes, contratos, calculadora, dashboard,
 app.include_router(agente_router.router)
 app.include_router(cobranza.router)
 app.include_router(ventas_router.router)
+app.include_router(comprobantes.router)
 
 
 @app.get("/health")
@@ -44,5 +45,24 @@ def _seed_if_empty():
         if db.query(models.User).count() == 0:
             from app.seed import run as seed_run
             seed_run()
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def _migrar_estados_contrato():
+    """
+    Migración liviana: 'cerrado' fue removido del enum y reemplazado por 'reservado'.
+    Los contratos históricos en 'cerrado' los pasamos a 'vencido' para no inventar
+    reservas que nunca existieron.
+    """
+    from sqlalchemy import text
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        db.execute(text("UPDATE contratos SET estado='vencido' WHERE estado='cerrado'"))
+        db.commit()
+    except Exception:
+        db.rollback()
     finally:
         db.close()

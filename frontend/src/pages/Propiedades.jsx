@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, Building2, Trash2, Pencil, X, MapPin, Home, RefreshCw } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
+import SearchBar from '../components/SearchBar'
 import TokkoSync from '../components/TokkoSync'
 import api from '../utils/api'
 
@@ -37,6 +38,7 @@ export default function Propiedades() {
   const [filtroModalidad, setFiltroModalidad] = useState('todos')
   const [clientes, setClientes] = useState([])
   const [tokkoOpen, setTokkoOpen] = useState(false)
+  const [busqueda, setBusqueda] = useState('')
 
   const load = () => {
     api.get('/api/propiedades').then(r => setList(r.data))
@@ -49,8 +51,16 @@ export default function Propiedades() {
     let r = [...list]
     if (filtroTipo !== 'todos') r = r.filter(p => p.tipo === filtroTipo)
     if (filtroModalidad !== 'todos') r = r.filter(p => p.modalidad === filtroModalidad)
+    const q = busqueda.trim().toLowerCase()
+    if (q) {
+      r = r.filter(p => {
+        const txt = [p.codigo, p.direccion, p.ciudad, p.provincia, p.tipo, p.tokko_id]
+          .filter(Boolean).join(' ').toLowerCase()
+        return txt.includes(q)
+      })
+    }
     setFiltered(r)
-  }, [list, filtroTipo, filtroModalidad])
+  }, [list, filtroTipo, filtroModalidad, busqueda])
 
   const del = async id => {
     if (!confirm('¿Eliminar propiedad?')) return
@@ -78,6 +88,12 @@ export default function Propiedades() {
             </div>
           </div>
         </header>
+
+        {/* Búsqueda */}
+        <div className="mb-4 max-w-md">
+          <SearchBar value={busqueda} onChange={setBusqueda}
+            placeholder="Buscar por dirección, código, ciudad, Tokko ID..." />
+        </div>
 
         {/* Filtros */}
         <div className="flex flex-wrap gap-2 mb-8">

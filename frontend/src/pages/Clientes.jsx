@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, Users, Pencil, Trash2, X, Phone, Mail } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
+import SearchBar from '../components/SearchBar'
 import api from '../utils/api'
 
 const ROLES = ['propietario','inquilino','comprador','vendedor']
@@ -16,13 +17,25 @@ const empty = { nombre:'', apellido:'', razon_social:'', documento:'', email:'',
 export default function Clientes() {
   const [list, setList] = useState([])
   const [filtro, setFiltro] = useState('todos')
+  const [busqueda, setBusqueda] = useState('')
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(null)
 
   const load = () => api.get('/api/clientes').then(r => setList(r.data))
   useEffect(() => { load() }, [])
 
-  const filtered = filtro === 'todos' ? list : list.filter(c => c.rol === filtro)
+  const filtered = useMemo(() => {
+    let r = filtro === 'todos' ? list : list.filter(c => c.rol === filtro)
+    const q = busqueda.trim().toLowerCase()
+    if (q) {
+      r = r.filter(c => {
+        const txt = [c.nombre, c.apellido, c.razon_social, c.documento, c.email, c.telefono]
+          .filter(Boolean).join(' ').toLowerCase()
+        return txt.includes(q)
+      })
+    }
+    return r
+  }, [list, filtro, busqueda])
 
   const del = async id => {
     if (!confirm('¿Eliminar cliente?')) return
@@ -45,6 +58,12 @@ export default function Clientes() {
             </button>
           </div>
         </header>
+
+        {/* Búsqueda */}
+        <div className="mb-4 max-w-md">
+          <SearchBar value={busqueda} onChange={setBusqueda}
+            placeholder="Buscar por nombre, DNI, email, teléfono..." />
+        </div>
 
         {/* Filtros */}
         <div className="flex flex-wrap gap-2 mb-8">

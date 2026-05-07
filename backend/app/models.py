@@ -47,6 +47,7 @@ class ContratoTipo(str, Enum):
     alquiler_vivienda = "alquiler_vivienda"
     alquiler_comercial = "alquiler_comercial"
     boleto_compraventa = "boleto_compraventa"
+    sena_alquiler = "sena_alquiler"
 
 
 class ContratoEstado(str, Enum):
@@ -54,7 +55,7 @@ class ContratoEstado(str, Enum):
     vigente = "vigente"
     vencido = "vencido"
     rescindido = "rescindido"
-    cerrado = "cerrado"
+    reservado = "reservado"
 
 
 class IndiceAjuste(str, Enum):
@@ -262,4 +263,27 @@ class MensajeConversacion(Base):
     lead = relationship("Lead", back_populates="mensajes")
     rol = Column(String)   # "user" | "assistant"
     contenido = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ComprobanteTipo(str, Enum):
+    inquilino = "inquilino"
+    propietario = "propietario"
+
+
+class Comprobante(Base):
+    __tablename__ = "comprobantes"
+    id = Column(Integer, primary_key=True)
+    pago_id = Column(Integer, ForeignKey("pagos.id"), nullable=False, index=True)
+    pago = relationship("Pago")
+    tipo = Column(SQLEnum(ComprobanteTipo), nullable=False)
+    destinatario_nombre = Column(String)
+    destinatario_email = Column(String)
+    monto_total = Column(Float, default=0)
+    monto_comision = Column(Float, default=0)   # solo en propietario
+    monto_neto = Column(Float, default=0)       # solo en propietario
+    pdf_blob = Column(Text)                     # base64 del PDF para descarga
+    enviado_email = Column(Boolean, default=False)
+    fecha_envio = Column(DateTime)
+    error_envio = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
