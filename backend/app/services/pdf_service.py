@@ -34,7 +34,8 @@ def _logo():
 
 
 # Paleta CIUDAD.
-COLOR_NOCHE = HexColor("#0F1A2E")
+COLOR_NOCHE = HexColor("#0F1A2E")          # azul noche (textos de marca, títulos)
+COLOR_HEADER_BG = HexColor("#000000")      # negro puro: matchea el fondo del logo
 COLOR_COBRE = HexColor("#B8893A")
 COLOR_GRIS = HexColor("#737373")
 COLOR_BORDE = HexColor("#E5E5E5")
@@ -90,8 +91,8 @@ def _header_footer(canvas, doc, codigo: str):
     canvas.saveState()
     width, height = A4
 
-    # Header band negro
-    canvas.setFillColor(COLOR_NOCHE)
+    # Header band negro puro (matchea el fondo del isotipo de CIUDAD)
+    canvas.setFillColor(COLOR_HEADER_BG)
     canvas.rect(0, height - 26 * mm, width, 26 * mm, fill=1, stroke=0)
 
     # Logo a la izquierda (cuadrado, JPG con fondo negro encaja directo en la banda)
