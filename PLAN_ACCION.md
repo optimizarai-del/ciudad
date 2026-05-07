@@ -42,10 +42,10 @@
 - Seed con datos demo
 - Launchers `.bat` Windows
 
-### Fase 2 — Integraciones
-- **Tokko Broker API** — sync de propiedades en venta (pull periódico + webhook)
-- **Índices reales** — scraper/feed INDEC para IPC, BCRA para ICL
-- **PDF de contratos** — plantillas legales (alquiler vivienda, alquiler comercial, boleto CV)
+### Fase 2 — Integraciones ✅ (entregada)
+- **Tokko Broker API** ✅ — sync pull (preview + import) en `backend/app/routers/tokko.py`
+- **Índices reales** ✅ — INDEC (IPC), BCRA (ICL/UVA), DolarAPI en `backend/app/routers/indices.py`
+- **PDF de contratos** ✅ — tres plantillas legales (vivienda Ley 27.551 / comercial CCyC / boleto CV) en `frontend/src/utils/pdfContracts.js`
 
 ### Fase 3 — Agente IA
 - Webhook WhatsApp (Twilio o Meta Cloud API)

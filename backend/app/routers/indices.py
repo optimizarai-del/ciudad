@@ -1,8 +1,7 @@
 """
-Índices económicos en vivo.
-Fuentes: INDEC (IPC), BCRA (ICL / UVA), DolarAPI (tipo de cambio).
+Indices economicos en vivo.
+Fuentes: INDEC (IPC nivel general), BCRA v4.0 (ICL / UVA), DolarAPI (tipo de cambio).
 """
-from datetime import date, timedelta
 import httpx
 from fastapi import APIRouter, Depends
 
@@ -11,21 +10,33 @@ from app.security import get_current_user
 router = APIRouter(prefix="/api/indices", tags=["indices"])
 
 
+async def _bcra_variable(client, var_id):
+    """Llama a BCRA v4.0 y devuelve la lista de detalle ordenada por fecha asc."""
+    r = await client.get(
+        f"https://api.bcra.gob.ar/estadisticas/v4.0/Monetarias/{var_id}",
+        headers={"Accept": "application/json"},
+    )
+    data = r.json()
+    results = data.get("results", [])
+    if not results:
+        return []
+    detalle = results[0].get("detalle", []) or []
+    detalle.sort(key=lambda x: x.get("fecha", ""))
+    return detalle
+
+
 @router.get("/")
 async def get_indices(user=Depends(get_current_user)):
     resultado = {}
-    hoy = date.today()
-    desde = (hoy - timedelta(days=45)).strftime("%Y-%m-%d")
-    hasta = hoy.strftime("%Y-%m-%d")
 
-    async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
+    async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
 
-        # ── IPC ── INDEC series API
+        # ── IPC nivel general ── INDEC (serie 101.1_I2NG_2016_M_22)
         try:
             r = await client.get(
                 "https://apis.datos.gob.ar/series/api/series/",
                 params={
-                    "ids": "148.3_INIVELG_DICI_M_26",
+                    "ids": "101.1_I2NG_2016_M_22",
                     "limit": 6,
                     "sort": "desc",
                     "format": "json",
@@ -52,58 +63,69 @@ async def get_indices(user=Depends(get_current_user)):
                     "fuente": "INDEC",
                     "ok": True,
                 }
-        except Exception as e:
+            else:
+                resultado["ipc"] = {"ok": False, "error": "INDEC sin datos"}
+        except Exception:
             resultado["ipc"] = {"ok": False, "error": "INDEC no disponible"}
 
-        # ── ICL ── BCRA variable 40
+        # ── ICL ── BCRA v4.0 variable 40
         try:
-            r = await client.get(
-                f"https://api.bcra.gob.ar/estadisticas/v2.0/DatosVariable/40/{desde}/{hasta}",
-                headers={"Accept": "application/json"},
-            )
-            data = r.json()
-            rows = data.get("results", [])
-            if rows and len(rows) >= 2:
-                ultimo = rows[-1]
-                anterior = rows[-2]
-                valor = float(ultimo.get("v", ultimo.get("valor", 0)))
-                val_ant = float(anterior.get("v", anterior.get("valor", 0)))
+            detalle = await _bcra_variable(client, 40)
+            if detalle and len(detalle) >= 2:
+                ultimo = detalle[-1]
+                anterior = detalle[-2]
+                valor = float(ultimo.get("valor", 0))
+                val_ant = float(anterior.get("valor", 0))
                 variacion = round((valor / val_ant - 1) * 100, 2) if val_ant else None
                 resultado["icl"] = {
                     "valor": valor,
                     "variacion_mensual": variacion,
-                    "fecha": ultimo.get("d", ultimo.get("fecha", "")),
+                    "fecha": ultimo.get("fecha", ""),
                     "fuente": "BCRA",
                     "ok": True,
                 }
-            elif rows:
-                ultimo = rows[-1]
+            elif detalle:
+                ultimo = detalle[-1]
                 resultado["icl"] = {
-                    "valor": float(ultimo.get("v", ultimo.get("valor", 0))),
+                    "valor": float(ultimo.get("valor", 0)),
                     "variacion_mensual": None,
-                    "fecha": ultimo.get("d", ultimo.get("fecha", "")),
+                    "fecha": ultimo.get("fecha", ""),
                     "fuente": "BCRA",
                     "ok": True,
                 }
+            else:
+                resultado["icl"] = {"ok": False, "error": "BCRA sin datos"}
         except Exception:
             resultado["icl"] = {"ok": False, "error": "BCRA no disponible"}
 
-        # ── UVA ── BCRA variable 4
+        # ── UVA ── BCRA v4.0 variable 31 (UVA - en pesos)
+        # 31 = UVA, 32 = UVI. Variable 4 anterior fue dada de baja en v4.
         try:
-            r = await client.get(
-                f"https://api.bcra.gob.ar/estadisticas/v2.0/DatosVariable/4/{desde}/{hasta}",
-                headers={"Accept": "application/json"},
-            )
-            data = r.json()
-            rows = data.get("results", [])
-            if rows:
-                ultimo = rows[-1]
+            detalle = await _bcra_variable(client, 31)
+            if detalle and len(detalle) >= 2:
+                ultimo = detalle[-1]
+                anterior = detalle[-2]
+                valor = float(ultimo.get("valor", 0))
+                val_ant = float(anterior.get("valor", 0))
+                variacion = round((valor / val_ant - 1) * 100, 2) if val_ant else None
                 resultado["uva"] = {
-                    "valor": float(ultimo.get("v", ultimo.get("valor", 0))),
-                    "fecha": ultimo.get("d", ultimo.get("fecha", "")),
+                    "valor": valor,
+                    "variacion_mensual": variacion,
+                    "fecha": ultimo.get("fecha", ""),
                     "fuente": "BCRA",
                     "ok": True,
                 }
+            elif detalle:
+                ultimo = detalle[-1]
+                resultado["uva"] = {
+                    "valor": float(ultimo.get("valor", 0)),
+                    "variacion_mensual": None,
+                    "fecha": ultimo.get("fecha", ""),
+                    "fuente": "BCRA",
+                    "ok": True,
+                }
+            else:
+                resultado["uva"] = {"ok": False, "error": "BCRA sin datos"}
         except Exception:
             resultado["uva"] = {"ok": False, "error": "BCRA no disponible"}
 

@@ -3,7 +3,7 @@ import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, Doll
 import Layout from '../components/Layout/Layout'
 import HistorialPagos from '../components/HistorialPagos'
 import api from '../utils/api'
-import { jsPDF } from 'jspdf'
+import { generarPDFContrato } from '../utils/pdfContracts'
 
 const TIPOS = ['alquiler_vivienda','alquiler_comercial','boleto_compraventa']
 const ESTADOS = ['borrador','vigente','vencido','rescindido','cerrado']
@@ -32,98 +32,7 @@ const empty = {
   comision_porc:'', notas:''
 }
 
-function generarPDF(c, propName, clienteName) {
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-  const W = 210, M = 20
-
-  doc.setFillColor(10, 10, 10)
-  doc.rect(0, 0, W, 32, 'F')
-  doc.setTextColor(255, 255, 255)
-  doc.setFontSize(22)
-  doc.setFont('helvetica', 'bold')
-  doc.text('CIUDAD.', M, 14)
-  doc.setFontSize(9)
-  doc.setFont('helvetica', 'normal')
-  doc.text('Inmuebles · Contratos · Gestion', M, 21)
-  doc.setFontSize(11)
-  doc.setFont('helvetica', 'bold')
-  doc.text(c.codigo || `CONTRATO #${c.id}`, W - M, 16, { align: 'right' })
-  doc.setFontSize(8)
-  doc.setFont('helvetica', 'normal')
-  doc.text(TIPO_LABEL[c.tipo] || c.tipo, W - M, 23, { align: 'right' })
-
-  doc.setTextColor(10, 10, 10)
-  let y = 44
-
-  const section = (titulo) => {
-    doc.setFillColor(247, 247, 247)
-    doc.rect(M, y, W - M * 2, 7, 'F')
-    doc.setFontSize(8)
-    doc.setFont('helvetica', 'bold')
-    doc.setTextColor(115, 115, 115)
-    doc.text(titulo.toUpperCase(), M + 3, y + 4.5)
-    doc.setTextColor(10, 10, 10)
-    y += 11
-  }
-
-  const row = (label, value) => {
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'normal')
-    doc.setTextColor(115, 115, 115)
-    doc.text(label, M, y)
-    doc.setTextColor(10, 10, 10)
-    doc.setFont('helvetica', 'bold')
-    doc.text(String(value || '—'), M + 55, y)
-    y += 7
-  }
-
-  section('Partes')
-  row('Propiedad', propName)
-  row('Inquilino / Comprador', clienteName || 'Sin asignar')
-  y += 2
-
-  section('Vigencia')
-  row('Fecha inicio', c.fecha_inicio || '—')
-  row('Fecha fin', c.fecha_fin || '—')
-  y += 2
-
-  section('Condiciones economicas')
-  row('Monto inicial', c.monto_inicial > 0 ? `$${Number(c.monto_inicial).toLocaleString('es-AR')}` : '—')
-  row('Deposito', c.deposito > 0 ? `$${Number(c.deposito).toLocaleString('es-AR')}` : '—')
-  row('Indice de ajuste', c.indice_ajuste?.toUpperCase())
-  row('Periodicidad', `${c.periodicidad_meses} meses`)
-  if (c.porcentaje_fijo > 0) row('% fijo', `${c.porcentaje_fijo}%`)
-  if (c.comision_porc > 0) row('Comision', `${c.comision_porc}%`)
-  y += 2
-
-  if (c.notas) {
-    section('Notas')
-    const lines = doc.splitTextToSize(c.notas, W - M * 2 - 6)
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
-    doc.text(lines, M, y)
-    y += lines.length * 5 + 4
-  }
-
-  y = Math.max(y + 10, 215)
-  doc.setDrawColor(200, 200, 200)
-  doc.line(M, y, M + 60, y)
-  doc.line(W - M - 60, y, W - M, y)
-  doc.setFontSize(8)
-  doc.setTextColor(115, 115, 115)
-  doc.setFont('helvetica', 'normal')
-  doc.text('Firma Locador / Vendedor', M + 30, y + 5, { align: 'center' })
-  doc.text('Firma Locatario / Comprador', W - M - 30, y + 5, { align: 'center' })
-
-  doc.setFillColor(247, 247, 247)
-  doc.rect(0, 287, W, 10, 'F')
-  doc.setFontSize(7)
-  doc.setTextColor(160, 160, 160)
-  doc.text(`CIUDAD. · Generado el ${new Date().toLocaleDateString('es-AR')}`, M, 293)
-  doc.text(`${c.codigo || `Contrato #${c.id}`} · Documento no oficial`, W - M, 293, { align: 'right' })
-
-  doc.save(`contrato-${c.codigo || c.id}.pdf`)
-}
+// PDF generation moved to ../utils/pdfContracts.js (legal templates per type).
 
 export default function Contratos() {
   const [list, setList]         = useState([])
@@ -153,6 +62,15 @@ export default function Contratos() {
   const clienteName = id => {
     const c = clientes.find(c => c.id === id)
     return c ? `${c.nombre} ${c.apellido || ''}`.trim() : null
+  }
+
+  const descargarPDF = (c) => {
+    const propiedad = propiedades.find(p => p.id === c.propiedad_id) || null
+    const propietario = propiedad?.propietario_id
+      ? clientes.find(cl => cl.id === propiedad.propietario_id)
+      : null
+    const inquilino = c.inquilino_id ? clientes.find(cl => cl.id === c.inquilino_id) : null
+    generarPDFContrato({ contrato: c, propiedad, propietario, inquilino })
   }
 
   return (
@@ -229,8 +147,8 @@ export default function Contratos() {
                     onClick={() => { setEditing(c); setOpen(true) }}>
                     <Pencil size={12} />
                   </button>
-                  <button className="btn-ghost py-2 px-3 text-[12px]" title="Descargar PDF"
-                    onClick={() => generarPDF(c, propName(c.propiedad_id), clienteName(c.inquilino_id))}>
+                  <button className="btn-ghost py-2 px-3 text-[12px]" title="Descargar PDF legal"
+                    onClick={() => descargarPDF(c)}>
                     <Download size={12} />
                   </button>
                   <button className="btn-danger py-2 px-3" onClick={() => del(c.id)}>
