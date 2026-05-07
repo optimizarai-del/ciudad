@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Users, Pencil, Trash2, X, Phone, Mail } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
-import SearchBar from '../components/SearchBar'
+import SearchBar, { match } from '../components/SearchBar'
 import api from '../utils/api'
 
 const ROLES = ['propietario','inquilino','comprador','vendedor']
@@ -26,13 +26,8 @@ export default function Clientes() {
 
   const filtered = useMemo(() => {
     let r = filtro === 'todos' ? list : list.filter(c => c.rol === filtro)
-    const q = busqueda.trim().toLowerCase()
-    if (q) {
-      r = r.filter(c => {
-        const txt = [c.nombre, c.apellido, c.razon_social, c.documento, c.email, c.telefono]
-          .filter(Boolean).join(' ').toLowerCase()
-        return txt.includes(q)
-      })
+    if (busqueda.trim()) {
+      r = r.filter(c => match(busqueda, c.nombre, c.apellido, c.razon_social, c.documento, c.email, c.telefono))
     }
     return r
   }, [list, filtro, busqueda])

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Layout from '../components/Layout/Layout'
-import SearchBar from '../components/SearchBar'
+import SearchBar, { match } from '../components/SearchBar'
 import api from '../utils/api'
 import {
   CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight,
@@ -45,13 +45,14 @@ export default function Cobranza() {
 
   const filtrados = useMemo(() => {
     let r = filtro === 'todos' ? items : items.filter(p => p.estado === filtro)
-    const q = busqueda.trim().toLowerCase()
-    if (q) {
-      r = r.filter(p => {
-        const txt = [p.propiedad, p.inquilino, p.propietario, p.contrato_codigo, p.propiedad_ciudad]
-          .filter(Boolean).join(' ').toLowerCase()
-        return txt.includes(q)
-      })
+    if (busqueda.trim()) {
+      r = r.filter(p => match(
+        busqueda,
+        p.propiedad, p.propiedad_ciudad,
+        p.inquilino, p.inquilino_email, p.inquilino_telefono,
+        p.propietario, p.propietario_email,
+        p.contrato_codigo,
+      ))
     }
     return r
   }, [items, filtro, busqueda])

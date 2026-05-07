@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Building2, Trash2, Pencil, X, MapPin, Home, RefreshCw } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
-import SearchBar from '../components/SearchBar'
+import SearchBar, { match } from '../components/SearchBar'
 import TokkoSync from '../components/TokkoSync'
 import api from '../utils/api'
 
@@ -51,13 +51,8 @@ export default function Propiedades() {
     let r = [...list]
     if (filtroTipo !== 'todos') r = r.filter(p => p.tipo === filtroTipo)
     if (filtroModalidad !== 'todos') r = r.filter(p => p.modalidad === filtroModalidad)
-    const q = busqueda.trim().toLowerCase()
-    if (q) {
-      r = r.filter(p => {
-        const txt = [p.codigo, p.direccion, p.ciudad, p.provincia, p.tipo, p.tokko_id]
-          .filter(Boolean).join(' ').toLowerCase()
-        return txt.includes(q)
-      })
+    if (busqueda.trim()) {
+      r = r.filter(p => match(busqueda, p.codigo, p.direccion, p.ciudad, p.provincia, p.tipo, p.tokko_id))
     }
     setFiltered(r)
   }, [list, filtroTipo, filtroModalidad, busqueda])

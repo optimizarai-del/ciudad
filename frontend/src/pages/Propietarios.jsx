@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, KeyRound, Mail, Phone, Building2, Search, X, Pencil } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
+import { match } from '../components/SearchBar'
 import api from '../utils/api'
 
 const empty = {
@@ -37,14 +38,19 @@ export default function Propietarios() {
   }, [propiedades])
 
   const filtrados = useMemo(() => {
-    const q = busqueda.trim().toLowerCase()
-    if (!q) return propietarios
+    if (!busqueda.trim()) return propietarios
     return propietarios.filter(p => {
-      const txt = [p.nombre, p.apellido, p.razon_social, p.documento, p.email, p.telefono]
-        .filter(Boolean).join(' ').toLowerCase()
-      return txt.includes(q)
+      // Permitir buscar también por dirección de las propiedades del propietario
+      // (ej: "Av. Gaona 3100" debe traer al dueño de esa propiedad).
+      const props = propsPorPropietario[p.id] || []
+      const direcciones = props.map(pr => `${pr.direccion} ${pr.ciudad || ''} ${pr.codigo || ''}`).join(' ')
+      return match(
+        busqueda,
+        p.nombre, p.apellido, p.razon_social, p.documento, p.email, p.telefono,
+        direcciones,
+      )
     })
-  }, [propietarios, busqueda])
+  }, [propietarios, busqueda, propsPorPropietario])
 
   return (
     <Layout>
@@ -68,7 +74,7 @@ export default function Propietarios() {
           <input
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            placeholder="Buscar por nombre, DNI, email..."
+            placeholder="Buscar por nombre, DNI, email o dirección..."
             className="input pl-10 pr-10"
           />
           {busqueda && (

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, DollarSign } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import HistorialPagos from '../components/HistorialPagos'
-import SearchBar from '../components/SearchBar'
+import SearchBar, { match } from '../components/SearchBar'
 import api from '../utils/api'
 
 const TIPOS = ['alquiler_vivienda','alquiler_comercial','boleto_compraventa','sena_alquiler']
@@ -69,17 +69,16 @@ export default function Contratos() {
 
   const filtered = useMemo(() => {
     let r = filtro === 'todos' ? list : list.filter(c => c.estado === filtro)
-    const q = busqueda.trim().toLowerCase()
-    if (q) {
+    if (busqueda.trim()) {
       r = r.filter(c => {
         const prop = propiedades.find(p => p.id === c.propiedad_id)
         const inq = clientes.find(cl => cl.id === c.inquilino_id)
-        const txt = [
+        return match(
+          busqueda,
           c.codigo, c.tipo, c.estado, c.notas,
-          prop?.direccion, prop?.ciudad,
+          prop?.direccion, prop?.ciudad, prop?.codigo,
           inq?.nombre, inq?.apellido, inq?.razon_social, inq?.documento,
-        ].filter(Boolean).join(' ').toLowerCase()
-        return txt.includes(q)
+        )
       })
     }
     return r
