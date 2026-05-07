@@ -25,11 +25,14 @@ const TIPO_LABEL = {
 
 const empty = {
   codigo:'', tipo:'alquiler_vivienda', estado:'borrador',
-  propiedad_id:'', inquilino_id:'',
+  propiedad_id:'', inquilino_id:'', fiador_id:'', fiador2_id:'',
   fecha_inicio:'', fecha_fin:'',
   monto_inicial:'', deposito:'',
-  indice_ajuste:'ipc', periodicidad_meses:'3', porcentaje_fijo:'',
-  comision_porc:'', notas:''
+  indice_ajuste:'icl', periodicidad_meses:'3', porcentaje_fijo:'',
+  comision_porc:'', notas:'',
+  pagare_refuerzo:'', inventario:'',
+  seguro_obligatorio:true, permite_mascotas:false,
+  punicion_diaria_porc:'1', dia_pago_desde:'1', dia_pago_hasta:'7',
 }
 
 // PDF generation moved to ../utils/pdfContracts.js (legal templates per type).
@@ -70,7 +73,9 @@ export default function Contratos() {
       ? clientes.find(cl => cl.id === propiedad.propietario_id)
       : null
     const inquilino = c.inquilino_id ? clientes.find(cl => cl.id === c.inquilino_id) : null
-    generarPDFContrato({ contrato: c, propiedad, propietario, inquilino })
+    const fiador  = c.fiador_id  ? clientes.find(cl => cl.id === c.fiador_id)  : null
+    const fiador2 = c.fiador2_id ? clientes.find(cl => cl.id === c.fiador2_id) : null
+    generarPDFContrato({ contrato: c, propiedad, propietario, inquilino, fiador, fiador2 })
   }
 
   return (
@@ -212,9 +217,14 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
   const submit = async e => {
     e.preventDefault(); setLoading(true); setErr('')
     const payload = { ...form }
-    ;['propiedad_id','inquilino_id','monto_inicial','deposito','periodicidad_meses','porcentaje_fijo','comision_porc'].forEach(k => {
+    ;[
+      'propiedad_id','inquilino_id','fiador_id','fiador2_id',
+      'monto_inicial','deposito','periodicidad_meses','porcentaje_fijo','comision_porc',
+      'pagare_refuerzo','punicion_diaria_porc','dia_pago_desde','dia_pago_hasta',
+    ].forEach(k => {
       if (payload[k] === '' || payload[k] == null) payload[k] = null
-      else payload[k] = Number(payload[k]) || null
+      else payload[k] = Number(payload[k])
+      if (Number.isNaN(payload[k])) payload[k] = null
     })
     if (!payload.fecha_inicio) payload.fecha_inicio = null
     if (!payload.fecha_fin)    payload.fecha_fin    = null
@@ -263,9 +273,34 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
             <label className="label">Inquilino / Comprador</label>
             <select className="input" value={form.inquilino_id || ''} onChange={set('inquilino_id')}>
               <option value="">Sin asignar</option>
-              {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre} {c.apellido}</option>)}
+              {clientes.filter(c => ['inquilino','comprador'].includes(c.rol)).map(c => (
+                <option key={c.id} value={c.id}>{c.nombre} {c.apellido} {c.documento ? `· ${c.documento}` : ''}</option>
+              ))}
             </select>
           </div>
+
+          {(form.tipo === 'alquiler_vivienda' || form.tipo === 'alquiler_comercial') && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Fiador 1 (garante)</label>
+                <select className="input" value={form.fiador_id || ''} onChange={set('fiador_id')}>
+                  <option value="">Sin asignar</option>
+                  {clientes.filter(c => c.rol === 'garante').map(c => (
+                    <option key={c.id} value={c.id}>{c.nombre} {c.apellido} {c.documento ? `· ${c.documento}` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Fiador 2 (opcional)</label>
+                <select className="input" value={form.fiador2_id || ''} onChange={set('fiador2_id')}>
+                  <option value="">Sin asignar</option>
+                  {clientes.filter(c => c.rol === 'garante').map(c => (
+                    <option key={c.id} value={c.id}>{c.nombre} {c.apellido} {c.documento ? `· ${c.documento}` : ''}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -325,6 +360,59 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
               </select>
             </div>
           </div>
+
+          {(form.tipo === 'alquiler_vivienda' || form.tipo === 'alquiler_comercial') && (
+            <>
+              <div className="divider !my-1" />
+              <p className="text-[11px] uppercase tracking-[0.12em] text-[#737373] dark:text-[#7A7A7A] font-semibold">Cláusulas modelo CIUDAD</p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Pagaré refuerzo $</label>
+                  <input className="input" type="number" placeholder="8000000"
+                    value={form.pagare_refuerzo || ''} onChange={set('pagare_refuerzo')} />
+                </div>
+                <div>
+                  <label className="label">Punición diaria %</label>
+                  <input className="input" type="number" step="0.1" placeholder="1"
+                    value={form.punicion_diaria_porc || ''} onChange={set('punicion_diaria_porc')} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Día pago desde</label>
+                  <input className="input" type="number" min="1" max="28"
+                    value={form.dia_pago_desde || ''} onChange={set('dia_pago_desde')} />
+                </div>
+                <div>
+                  <label className="label">Día pago hasta</label>
+                  <input className="input" type="number" min="1" max="28"
+                    value={form.dia_pago_hasta || ''} onChange={set('dia_pago_hasta')} />
+                </div>
+              </div>
+
+              <div>
+                <label className="label">Inventario y bienes incorporados</label>
+                <textarea className="input resize-none" rows={3}
+                  placeholder="SPLIT, termotanque, cocina, etc. — pintura latex blanco a devolver igual."
+                  value={form.inventario || ''} onChange={set('inventario')} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2 text-[13px] cursor-pointer">
+                  <input type="checkbox" checked={!!form.seguro_obligatorio}
+                    onChange={e => setForm({ ...form, seguro_obligatorio: e.target.checked })} />
+                  <span>Seguro incendio/robo/RC obligatorio</span>
+                </label>
+                <label className="flex items-center gap-2 text-[13px] cursor-pointer">
+                  <input type="checkbox" checked={!!form.permite_mascotas}
+                    onChange={e => setForm({ ...form, permite_mascotas: e.target.checked })} />
+                  <span>Permite mascotas</span>
+                </label>
+              </div>
+            </>
+          )}
 
           <div>
             <label className="label">Notas</label>

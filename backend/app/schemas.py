@@ -44,6 +44,10 @@ class ClienteBase(BaseModel):
     email: Optional[str] = None
     telefono: Optional[str] = None
     rol: Optional[str] = "inquilino"
+    nacionalidad: Optional[str] = "Argentino"
+    direccion: Optional[str] = None
+    localidad: Optional[str] = None
+    provincia: Optional[str] = "La Pampa"
     notas: Optional[str] = None
 
 
@@ -97,6 +101,8 @@ class ContratoBase(BaseModel):
     estado: Optional[str] = "borrador"
     propiedad_id: int
     inquilino_id: Optional[int] = None
+    fiador_id: Optional[int] = None
+    fiador2_id: Optional[int] = None
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
     monto_inicial: Optional[float] = 0
@@ -105,6 +111,13 @@ class ContratoBase(BaseModel):
     periodicidad_meses: Optional[int] = 3
     porcentaje_fijo: Optional[float] = 0
     comision_porc: Optional[float] = 0
+    pagare_refuerzo: Optional[float] = 0
+    inventario: Optional[str] = None
+    seguro_obligatorio: Optional[bool] = True
+    permite_mascotas: Optional[bool] = False
+    punicion_diaria_porc: Optional[float] = 1.0
+    dia_pago_desde: Optional[int] = 1
+    dia_pago_hasta: Optional[int] = 7
     notas: Optional[str] = None
 
 

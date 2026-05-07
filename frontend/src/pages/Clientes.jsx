@@ -3,15 +3,21 @@ import { Plus, Users, Pencil, Trash2, X, Phone, Mail } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import api from '../utils/api'
 
-const ROLES = ['propietario','inquilino','comprador','vendedor']
+const ROLES = ['propietario','inquilino','comprador','vendedor','garante']
 const ROL_CHIP = {
   propietario: 'chip-dark',
   inquilino:   'chip-gray',
   comprador:   'chip-success',
   vendedor:    'chip-warn',
+  garante:     'chip-muted',
 }
 
-const empty = { nombre:'', apellido:'', razon_social:'', documento:'', email:'', telefono:'', rol:'inquilino', notas:'' }
+const empty = {
+  nombre:'', apellido:'', razon_social:'', documento:'', email:'', telefono:'',
+  rol:'inquilino', nacionalidad:'Argentino',
+  direccion:'', localidad:'Santa Rosa', provincia:'La Pampa',
+  notas:'',
+}
 
 export default function Clientes() {
   const [list, setList] = useState([])
@@ -200,14 +206,39 @@ function Modal({ initial, onClose, onSaved }) {
               </select>
             </div>
           </div>
-          <div>
-            <label className="label">Email</label>
-            <input className="input" type="email" value={form.email || ''} onChange={set('email')} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Email</label>
+              <input className="input" type="email" value={form.email || ''} onChange={set('email')} />
+            </div>
+            <div>
+              <label className="label">Teléfono / WhatsApp</label>
+              <input className="input" placeholder="+54 9 2954 ..." value={form.telefono || ''} onChange={set('telefono')} />
+            </div>
           </div>
-          <div>
-            <label className="label">Teléfono / WhatsApp</label>
-            <input className="input" placeholder="+54 9 11 ..." value={form.telefono || ''} onChange={set('telefono')} />
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Nacionalidad</label>
+              <input className="input" placeholder="Argentino/a" value={form.nacionalidad || ''} onChange={set('nacionalidad')} />
+            </div>
+            <div>
+              <label className="label">Provincia</label>
+              <input className="input" placeholder="La Pampa" value={form.provincia || ''} onChange={set('provincia')} />
+            </div>
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Domicilio</label>
+              <input className="input" placeholder="Belgrano 1255" value={form.direccion || ''} onChange={set('direccion')} />
+            </div>
+            <div>
+              <label className="label">Localidad</label>
+              <input className="input" placeholder="Santa Rosa" value={form.localidad || ''} onChange={set('localidad')} />
+            </div>
+          </div>
+
           <div>
             <label className="label">Notas</label>
             <textarea className="input resize-none" rows={2} value={form.notas || ''} onChange={set('notas')} />

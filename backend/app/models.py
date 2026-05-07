@@ -41,6 +41,7 @@ class ClienteRol(str, Enum):
     inquilino = "inquilino"
     comprador = "comprador"
     vendedor = "vendedor"
+    garante = "garante"
 
 
 class ContratoTipo(str, Enum):
@@ -97,8 +98,8 @@ class Propiedad(Base):
     id = Column(Integer, primary_key=True)
     codigo = Column(String, unique=True, index=True)
     direccion = Column(String, nullable=False, index=True)
-    ciudad = Column(String)
-    provincia = Column(String)
+    ciudad = Column(String, default="Santa Rosa")
+    provincia = Column(String, default="La Pampa")
     tipo = Column(SQLEnum(PropiedadTipo), nullable=False)
     modalidad = Column(SQLEnum(PropiedadModalidad), default=PropiedadModalidad.alquiler)
     estado = Column(SQLEnum(PropiedadEstado), default=PropiedadEstado.disponible)
@@ -132,6 +133,10 @@ class Cliente(Base):
     email = Column(String, index=True)
     telefono = Column(String)
     rol = Column(SQLEnum(ClienteRol), default=ClienteRol.inquilino)
+    nacionalidad = Column(String, default="Argentino")
+    direccion = Column(String)
+    localidad = Column(String)
+    provincia = Column(String, default="La Pampa")
     notas = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -148,6 +153,12 @@ class Contrato(Base):
     inquilino_id = Column(Integer, ForeignKey("clientes.id"))
     inquilino = relationship("Cliente", foreign_keys=[inquilino_id])
 
+    # Garantes (hasta dos fiadores solidarios)
+    fiador_id = Column(Integer, ForeignKey("clientes.id"))
+    fiador = relationship("Cliente", foreign_keys=[fiador_id])
+    fiador2_id = Column(Integer, ForeignKey("clientes.id"))
+    fiador2 = relationship("Cliente", foreign_keys=[fiador2_id])
+
     fecha_inicio = Column(Date)
     fecha_fin = Column(Date)
     monto_inicial = Column(Float, default=0)
@@ -160,6 +171,15 @@ class Contrato(Base):
 
     # Comisión
     comision_porc = Column(Float, default=0)
+
+    # Cláusulas operativas (modelo CIUDAD Santa Rosa)
+    pagare_refuerzo = Column(Float, default=0)
+    inventario = Column(Text)
+    seguro_obligatorio = Column(Boolean, default=True)
+    permite_mascotas = Column(Boolean, default=False)
+    punicion_diaria_porc = Column(Float, default=1.0)
+    dia_pago_desde = Column(Integer, default=1)
+    dia_pago_hasta = Column(Integer, default=7)
 
     notas = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)

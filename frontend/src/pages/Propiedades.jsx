@@ -22,7 +22,7 @@ const MODALIDAD_CHIP = {
 }
 
 const empty = {
-  codigo:'', direccion:'', ciudad:'', provincia:'', tipo:'departamento',
+  codigo:'', direccion:'', ciudad:'Santa Rosa', provincia:'La Pampa', tipo:'departamento',
   modalidad:'alquiler', estado:'disponible', superficie_m2:'', ambientes:'',
   descripcion:'', precio_alquiler:'', precio_venta:'', expensas:'',
   impuesto_inmobiliario:'', tasa_municipal:'', tokko_id:'', propietario_id:'',
