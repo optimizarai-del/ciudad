@@ -34,12 +34,12 @@ async def _fetch_remoto() -> dict:
     }
 
     async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
-        # IPC mensual nivel general (INDEC vía datos.gob.ar)
+        # IPC mensual nivel general nacional (INDEC vía datos.gob.ar)
         try:
             r = await client.get(
                 "https://apis.datos.gob.ar/series/api/series/",
                 params={
-                    "ids": "148.3_INIVELG_DICI_M_26",
+                    "ids": "148.3_INIVELNAL_DICI_M_26",
                     "limit": 6,
                     "sort": "desc",
                     "format": "json",
@@ -58,22 +58,23 @@ async def _fetch_remoto() -> dict:
         except Exception:
             pass
 
-        # ICL — variación mensual de la variable 40 BCRA
+        # ICL — variación mensual variable 40 BCRA (API v4, datos en orden desc)
         try:
             r = await client.get(
-                f"https://api.bcra.gob.ar/estadisticas/v2.0/DatosVariable/40/{desde}/{hasta}",
+                "https://api.bcra.gob.ar/estadisticas/v4.0/Monetarias/40",
+                params={"desde": desde, "hasta": hasta},
                 headers={"Accept": "application/json"},
             )
             data = r.json()
-            rows = data.get("results", [])
+            res = data.get("results") or []
+            rows = (res[0].get("detalle") if res else []) or []
             if rows and len(rows) >= 2:
-                ultimo = float(rows[-1].get("v", rows[-1].get("valor", 0)))
-                # Buscar el valor ~30 días antes
-                idx_anterior = max(0, len(rows) - 31)
-                anterior = float(rows[idx_anterior].get("v", rows[idx_anterior].get("valor", 0)))
+                ultimo = float(rows[0].get("valor", 0))
+                hace_30 = rows[30] if len(rows) > 30 else rows[-1]
+                anterior = float(hace_30.get("valor", 0))
                 if anterior:
                     resultado["icl_mensual"] = round(ultimo / anterior - 1, 6)
-                    resultado["icl_fecha"] = rows[-1].get("d", rows[-1].get("fecha", ""))
+                    resultado["icl_fecha"] = rows[0].get("fecha", "")
                     resultado["icl_fuente"] = "BCRA"
                     resultado["icl_ok"] = True
         except Exception:
