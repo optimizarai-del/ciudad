@@ -218,8 +218,12 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
   const set = k => e => setForm({ ...form, [k]: e.target.value })
   const total = ['monto_alquiler','monto_expensas','monto_tasas_municipales','monto_otros']
     .reduce((s, k) => s + (Number(form[k]) || 0), 0)
-  const comision = (item.comision_porc || 0) * total / 100
-  const neto = total - comision
+  // La comisión se calcula sólo sobre el alquiler. Los gastos pasantes
+  // (expensas, tasas, otros) se cobran al inquilino y se derivan a quien
+  // corresponda — no integran el neto al propietario.
+  const alquiler = Number(form.monto_alquiler) || 0
+  const comision = (item.comision_porc || 0) * alquiler / 100
+  const neto = alquiler - comision
 
   const submit = async (e) => {
     e.preventDefault()
@@ -299,8 +303,9 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
 
           {/* Resumen */}
           <div className="rounded-2xl bg-[#F5F5F5] dark:bg-[#1A1A1A] p-4 space-y-1.5 text-[13px]">
-            <div className="flex justify-between"><span className="text-muted">Total a cobrar</span><span className="font-semibold">{fmtMoney(total)}</span></div>
-            <div className="flex justify-between"><span className="text-muted">Comisión inmobiliaria ({item.comision_porc || 0}%)</span><span>− {fmtMoney(comision)}</span></div>
+            <div className="flex justify-between"><span className="text-muted">Total cobrado al inquilino</span><span className="font-semibold">{fmtMoney(total)}</span></div>
+            <div className="flex justify-between"><span className="text-muted">Alquiler base</span><span>{fmtMoney(alquiler)}</span></div>
+            <div className="flex justify-between"><span className="text-muted">Comisión ({item.comision_porc || 0}% s/ alquiler)</span><span>− {fmtMoney(comision)}</span></div>
             <div className="border-t border-border pt-1.5 flex justify-between font-semibold"><span>Neto al propietario</span><span className="text-[#B8893A]">{fmtMoney(neto)}</span></div>
           </div>
 

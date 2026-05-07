@@ -146,6 +146,13 @@ def generar_pdf_comprobante_inquilino(ctx: dict) -> bytes:
 
 def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
     """
+    Estructura económica:
+        El inquilino paga Alquiler + Expensas + Tasas + Otros (= total cobrado).
+        La comisión inmobiliaria se calcula SOLO sobre el alquiler (no sobre los
+        gastos pasantes). El propietario percibe Alquiler − Comisión.
+        Expensas, tasas y otros se muestran como pasantes (cobrados al inquilino,
+        derivados a quien corresponda); no integran el neto al propietario.
+
     ctx = {
         "numero": "LIQ-2026-05-001",
         "fecha_pago": date,
@@ -154,11 +161,13 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
         "propietario": {"nombre_completo","documento","email","telefono"},
         "inquilino": {"nombre_completo"},
         "contrato": {"id","codigo"},
-        "monto_cobrado": float,
+        "items_cobrados": [(label, monto), ...],     # todo lo cobrado al inquilino
+        "monto_alquiler": float,                      # base para la comisión
         "comision_porc": float,
-        "monto_comision": float,
-        "monto_neto": float,
-        "items_descuento": [(label, monto), ...],   # comisión + otros descuentos
+        "monto_comision": float,                      # = alquiler * comision_porc/100
+        "monto_neto": float,                          # = alquiler - comision
+        "monto_cobrado_total": float,                 # informativo
+        "items_pasantes": [(label, monto), ...],     # expensas/tasas/otros (informativo)
     }
     """
     numero = ctx.get("numero") or "LIQUIDACION"
@@ -188,35 +197,61 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
         ("Fecha de cobro", _fecha(ctx.get("fecha_pago"))),
     ])]
 
+    alquiler = float(ctx.get("monto_alquiler") or 0)
+    comision_pct = float(ctx.get("comision_porc") or 0)
+    comision = float(ctx.get("monto_comision") or round(alquiler * comision_pct / 100.0, 2))
+    neto = float(ctx.get("monto_neto") or round(alquiler - comision, 2))
+    cobrado_total = float(ctx.get("monto_cobrado_total") or 0)
+
+    items_cobrados = ctx.get("items_cobrados") or []
+    items_pasantes = ctx.get("items_pasantes") or []
+
+    # 1) Detalle de lo cobrado al inquilino (informativo, todos los conceptos)
     story += [
         Spacer(1, 8 * mm),
-        Paragraph("DETALLE DE LA LIQUIDACIÓN", sty["CiudadSection"]),
-    ]
-
-    cobrado = float(ctx.get("monto_cobrado") or 0)
-    comision_pct = float(ctx.get("comision_porc") or 0)
-    comision = float(ctx.get("monto_comision") or 0)
-    neto = float(ctx.get("monto_neto") or 0)
-
-    items = [
-        ("Monto total cobrado al inquilino", cobrado),
-        (f"Comisión inmobiliaria ({comision_pct}%)", -comision),
-    ]
-    for label, monto in (ctx.get("items_descuento") or []):
-        items.append((label, -float(monto or 0)))
-
-    story += [
+        Paragraph("DETALLE COBRADO AL INQUILINO", sty["CiudadSection"]),
         _tabla_montos(
-            items,
+            items_cobrados,
+            total_label="TOTAL COBRADO AL INQUILINO",
+            total_value=cobrado_total or sum(v for _, v in items_cobrados),
+            acento_total=COLOR_NOCHE,
+        ),
+        Spacer(1, 8 * mm),
+    ]
+
+    # 2) Liquidación: comisión sobre el alquiler. Pasantes informativos abajo.
+    liq_items = [
+        ("Alquiler base del período", alquiler),
+        (f"Comisión inmobiliaria ({comision_pct}% sobre alquiler)", -comision),
+    ]
+    story += [
+        Paragraph("LIQUIDACIÓN AL PROPIETARIO", sty["CiudadSection"]),
+        _tabla_montos(
+            liq_items,
             total_label="NETO A LIQUIDAR AL PROPIETARIO",
             total_value=neto,
             acento_total=COLOR_COBRE,
         ),
+    ]
+
+    if items_pasantes:
+        story += [
+            Spacer(1, 6 * mm),
+            Paragraph(
+                "Conceptos pasantes (cobrados al inquilino y derivados a quien corresponda — "
+                "no integran el neto al propietario):",
+                sty["CiudadClause"],
+            ),
+            _tabla_kv([(lbl, _money(monto)) for lbl, monto in items_pasantes]),
+        ]
+
+    story += [
         Spacer(1, 10 * mm),
         Paragraph(
-            f"Por la presente se le informa la liquidación correspondiente al período "
-            f"{ctx.get('periodo','—')}. El monto neto será depositado/transferido conforme "
-            f"a los datos bancarios oportunamente provistos.",
+            f"Por la presente se informa la liquidación correspondiente al período "
+            f"{ctx.get('periodo','—')}. El neto a liquidar será depositado/transferido "
+            f"conforme a los datos bancarios oportunamente provistos. La comisión "
+            f"inmobiliaria se aplica únicamente sobre el alquiler.",
             sty["CiudadClause"],
         ),
         Spacer(1, 14 * mm),

@@ -272,10 +272,15 @@ def registrar_pago(
     pago.notas = data.notas
     db.flush()
 
-    # Comisión inmobiliaria
+    # Comisión inmobiliaria: se calcula SOLO sobre el alquiler, no sobre los
+    # gastos pasantes (expensas, tasas, otros). El propietario percibe
+    # alquiler − comisión; las demás partidas las cobra el inquilino y se
+    # derivan a quien corresponda (consorcio, municipio, etc).
+    monto_alquiler = float(data.monto_alquiler or 0)
     comision_pct = float(contrato.comision_porc or 0)
-    comision = round(monto_total * comision_pct / 100.0, 2)
-    neto = round(monto_total - comision, 2)
+    comision = round(monto_alquiler * comision_pct / 100.0, 2)
+    neto = round(monto_alquiler - comision, 2)
+    items_pasantes = [(l, v) for l, v in items_no_cero if l != "Alquiler"]
 
     nombre_inq = _nombre_cliente(inquilino) or "Inquilino/a"
     nombre_pro = _nombre_cliente(propietario) or "Propietario/a"
@@ -303,7 +308,8 @@ def registrar_pago(
         "total": monto_total,
     })
 
-    # PDF propietario
+    # PDF propietario — incluye desglose de lo cobrado al inquilino y la
+    # liquidación calculada sobre el alquiler.
     pdf_pro = generar_pdf_comprobante_propietario({
         "numero": f"LIQ-{periodo}-{contrato.id:04d}",
         "fecha_pago": fecha_pago,
@@ -317,7 +323,10 @@ def registrar_pago(
             "telefono": propietario.telefono if propietario else None,
         },
         "inquilino": {"nombre_completo": nombre_inq},
-        "monto_cobrado": monto_total,
+        "items_cobrados": items_no_cero or [("Pago del período", monto_total)],
+        "items_pasantes": items_pasantes,
+        "monto_alquiler": monto_alquiler,
+        "monto_cobrado_total": monto_total,
         "comision_porc": comision_pct,
         "monto_comision": comision,
         "monto_neto": neto,
@@ -335,8 +344,9 @@ def registrar_pago(
         f"Hola {nombre_pro},\n\n"
         f"Te enviamos la liquidación del período {periodo} correspondiente a "
         f"{prop_ctx['direccion']}.\n\n"
-        f"Cobrado: $ {monto_total:,.2f}\n"
-        f"Comisión ({comision_pct}%): $ {comision:,.2f}\n"
+        f"Total cobrado al inquilino: $ {monto_total:,.2f}\n"
+        f"Alquiler base: $ {monto_alquiler:,.2f}\n"
+        f"Comisión ({comision_pct}% sobre alquiler): $ {comision:,.2f}\n"
         f"Neto a transferir: $ {neto:,.2f}\n\n"
         f"CIUDAD."
     )
