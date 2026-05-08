@@ -377,6 +377,38 @@ def crear_evento(
     return {"ok": True, "id": ev.id, "titulo": ev.titulo, "tipo": ev.tipo.value if hasattr(ev.tipo,"value") else ev.tipo}
 
 
+# ────────────────────────────────────────────────────────────────────
+# Tools de la red Tokko (análisis de mercado)
+# ────────────────────────────────────────────────────────────────────
+
+def tokko_buscar_red(db: Session, operacion: str = "venta", tipo: Optional[str] = None,
+                     ciudad: Optional[str] = None, dormitorios_min: Optional[int] = None,
+                     precio_min: Optional[float] = None, precio_max: Optional[float] = None,
+                     moneda: str = "USD", limit: int = 20) -> dict:
+    from app.services.tokko_market import tokko_buscar_red as _fn
+    return _fn(operacion=operacion, tipo=tipo, ciudad=ciudad,
+               dormitorios_min=dormitorios_min, precio_min=precio_min,
+               precio_max=precio_max, moneda=moneda, limit=limit)
+
+
+def tokko_ficha(db: Session, tokko_id: str) -> dict:
+    from app.services.tokko_market import tokko_ficha as _fn
+    return _fn(tokko_id)
+
+
+def tokko_estadisticas_zona(db: Session, operacion: str = "venta", tipo: Optional[str] = None,
+                            ciudad: Optional[str] = None, moneda: str = "USD",
+                            sample: int = 50) -> dict:
+    from app.services.tokko_market import tokko_estadisticas_zona as _fn
+    return _fn(operacion=operacion, tipo=tipo, ciudad=ciudad, moneda=moneda, sample=sample)
+
+
+def tokko_comparables(db: Session, propiedad_id: int, operacion: str = "venta",
+                      tolerancia_m2: int = 30) -> dict:
+    from app.services.tokko_market import tokko_comparables as _fn
+    return _fn(db, propiedad_id, operacion=operacion, tolerancia_m2=tolerancia_m2)
+
+
 # Mapa nombre → fn para el dispatcher del agente
 TOOLS = {
     "buscar_propiedad": buscar_propiedad,
@@ -390,4 +422,9 @@ TOOLS = {
     "cambiar_estado_propiedad": cambiar_estado_propiedad,
     "calcular_alquiler": calcular_alquiler,
     "crear_evento": crear_evento,
+    # Red Tokko (análisis de mercado)
+    "tokko_buscar_red": tokko_buscar_red,
+    "tokko_ficha": tokko_ficha,
+    "tokko_estadisticas_zona": tokko_estadisticas_zona,
+    "tokko_comparables": tokko_comparables,
 }

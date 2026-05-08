@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { Plus, Building2, Trash2, Pencil, X, MapPin, Home, RefreshCw, Image as ImageIcon } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import SearchBar, { match } from '../components/SearchBar'
-import TokkoSync from '../components/TokkoSync'
 import AdjuntosModal from '../components/AdjuntosModal'
 import api from '../utils/api'
 
@@ -38,12 +37,15 @@ export default function Propiedades() {
   const [filtroTipo, setFiltroTipo] = useState('todos')
   const [filtroModalidad, setFiltroModalidad] = useState('todos')
   const [clientes, setClientes] = useState([])
-  const [tokkoOpen, setTokkoOpen] = useState(false)
   const [busqueda, setBusqueda] = useState('')
   const [adjPropiedad, setAdjPropiedad] = useState(null)
 
   const load = () => {
-    api.get('/api/propiedades').then(r => setList(r.data))
+    // Tokko = ventas. En el área de alquileres ocultamos las que tienen tokko_id;
+    // se ven en Ventas → Portal Tokko / Ventas → Propiedades.
+    api.get('/api/propiedades').then(r =>
+      setList((r.data || []).filter(p => !p.tokko_id))
+    )
     api.get('/api/clientes').then(r => setClientes(r.data))
   }
 
@@ -75,14 +77,9 @@ export default function Propiedades() {
               <h1 className="hero-title text-5xl md:text-6xl mb-3">Propiedades.</h1>
               <p className="hero-sub">Todas las unidades en un solo lugar.</p>
             </div>
-            <div className="flex gap-2">
-              <button className="btn-secondary" onClick={() => setTokkoOpen(true)}>
-                <RefreshCw size={14} /> Sync Tokko
-              </button>
-              <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
-                <Plus size={14} /> Nueva propiedad
-              </button>
-            </div>
+            <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
+              <Plus size={14} /> Nueva propiedad
+            </button>
           </div>
         </header>
 
@@ -196,13 +193,6 @@ export default function Propiedades() {
           clientes={clientes}
           onClose={() => setOpen(false)}
           onSaved={() => { setOpen(false); load() }}
-        />
-      )}
-
-      {tokkoOpen && (
-        <TokkoSync
-          onClose={() => setTokkoOpen(false)}
-          onSynced={() => load()}
         />
       )}
 

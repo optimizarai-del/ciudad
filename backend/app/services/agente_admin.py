@@ -45,10 +45,16 @@ ROLE_TOOLS = {
     "ventas": {
         "buscar_propiedad", "info_propiedad", "info_contrato",
         "resumen_dashboard", "calcular_alquiler", "crear_evento",
+        # Tokko = corazón del área de Ventas
+        "tokko_buscar_red", "tokko_ficha", "tokko_estadisticas_zona",
+        "tokko_comparables",
     },
     "agente_ia": {
         "buscar_propiedad", "info_propiedad", "info_contrato",
         "resumen_dashboard", "calcular_alquiler",
+        # El agente puede consultar la red Tokko para responder a leads
+        "tokko_buscar_red", "tokko_ficha", "tokko_estadisticas_zona",
+        "tokko_comparables",
     },
 }
 
@@ -249,6 +255,73 @@ TOOL_SCHEMAS = [
                 "es_critico": {"type": "boolean"},
             },
             "required": ["titulo"],
+        },
+    },
+    # ── Tokko: análisis de mercado ───────────────────────────────────────
+    {
+        "name": "tokko_buscar_red",
+        "description": (
+            "Busca propiedades en la red de Tokko Broker con filtros. "
+            "Permite ver propiedades que ofrecen otras inmobiliarias afiliadas "
+            "(no solo las de tu cuenta). Útil para encontrar comparables, "
+            "ver oferta disponible en una zona o calcular precios de mercado."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "operacion": {"type": "string", "enum": ["venta", "alquiler", "alquiler_temporal"], "default": "venta"},
+                "tipo": {"type": "string", "description": "Casa, Departamento, Local, Terreno, Campo, etc."},
+                "ciudad": {"type": "string", "description": "Filtra por nombre de ciudad/zona (substring)"},
+                "dormitorios_min": {"type": "integer"},
+                "precio_min": {"type": "number"},
+                "precio_max": {"type": "number"},
+                "moneda": {"type": "string", "enum": ["USD", "ARS"], "default": "USD"},
+                "limit": {"type": "integer", "default": 20, "maximum": 50},
+            },
+        },
+    },
+    {
+        "name": "tokko_ficha",
+        "description": "Devuelve la ficha completa de una propiedad de la red Tokko por su id Tokko.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"tokko_id": {"type": "string"}},
+            "required": ["tokko_id"],
+        },
+    },
+    {
+        "name": "tokko_estadisticas_zona",
+        "description": (
+            "Estadísticas de mercado de Tokko: precio promedio/mediana/min/max y "
+            "precio por m² para una combinación operación+tipo+ciudad. Útil para "
+            "valuar una propiedad o hacer un análisis de mercado para un cliente."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "operacion": {"type": "string", "enum": ["venta", "alquiler"], "default": "venta"},
+                "tipo": {"type": "string"},
+                "ciudad": {"type": "string"},
+                "moneda": {"type": "string", "enum": ["USD", "ARS"], "default": "USD"},
+                "sample": {"type": "integer", "default": 50, "maximum": 50},
+            },
+        },
+    },
+    {
+        "name": "tokko_comparables",
+        "description": (
+            "Dada una propiedad local de CIUDAD por id, busca comparables en la "
+            "red Tokko (mismo tipo, ciudad, ±tolerancia de m²) y devuelve "
+            "estadísticas de precios para sugerir valuación competitiva."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "propiedad_id": {"type": "integer"},
+                "operacion": {"type": "string", "enum": ["venta", "alquiler"], "default": "venta"},
+                "tolerancia_m2": {"type": "integer", "default": 30},
+            },
+            "required": ["propiedad_id"],
         },
     },
 ]

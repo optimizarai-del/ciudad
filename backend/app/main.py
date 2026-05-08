@@ -49,6 +49,41 @@ def health():
 # las tablas (el seed inicial las consulta, así que debe ir al final).
 
 @app.on_event("startup")
+def _migrar_tokko_a_venta():
+    """
+    Las propiedades importadas desde Tokko se cargaron antes con
+    modalidad=alquiler y el precio en precio_alquiler. Tokko es solo venta —
+    movemos el precio y forzamos la modalidad. Idempotente con marker en
+    ciudad_settings.
+    """
+    from sqlalchemy import text
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS ciudad_settings (
+                key VARCHAR PRIMARY KEY,
+                value VARCHAR
+            )
+        """))
+        ya = db.execute(text("SELECT value FROM ciudad_settings WHERE key='tokko_es_venta'")).first()
+        if not ya:
+            db.execute(text("""
+                UPDATE propiedades
+                SET modalidad='venta',
+                    precio_venta = COALESCE(precio_venta, 0) + COALESCE(precio_alquiler, 0),
+                    precio_alquiler = 0
+                WHERE tokko_id IS NOT NULL AND tokko_id != ''
+            """))
+            db.execute(text("INSERT INTO ciudad_settings (key, value) VALUES ('tokko_es_venta', '1')"))
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _migrar_schema():
     """Migraciones livianas de columnas/datos. Idempotentes."""
     from sqlalchemy import text, inspect
