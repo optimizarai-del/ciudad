@@ -32,6 +32,9 @@ class ChatRequest(BaseModel):
     mensaje: str
     canal_id: str = "test_panel"
     canal: str = "web"
+    # Solo se usa en /admin/chat para simular permisos de un rol distinto.
+    role: Optional[str] = None
+    nombre: Optional[str] = None
 
 class LeadUpdate(BaseModel):
     estado: Optional[str] = None
@@ -55,20 +58,22 @@ async def telegram_webhook(request: Request, background: BackgroundTasks, db: Se
     if not text:
         return {"ok": True}
 
-    # Si el chat está en la whitelist de admins, ruteamos al agente administrativo.
-    # Los chats normales siguen yendo al flujo público de leads.
-    if agente_admin.es_admin(chat_id):
+    # ¿Chat autorizado como staff? Resolvemos rol (de User.telegram_chat_id
+    # o del fallback TELEGRAM_ADMIN_CHATS).
+    auth = agente_admin.autorizar(chat_id, db)
+    if auth:
         async def _process_admin():
             await telegram_service.send_typing(chat_id)
             try:
-                respuesta = await agente_admin.responder_admin_llm(text, db)
+                respuesta = await agente_admin.responder_admin_llm(
+                    text, db, role=auth["role"], nombre=auth["nombre"],
+                )
             except Exception as e:
                 respuesta = f"⚠ Error al procesar: {type(e).__name__}: {e}"
-            # Telegram permite hasta ~4096 chars por mensaje; partimos si hace falta.
             for parte in _split_telegram(respuesta):
                 await telegram_service.send_message(chat_id, parte)
         background.add_task(_process_admin)
-        return {"ok": True, "modo": "admin"}
+        return {"ok": True, "modo": "admin", "rol": auth["role"]}
 
     async def _process():
         await telegram_service.send_typing(chat_id)
@@ -171,23 +176,105 @@ async def chat_test(req: ChatRequest, db: Session = Depends(get_db)):
 @router.post("/admin/chat")
 async def chat_admin_test(req: ChatRequest, db: Session = Depends(get_db)):
     """
-    Probar el agente administrativo SIN pasar por Telegram. Útil para QA y para
-    el panel de configuración. NO chequea whitelist — está protegido por auth
-    a nivel del frontend.
+    Probar el agente admin SIN pasar por Telegram. Acepta opcionalmente un
+    `role` para simular permisos de un usuario distinto.
     """
-    respuesta = await agente_admin.responder_admin_llm(req.mensaje, db)
-    return {"respuesta": respuesta}
+    role = getattr(req, "role", None) or "admin"
+    nombre = getattr(req, "nombre", None) or "Test"
+    respuesta = await agente_admin.responder_admin_llm(req.mensaje, db, role=role, nombre=nombre)
+    return {"respuesta": respuesta, "rol": role}
 
 
 @router.get("/admin/status")
-def admin_status():
+def admin_status(db: Session = Depends(get_db)):
     raw = os.getenv("TELEGRAM_ADMIN_CHATS", "")
-    chats = [c.strip() for c in raw.split(",") if c.strip()]
+    chats_env = [c.strip() for c in raw.split(",") if c.strip()]
+    users_bind = (
+        db.query(models.User)
+        .filter(models.User.telegram_chat_id.isnot(None))
+        .filter(models.User.telegram_chat_id != "")
+        .all()
+    )
     return {
-        "telegram_admin_chats": chats,
+        "telegram_admin_chats_env": chats_env,
+        "users_bindings": [
+            {
+                "user_id": u.id, "nombre": u.nombre,
+                "role": u.role.value if hasattr(u.role, "value") else u.role,
+                "chat_id": u.telegram_chat_id,
+            }
+            for u in users_bind
+        ],
         "anthropic_configurado": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "telegram_token_configurado": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
         "tools_disponibles": list(TOOL_NAMES),
+        "permisos_por_rol": {
+            r: sorted(list(t)) for r, t in agente_admin.ROLE_TOOLS.items()
+        },
     }
+
+
+# ── Vinculación chat ↔ usuario ───────────────────────────────────────────────
+class BindChatRequest(BaseModel):
+    user_id: int
+    chat_id: Optional[str] = None  # None desvincula
+
+
+@router.post("/admin/bind-chat")
+def bind_chat(req: BindChatRequest, db: Session = Depends(get_db)):
+    """Vincula (o desvincula) un User.id con un chat_id de Telegram."""
+    user = db.query(models.User).filter_by(id=req.user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+    if req.chat_id:
+        # Liberar el chat_id si está asignado a otro
+        otro = db.query(models.User).filter(
+            models.User.telegram_chat_id == req.chat_id,
+            models.User.id != user.id,
+        ).first()
+        if otro:
+            otro.telegram_chat_id = None
+        user.telegram_chat_id = req.chat_id
+    else:
+        user.telegram_chat_id = None
+    db.commit()
+    return {"ok": True, "user_id": user.id, "chat_id": user.telegram_chat_id}
+
+
+# ── Setup del webhook de Telegram ───────────────────────────────────────────
+class WebhookSetupRequest(BaseModel):
+    public_url: str   # ej: https://api.miciudad.com  (sin /api/agente/webhook/telegram)
+
+
+@router.post("/telegram/setup-webhook")
+async def setup_webhook(req: WebhookSetupRequest):
+    """
+    Registra el webhook contra la API de Telegram. Necesita TELEGRAM_BOT_TOKEN
+    en el .env. Devuelve la respuesta cruda de Telegram para diagnóstico.
+    """
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise HTTPException(400, "TELEGRAM_BOT_TOKEN no configurado en .env")
+    import httpx
+    target = req.public_url.rstrip("/") + "/api/agente/webhook/telegram"
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.post(
+            f"https://api.telegram.org/bot{token}/setWebhook",
+            json={"url": target, "allowed_updates": ["message", "edited_message"]},
+        )
+        info = await c.get(f"https://api.telegram.org/bot{token}/getWebhookInfo")
+    return {"setWebhook": r.json(), "info": info.json(), "url": target}
+
+
+@router.get("/telegram/webhook-info")
+async def webhook_info():
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise HTTPException(400, "TELEGRAM_BOT_TOKEN no configurado en .env")
+    import httpx
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.get(f"https://api.telegram.org/bot{token}/getWebhookInfo")
+    return r.json()
 
 
 # ── Leads ─────────────────────────────────────────────────────────────────────

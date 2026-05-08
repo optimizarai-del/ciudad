@@ -27,13 +27,64 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app import models
 from app.services.admin_actions import TOOLS
 
 
-def es_admin(chat_id: str) -> bool:
+# Permisos por rol — qué tools puede invocar cada uno desde Telegram.
+ROLE_TOOLS = {
+    "admin":      set(TOOLS.keys()),
+    "gerencia":   set(TOOLS.keys()),
+    "alquileres": {
+        "buscar_propiedad", "info_propiedad", "info_contrato",
+        "listar_pendientes_cobro", "resumen_dashboard",
+        "actualizar_tasas_municipales", "actualizar_alquileres",
+        "actualizar_expensas", "cambiar_estado_propiedad",
+        "calcular_alquiler", "crear_evento",
+    },
+    "ventas": {
+        "buscar_propiedad", "info_propiedad", "info_contrato",
+        "resumen_dashboard", "calcular_alquiler", "crear_evento",
+    },
+    "agente_ia": {
+        "buscar_propiedad", "info_propiedad", "info_contrato",
+        "resumen_dashboard", "calcular_alquiler",
+    },
+}
+
+
+def autorizar(chat_id: str, db: Session) -> Optional[dict]:
+    """
+    Devuelve {role, user_id, nombre} si el chat está autorizado, None si no.
+
+    Orden:
+      1. User.telegram_chat_id == chat_id en BD → rol del usuario.
+      2. chat_id en TELEGRAM_ADMIN_CHATS → rol "admin" (dev / fallback).
+    """
+    chat_id = str(chat_id)
+    u = db.query(models.User).filter_by(telegram_chat_id=chat_id, is_active=True).first()
+    if u:
+        return {
+            "role": u.role.value if hasattr(u.role, "value") else u.role,
+            "user_id": u.id,
+            "nombre": u.nombre,
+        }
     raw = os.getenv("TELEGRAM_ADMIN_CHATS", "")
-    ids = {s.strip() for s in raw.split(",") if s.strip()}
-    return str(chat_id) in ids
+    if chat_id in {s.strip() for s in raw.split(",") if s.strip()}:
+        return {"role": "admin", "user_id": None, "nombre": "Admin (env)"}
+    return None
+
+
+def es_admin(chat_id: str, db: Optional[Session] = None) -> bool:
+    """Compat: True si el chat está autorizado con cualquier rol."""
+    if db is not None:
+        return autorizar(chat_id, db) is not None
+    raw = os.getenv("TELEGRAM_ADMIN_CHATS", "")
+    return str(chat_id) in {s.strip() for s in raw.split(",") if s.strip()}
+
+
+def tools_permitidos(role: str) -> set[str]:
+    return ROLE_TOOLS.get(role, set())
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -164,13 +215,49 @@ TOOL_SCHEMAS = [
             "required": ["identificador", "nuevo_estado"],
         },
     },
+    {
+        "name": "calcular_alquiler",
+        "description": (
+            "Calcula el alquiler actualizado de una propiedad a una fecha dada. "
+            "Aplica el ajuste del contrato vigente con índices reales (IPC/ICL) "
+            "y suma expensas + tasas municipales."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "identificador": {"type": "string", "description": "id, código o dirección"},
+                "fecha": {"type": "string", "description": "YYYY-MM-DD (opcional, default hoy)"},
+            },
+            "required": ["identificador"],
+        },
+    },
+    {
+        "name": "crear_evento",
+        "description": (
+            "Crea un evento/nota en el activity log de Ciudad (recordatorio, "
+            "vencimiento, observación). Útil para que el staff registre algo "
+            "desde Telegram."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "titulo": {"type": "string"},
+                "descripcion": {"type": "string"},
+                "tipo": {"type": "string", "enum": ["alta", "pago", "ajuste", "vencimiento", "nota", "consulta_ia"]},
+                "propiedad_id": {"type": "integer"},
+                "contrato_id": {"type": "integer"},
+                "es_critico": {"type": "boolean"},
+            },
+            "required": ["titulo"],
+        },
+    },
 ]
 
 
-SYSTEM_PROMPT = """Sos el agente administrativo de CIUDAD., una plataforma inmobiliaria.
+SYSTEM_PROMPT_BASE = """Sos el agente administrativo de CIUDAD — Negocios Inmobiliarios.
 
 Hablás con personal del staff por Telegram. Te dan instrucciones en lenguaje natural
-para consultar la base o hacer modificaciones masivas. Tu trabajo es:
+para consultar la base o hacer modificaciones. Tu trabajo es:
 
 1. Entender la intención.
 2. Llamar a una o más herramientas para resolverla.
@@ -184,6 +271,8 @@ Reglas:
 - Las "tasas municipales" agrupan ABL + alumbrado + inmobiliario en un solo monto.
 - Después de actualizar, indicá cuántas se actualizaron, cuántas fallaron y por qué.
 - No inventes propiedades. Si no aparecen en los resultados, decilo.
+- Si el usuario pide algo fuera de tus permisos, explicale brevemente que no podés
+  ejecutarlo y sugerí qué sí podés hacer.
 """
 
 
@@ -191,16 +280,29 @@ Reglas:
 # Loop tool-calling con Claude
 # ────────────────────────────────────────────────────────────────────
 
-async def responder_admin_llm(texto: str, db: Session) -> str:
-    """Devuelve un texto plano listo para enviar por Telegram."""
+async def responder_admin_llm(texto: str, db: Session, role: str = "admin", nombre: str = "") -> str:
+    """
+    Devuelve un texto plano listo para enviar por Telegram.
+    `role` filtra qué tools puede invocar el modelo.
+    """
+    permitidos = tools_permitidos(role)
+    if not permitidos:
+        return f"⚠ Tu rol ({role}) no tiene tools habilitadas en el agente admin."
+
+    schemas = [t for t in TOOL_SCHEMAS if t["name"] in permitidos]
+    system = SYSTEM_PROMPT_BASE + (
+        f"\n\nUsuario: {nombre or 'Staff'} (rol: {role}). "
+        f"Tools habilitadas: {', '.join(sorted(permitidos))}."
+    )
+
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        return _responder_comandos(texto, db)
+        return _responder_comandos(texto, db, permitidos)
 
     try:
         from anthropic import Anthropic
     except ImportError:
-        return _responder_comandos(texto, db)
+        return _responder_comandos(texto, db, permitidos)
 
     client = Anthropic(api_key=api_key)
     messages = [{"role": "user", "content": texto}]
@@ -209,33 +311,29 @@ async def responder_admin_llm(texto: str, db: Session) -> str:
         resp = client.messages.create(
             model=os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
             max_tokens=1500,
-            system=SYSTEM_PROMPT,
-            tools=TOOL_SCHEMAS,
+            system=system,
+            tools=schemas,
             messages=messages,
         )
 
         if resp.stop_reason == "tool_use":
-            # Recoger todas las llamadas a tool del turno
             messages.append({"role": "assistant", "content": resp.content})
             tool_results = []
             for block in resp.content:
                 if block.type != "tool_use":
                     continue
-                fn = TOOLS.get(block.name)
-                if not fn:
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": json.dumps({"ok": False, "error": f"tool desconocida: {block.name}"}),
-                        "is_error": True,
-                    })
-                    continue
-                try:
-                    out = fn(db=db, **(block.input or {}))
-                except TypeError:
-                    out = fn(db, **(block.input or {}))
-                except Exception as e:
-                    out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+                # Doble protección: aunque sólo le mandamos los schemas
+                # permitidos, validamos también acá.
+                if block.name not in permitidos:
+                    out = {"ok": False, "error": f"acción no permitida para tu rol ({role})"}
+                else:
+                    fn = TOOLS.get(block.name)
+                    try:
+                        out = fn(db=db, **(block.input or {})) if fn else {"ok": False, "error": "tool desconocida"}
+                    except TypeError:
+                        out = fn(db, **(block.input or {})) if fn else {"ok": False, "error": "tool desconocida"}
+                    except Exception as e:
+                        out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -244,7 +342,6 @@ async def responder_admin_llm(texto: str, db: Session) -> str:
             messages.append({"role": "user", "content": tool_results})
             continue
 
-        # final
         textos = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
         return "\n".join(textos).strip() or "Listo."
 
@@ -256,17 +353,21 @@ async def responder_admin_llm(texto: str, db: Session) -> str:
 # ────────────────────────────────────────────────────────────────────
 
 _HELP = (
-    "Comandos disponibles:\n"
-    "/resumen — vista general\n"
-    "/buscar <texto> — busca propiedades\n"
-    "/info <id_o_dir> — ficha de una propiedad\n"
-    "/contrato <id_o_codigo> — info de contrato\n"
-    "/pendientes [YYYY-MM] — pendientes de cobro del mes\n"
-    "/actualizar_tasas <ref1>=<monto>; <ref2>=<monto>; ...\n"
-    "/actualizar_alquileres <ref1>=<monto>; <ref2>=<monto>; ...\n"
-    "/actualizar_expensas <ref1>=<monto>; <ref2>=<monto>; ...\n"
-    "/estado <id_o_dir> <disponible|ocupada|reservada|inactiva>\n"
-    "\nTambién podés escribir en lenguaje natural si está activado el modelo."
+    "Comandos disponibles (los permisos dependen de tu rol):\n"
+    "Consulta:\n"
+    "  /resumen — vista general\n"
+    "  /buscar <texto> — busca propiedades\n"
+    "  /info <id_o_dir> — ficha de una propiedad\n"
+    "  /contrato <id_o_codigo> — info de contrato\n"
+    "  /pendientes [YYYY-MM] — pendientes de cobro del mes\n"
+    "  /calcular <id_o_dir> [YYYY-MM-DD] — alquiler actualizado\n"
+    "Modificación masiva:\n"
+    "  /actualizar_tasas <ref>=<monto>; ...\n"
+    "  /actualizar_alquileres <ref>=<monto>; ...\n"
+    "  /actualizar_expensas <ref>=<monto>; ...\n"
+    "  /estado <id_o_dir> <disponible|ocupada|reservada|inactiva>\n"
+    "  /evento <título> [| descripción]\n"
+    "\nTambién podés escribir en lenguaje natural si hay modelo configurado."
 )
 
 
@@ -360,7 +461,27 @@ def _format_bulk(d: dict, etiqueta: str) -> str:
     return "\n".join(out)
 
 
-def _responder_comandos(texto: str, db: Session) -> str:
+CMD_TO_TOOL = {
+    "/resumen":               "resumen_dashboard",
+    "/buscar":                "buscar_propiedad",
+    "/buscar_propiedad":      "buscar_propiedad",
+    "/info":                  "info_propiedad",
+    "/contrato":              "info_contrato",
+    "/pendientes":            "listar_pendientes_cobro",
+    "/actualizar_tasas":      "actualizar_tasas_municipales",
+    "/tasas":                 "actualizar_tasas_municipales",
+    "/actualizar_alquileres": "actualizar_alquileres",
+    "/alquileres":            "actualizar_alquileres",
+    "/actualizar_expensas":   "actualizar_expensas",
+    "/expensas":              "actualizar_expensas",
+    "/estado":                "cambiar_estado_propiedad",
+    "/calcular":              "calcular_alquiler",
+    "/evento":                "crear_evento",
+}
+
+
+def _responder_comandos(texto: str, db: Session, permitidos: Optional[set[str]] = None) -> str:
+    """Procesa comandos /. Si `permitidos` está dado, niega los que no estén."""
     t = texto.strip()
     if not t.startswith("/"):
         return ("No tengo modelo de IA configurado para entender lenguaje natural.\n\n" + _HELP)
@@ -371,6 +492,11 @@ def _responder_comandos(texto: str, db: Session) -> str:
 
     if cmd in ("/start", "/help", "/ayuda"):
         return _HELP
+
+    # Verificación de permisos para los comandos que mapean a tools.
+    needed = CMD_TO_TOOL.get(cmd)
+    if permitidos is not None and needed and needed not in permitidos:
+        return f"⚠ Tu rol no tiene permiso para `{cmd}`. Probá comandos de consulta como /buscar o /info."
 
     if cmd == "/resumen":
         return _format_resumen(TOOLS["resumen_dashboard"](db))
@@ -429,5 +555,38 @@ def _responder_comandos(texto: str, db: Session) -> str:
         if not out.get("ok"):
             return f"⚠ {out['error']}"
         return f"Estado cambiado: {out['direccion']} → {out['nuevo']}"
+
+    if cmd == "/calcular":
+        if not arg:
+            return "Uso: /calcular <id_o_direccion> [YYYY-MM-DD]"
+        partes = arg.rsplit(" ", 1)
+        ref = arg
+        fecha = None
+        # Si lo último parece YYYY-MM-DD, lo tomamos como fecha
+        if len(partes) == 2 and re.match(r"^\d{4}-\d{2}-\d{2}$", partes[1]):
+            ref, fecha = partes[0].strip(), partes[1]
+        out = TOOLS["calcular_alquiler"](db, ref, fecha)
+        if not out.get("ok"):
+            return f"⚠ {out.get('error')}"
+        prop = out.get("propiedad") or {}
+        return (
+            f"Cálculo {prop.get('direccion','—')}\n"
+            f"  Base: ${int(out.get('base_alquiler') or 0):,}\n"
+            f"  Factor: {out.get('factor_ajuste')}\n"
+            f"  Alquiler ajustado: ${int(out.get('alquiler_actualizado') or 0):,}\n"
+            f"  Total mensual: ${int(out.get('total_mensual') or 0):,}"
+        )
+
+    if cmd == "/evento":
+        if not arg:
+            return "Uso: /evento <título> [| descripción]"
+        if "|" in arg:
+            titulo, descripcion = [s.strip() for s in arg.split("|", 1)]
+        else:
+            titulo, descripcion = arg.strip(), None
+        out = TOOLS["crear_evento"](db, titulo, descripcion)
+        if not out.get("ok"):
+            return f"⚠ {out.get('error')}"
+        return f"Evento creado #{out['id']}: {out['titulo']}"
 
     return f"Comando no reconocido: {cmd}\n\n{_HELP}"

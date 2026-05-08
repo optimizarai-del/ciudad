@@ -274,6 +274,109 @@ def cambiar_estado_propiedad(db: Session, identificador, nuevo_estado: str) -> d
             "anterior": anterior, "nuevo": nuevo_estado}
 
 
+def calcular_alquiler(db: Session, identificador: str, fecha: Optional[str] = None) -> dict:
+    """
+    Calcula el alquiler actualizado de una propiedad a una fecha (YYYY-MM-DD).
+    Aplica el ajuste del contrato vigente con índices reales (IPC/ICL del
+    cache; si no hay cache, fallback) y suma costos.
+    """
+    p = _resolver_propiedad(db, identificador)
+    if not p:
+        return {"ok": False, "error": f"Propiedad no encontrada: {identificador}"}
+
+    from datetime import date as _date
+    f_obj = _date.today()
+    if fecha:
+        try:
+            f_obj = _date.fromisoformat(fecha)
+        except ValueError:
+            return {"ok": False, "error": f"Fecha inválida: {fecha} (usar YYYY-MM-DD)"}
+
+    from sqlalchemy import or_ as _or
+    from app.services.indices_service import get_tasas_cached_sync
+
+    contrato = (
+        db.query(models.Contrato)
+        .filter(models.Contrato.propiedad_id == p.id)
+        .filter(_or(models.Contrato.estado == "vigente", models.Contrato.estado == "borrador"))
+        .order_by(models.Contrato.id.desc())
+        .first()
+    )
+
+    tasas = get_tasas_cached_sync()
+    ipc_m = tasas["ipc_mensual"]
+    icl_m = tasas["icl_mensual"]
+
+    base = float(p.precio_alquiler or 0)
+    factor = 1.0
+    indice = "sin_ajuste"
+    periodos = 0
+    if contrato:
+        base = float(contrato.monto_inicial or p.precio_alquiler or 0)
+        if contrato.fecha_inicio and f_obj > contrato.fecha_inicio:
+            meses = (f_obj.year - contrato.fecha_inicio.year) * 12 + (f_obj.month - contrato.fecha_inicio.month)
+            indice = contrato.indice_ajuste.value if hasattr(contrato.indice_ajuste, "value") else contrato.indice_ajuste
+            period = contrato.periodicidad_meses or 3
+            if indice != "sin_ajuste" and meses >= period:
+                periodos = meses // period
+                if indice == "fijo":
+                    tasa_p = (contrato.porcentaje_fijo or 0) / 100.0
+                elif indice == "icl":
+                    tasa_p = (1 + icl_m) ** period - 1
+                else:
+                    tasa_p = (1 + ipc_m) ** period - 1
+                factor = (1 + tasa_p) ** periodos
+
+    alquiler_act = round(base * factor, 2)
+    expensas = float(p.expensas or 0)
+    tasas_mun = float(p.tasa_municipal or 0) + float(p.impuesto_inmobiliario or 0)
+    total = round(alquiler_act + expensas + tasas_mun, 2)
+
+    return {
+        "ok": True,
+        "propiedad": {"id": p.id, "direccion": p.direccion, "ciudad": p.ciudad},
+        "fecha_calculo": str(f_obj),
+        "base_alquiler": base,
+        "factor_ajuste": round(factor, 4),
+        "indice": indice,
+        "periodos_aplicados": periodos,
+        "alquiler_actualizado": alquiler_act,
+        "expensas": expensas,
+        "tasas_municipales": tasas_mun,
+        "total_mensual": total,
+        "indice_real": tasas.get("ipc_ok") if indice == "ipc" else tasas.get("icl_ok"),
+    }
+
+
+def crear_evento(
+    db: Session,
+    titulo: str,
+    descripcion: Optional[str] = None,
+    propiedad_id: Optional[int] = None,
+    contrato_id: Optional[int] = None,
+    es_critico: bool = False,
+    tipo: str = "nota",
+) -> dict:
+    """Crea un evento en el activity log."""
+    if not titulo:
+        return {"ok": False, "error": "Falta título"}
+    valido = [e.value for e in models.EventoTipo]
+    if tipo not in valido:
+        return {"ok": False, "error": f"tipo inválido (válidos: {', '.join(valido)})"}
+    ev = models.Evento(
+        tipo=tipo,
+        titulo=titulo,
+        descripcion=descripcion,
+        propiedad_id=propiedad_id,
+        contrato_id=contrato_id,
+        es_critico=bool(es_critico),
+    )
+    db.add(ev)
+    db.commit()
+    db.refresh(ev)
+    return {"ok": True, "id": ev.id, "titulo": ev.titulo, "tipo": ev.tipo.value if hasattr(ev.tipo,"value") else ev.tipo}
+
+
 # Mapa nombre → fn para el dispatcher del agente
 TOOLS = {
     "buscar_propiedad": buscar_propiedad,
@@ -285,4 +388,6 @@ TOOLS = {
     "actualizar_alquileres": actualizar_alquileres,
     "actualizar_expensas": actualizar_expensas,
     "cambiar_estado_propiedad": cambiar_estado_propiedad,
+    "calcular_alquiler": calcular_alquiler,
+    "crear_evento": crear_evento,
 }

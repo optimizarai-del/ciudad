@@ -40,48 +40,28 @@ def health():
     return {"status": "ok", "brand": "CIUDAD — Negocios Inmobiliarios", "slogan": "#VIVIRMEJOR"}
 
 
-@app.on_event("startup")
-def _seed_if_empty():
-    from app.database import SessionLocal
-    from app import models
-    db = SessionLocal()
-    try:
-        if db.query(models.User).count() == 0:
-            from app.seed import run as seed_run
-            seed_run()
-    finally:
-        db.close()
-
+# Las migraciones de schema deben correr ANTES de que cualquier query toque
+# las tablas (el seed inicial las consulta, así que debe ir al final).
 
 @app.on_event("startup")
-def _migrar_estados_contrato():
-    """
-    Migración liviana: 'cerrado' fue removido del enum y reemplazado por 'reservado'.
-    Los contratos históricos en 'cerrado' los pasamos a 'vencido' para no inventar
-    reservas que nunca existieron.
-    """
-    from sqlalchemy import text
-    from app.database import SessionLocal
+def _migrar_schema():
+    """Migraciones livianas de columnas/datos. Idempotentes."""
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine
     db = SessionLocal()
     try:
+        # 1. User.telegram_chat_id (Fase 3 — agente admin con permisos por rol).
+        cols = {c["name"] for c in inspect(engine).get_columns("users")}
+        if "telegram_chat_id" not in cols:
+            db.execute(text("ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR"))
+            db.commit()
+
+        # 2. ContratoEstado: 'cerrado' → 'vencido' (el enum dejó de soportar
+        # 'cerrado'; los registros viejos se migran para no inventar reservas).
         db.execute(text("UPDATE contratos SET estado='vencido' WHERE estado='cerrado'"))
         db.commit()
-    except Exception:
-        db.rollback()
-    finally:
-        db.close()
 
-
-@app.on_event("startup")
-def _unificar_tasas_municipales():
-    """
-    Migración: ahora tasa_municipal = tasa_municipal + impuesto_inmobiliario.
-    Lo hacemos una sola vez (marca: ciudad_settings.tasas_unificadas).
-    """
-    from sqlalchemy import text
-    from app.database import SessionLocal
-    db = SessionLocal()
-    try:
+        # 3. Tasas municipales unificadas (impuesto_inmobiliario + tasa_municipal).
         db.execute(text("""
             CREATE TABLE IF NOT EXISTS ciudad_settings (
                 key VARCHAR PRIMARY KEY,
@@ -101,3 +81,18 @@ def _unificar_tasas_municipales():
         db.rollback()
     finally:
         db.close()
+
+
+@app.on_event("startup")
+def _seed_if_empty():
+    from app.database import SessionLocal
+    from app import models
+    db = SessionLocal()
+    try:
+        if db.query(models.User).count() == 0:
+            from app.seed import run as seed_run
+            seed_run()
+    finally:
+        db.close()
+
+
