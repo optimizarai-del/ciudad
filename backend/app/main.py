@@ -3,7 +3,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-load_dotenv()
+# override=True: si hay una variable previa en el shell (vacía o con otro valor),
+# el .env del proyecto manda. Importante en entornos donde el shell hereda
+# variables de sesiones anteriores.
+load_dotenv(override=True)
 
 from app.database import Base, engine
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
