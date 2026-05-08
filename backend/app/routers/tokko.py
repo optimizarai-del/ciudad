@@ -17,7 +17,8 @@ from app import models
 router = APIRouter(prefix="/api/tokko", tags=["tokko"])
 
 TOKKO_KEY = os.getenv("TOKKO_API_KEY", "")
-TOKKO_URL = os.getenv("TOKKO_API_URL", "https://www.tokkosoftware.com/api/v1")
+# Dominio actual de Tokko (la marca antigua tokkosoftware.com está deprecada).
+TOKKO_URL = os.getenv("TOKKO_API_URL", "https://www.tokkobroker.com/api/v1")
 
 
 @router.get("/status")
@@ -63,13 +64,13 @@ async def preview(user=Depends(get_current_user), db: Session = Depends(get_db))
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:
             r = await client.get(
-                f"{TOKKO_URL}/property/search/",
-                params={"key": TOKKO_KEY, "format": "json", "limit": 50, "lang": "es"},
+                f"{TOKKO_URL}/property/",
+                params={"key": TOKKO_KEY, "format": "json", "limit": 50, "lang": "es_ar"},
             )
             r.raise_for_status()
             data = r.json()
         except httpx.HTTPStatusError as e:
-            raise HTTPException(502, f"Tokko respondió {e.response.status_code}")
+            raise HTTPException(502, f"Tokko respondió {e.response.status_code}: {e.response.text[:200]}")
         except httpx.RequestError as e:
             raise HTTPException(502, f"No se pudo conectar con Tokko: {e}")
 
@@ -110,8 +111,8 @@ async def sync(db: Session = Depends(get_db), user=Depends(get_current_user)):
     async with httpx.AsyncClient(timeout=20.0) as client:
         try:
             r = await client.get(
-                f"{TOKKO_URL}/property/search/",
-                params={"key": TOKKO_KEY, "format": "json", "limit": 200, "lang": "es"},
+                f"{TOKKO_URL}/property/",
+                params={"key": TOKKO_KEY, "format": "json", "limit": 200, "lang": "es_ar"},
             )
             r.raise_for_status()
             data = r.json()
