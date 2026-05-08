@@ -20,6 +20,8 @@ import Cobranza           from './pages/Cobranza'
 import DashboardVentas    from './pages/DashboardVentas'
 import PropiedadesVenta   from './pages/PropiedadesVenta'
 import Propietarios       from './pages/Propietarios'
+import Liquidaciones      from './pages/Liquidaciones'
+import Recordatorios      from './pages/Recordatorios'
 
 export default function App() {
   return (
@@ -55,6 +57,12 @@ export default function App() {
         } />
         <Route path="/alquileres/propietarios" element={
           <ProtectedRoute requireAlquileres><Propietarios /></ProtectedRoute>
+        } />
+        <Route path="/alquileres/liquidaciones" element={
+          <ProtectedRoute requireAlquileres><Liquidaciones /></ProtectedRoute>
+        } />
+        <Route path="/recordatorios" element={
+          <ProtectedRoute><Recordatorios /></ProtectedRoute>
         } />
 
         {/* Ventas */}

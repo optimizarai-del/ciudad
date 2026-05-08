@@ -8,6 +8,7 @@ load_dotenv()
 from app.database import Base, engine
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
 from app.routers import cobranza, ventas_router, comprobantes
+from app.routers import liquidaciones, finanzas, adjuntos, recordatorios
 
 Base.metadata.create_all(bind=engine)
 
@@ -33,6 +34,10 @@ app.include_router(agente_router.router)
 app.include_router(cobranza.router)
 app.include_router(ventas_router.router)
 app.include_router(comprobantes.router)
+app.include_router(liquidaciones.router)
+app.include_router(finanzas.router)
+app.include_router(adjuntos.router)
+app.include_router(recordatorios.router)
 
 
 @app.get("/health")
@@ -81,6 +86,20 @@ def _migrar_schema():
         db.rollback()
     finally:
         db.close()
+
+
+@app.on_event("startup")
+async def _start_recordatorios():
+    """
+    Loop background de recordatorios. Se activa con RECORDATORIOS_ENABLED=true
+    en .env (default false para no spamear en dev). Intervalo configurable.
+    """
+    import os, asyncio
+    if os.getenv("RECORDATORIOS_ENABLED", "false").lower() not in ("1", "true", "yes"):
+        return
+    intervalo = int(os.getenv("RECORDATORIOS_INTERVALO_SEG", "3600"))
+    from app.services.recordatorios import loop_recordatorios
+    asyncio.create_task(loop_recordatorios(intervalo))
 
 
 @app.on_event("startup")

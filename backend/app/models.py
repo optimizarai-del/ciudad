@@ -269,6 +269,28 @@ class MensajeConversacion(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AdjuntoTipo(str, Enum):
+    foto = "foto"
+    documento = "documento"
+    plano = "plano"
+    otro = "otro"
+
+
+class PropiedadAdjunto(Base):
+    __tablename__ = "propiedad_adjuntos"
+    id = Column(Integer, primary_key=True)
+    propiedad_id = Column(Integer, ForeignKey("propiedades.id"), nullable=False, index=True)
+    propiedad = relationship("Propiedad")
+    tipo = Column(SQLEnum(AdjuntoTipo), default=AdjuntoTipo.foto)
+    nombre_archivo = Column(String, nullable=False)
+    mime = Column(String)
+    tamano_bytes = Column(Integer)
+    descripcion = Column(Text)
+    blob_b64 = Column(Text, nullable=False)   # contenido base64
+    es_principal = Column(Boolean, default=False)  # foto destacada
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ComprobanteTipo(str, Enum):
     inquilino = "inquilino"
     propietario = "propietario"

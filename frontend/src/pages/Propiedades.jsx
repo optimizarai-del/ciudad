@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Building2, Trash2, Pencil, X, MapPin, Home, RefreshCw } from 'lucide-react'
+import { Plus, Building2, Trash2, Pencil, X, MapPin, Home, RefreshCw, Image as ImageIcon } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import SearchBar, { match } from '../components/SearchBar'
 import TokkoSync from '../components/TokkoSync'
+import AdjuntosModal from '../components/AdjuntosModal'
 import api from '../utils/api'
 
 const TIPOS = ['departamento','casa','local','campo']
@@ -39,6 +40,7 @@ export default function Propiedades() {
   const [clientes, setClientes] = useState([])
   const [tokkoOpen, setTokkoOpen] = useState(false)
   const [busqueda, setBusqueda] = useState('')
+  const [adjPropiedad, setAdjPropiedad] = useState(null)
 
   const load = () => {
     api.get('/api/propiedades').then(r => setList(r.data))
@@ -174,6 +176,10 @@ export default function Propiedades() {
                     onClick={() => { setEditing(p); setOpen(true) }}>
                     <Pencil size={12} /> Editar
                   </button>
+                  <button className="btn-ghost py-2 px-3" title="Fotos y documentos"
+                    onClick={() => setAdjPropiedad(p)}>
+                    <ImageIcon size={12} />
+                  </button>
                   <button className="btn-danger py-2 px-3" onClick={() => del(p.id)}>
                     <Trash2 size={12} />
                   </button>
@@ -197,6 +203,13 @@ export default function Propiedades() {
         <TokkoSync
           onClose={() => setTokkoOpen(false)}
           onSynced={() => load()}
+        />
+      )}
+
+      {adjPropiedad && (
+        <AdjuntosModal
+          propiedad={adjPropiedad}
+          onClose={() => setAdjPropiedad(null)}
         />
       )}
     </Layout>

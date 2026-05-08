@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, FileText, Users, Calculator,
   BarChart2, Bot, TrendingUp, Settings, DollarSign,
-  Home, CreditCard, Store, ChevronRight, KeyRound
+  Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt
 } from 'lucide-react'
 import { useRole } from '../../context/RoleContext'
 
@@ -43,10 +43,11 @@ export default function Sidebar() {
           <NavItem to="/alquileres/dashboard"  icon={LayoutDashboard} label="Dashboard" />
           <NavItem to="/alquileres/propiedades" icon={Home}           label="Propiedades" />
           <NavItem to="/alquileres/contratos"   icon={FileText}       label="Contratos" />
-          <NavItem to="/alquileres/cobranza"      icon={CreditCard}     label="Cobranza" />
-          <NavItem to="/alquileres/clientes"      icon={Users}          label="Clientes" />
-          <NavItem to="/alquileres/propietarios"  icon={KeyRound}       label="Propietarios" />
-          <NavItem to="/calculadora"              icon={Calculator}     label="Calculadora" />
+          <NavItem to="/alquileres/cobranza"       icon={CreditCard}     label="Cobranza" />
+          <NavItem to="/alquileres/liquidaciones"  icon={Receipt}        label="Liquidaciones" />
+          <NavItem to="/alquileres/clientes"       icon={Users}          label="Clientes" />
+          <NavItem to="/alquileres/propietarios"   icon={KeyRound}       label="Propietarios" />
+          <NavItem to="/calculadora"               icon={Calculator}     label="Calculadora" />
         </Section>
       )}
 
@@ -62,8 +63,9 @@ export default function Sidebar() {
 
       {/* Herramientas */}
       <Section label="Herramientas">
-        <NavItem to="/indices" icon={BarChart2} label="Índices" />
-        <NavItem to="/agente"  icon={Bot}       label="Agente IA" />
+        <NavItem to="/indices"        icon={BarChart2} label="Índices" />
+        <NavItem to="/agente"         icon={Bot}       label="Agente IA" />
+        <NavItem to="/recordatorios"  icon={Bell}      label="Recordatorios" />
       </Section>
 
       {/* Admin */}
