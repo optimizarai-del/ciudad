@@ -35,7 +35,8 @@ desktop.ini
 *.swp
 *.swo
 
-# Secrets (el .env base SÍ se sube como referencia, sin valores reales)
+# Secrets — NUNCA subir .env reales. Usar .env.example como referencia.
+backend/.env
 backend/.env.local
 backend/.env.production
 frontend/.env
