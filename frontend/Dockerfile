@@ -26,6 +26,5 @@ RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
-
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD wget -qO- http://localhost/ > /dev/null || exit 1
+# Sin HEALTHCHECK Docker — Easypanel hace su propia verificación HTTP via proxy.
+# Un HEALTHCHECK que fallaba mataba el contenedor cada ~90s.
