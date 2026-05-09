@@ -16,12 +16,17 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
+def _truncate72(p: str) -> bytes:
+    """bcrypt acepta máximo 72 bytes; passwords más largas hay que truncarlas."""
+    return p.encode("utf-8")[:72]
+
+
 def hash_pw(p: str) -> str:
-    return pwd_context.hash(p)
+    return pwd_context.hash(_truncate72(p))
 
 
 def verify_pw(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return pwd_context.verify(_truncate72(plain), hashed)
 
 
 def create_token(data: dict) -> str:
