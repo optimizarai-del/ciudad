@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.security import get_current_user
 from app import models
+from app.services import notificaciones
 
 router = APIRouter(prefix="/api/alertas", tags=["alertas"])
 
@@ -51,3 +52,45 @@ def vencimientos(dias: int = 60, db: Session = Depends(get_db), user=Depends(get
         })
 
     return resultado
+
+
+@router.post("/enviar-recordatorios")
+def enviar_recordatorios(dias: int = 60, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Envía emails de recordatorio para contratos por vencer. Retorna resumen."""
+    hoy = date.today()
+    limite = hoy + timedelta(days=dias)
+
+    contratos = (
+        db.query(models.Contrato)
+        .filter(
+            models.Contrato.estado == models.ContratoEstado.vigente,
+            models.Contrato.fecha_fin.isnot(None),
+            models.Contrato.fecha_fin <= limite,
+            models.Contrato.fecha_fin >= hoy,
+        )
+        .order_by(models.Contrato.fecha_fin)
+        .all()
+    )
+
+    enviados = 0
+    fallidos = 0
+    omitidos = 0
+
+    for contrato in contratos:
+        dias_restantes = (contrato.fecha_fin - hoy).days
+        if not contrato.inquilino or not contrato.inquilino.email:
+            omitidos += 1
+            continue
+        ok = notificaciones.enviar_recordatorio_vencimiento(contrato, dias_restantes)
+        if ok:
+            enviados += 1
+        else:
+            fallidos += 1
+
+    return {
+        "ok": True,
+        "total_contratos": len(contratos),
+        "enviados": enviados,
+        "fallidos": fallidos,
+        "omitidos": omitidos,
+    }
