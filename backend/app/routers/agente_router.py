@@ -5,6 +5,8 @@ Endpoints:
   POST /api/agente/webhook/telegram   <- webhook del bot de Telegram
   GET  /api/agente/webhook/instagram  <- verificación de Instagram
   POST /api/agente/webhook/instagram  <- mensajes de Instagram (preparado)
+  GET  /api/agente/webhook/whatsapp   <- verificación hub.challenge de WhatsApp
+  POST /api/agente/webhook/whatsapp   <- mensajes de WhatsApp Cloud API
   POST /api/agente/chat               <- chat de prueba desde el panel
   GET  /api/agente/leads              <- lista de leads con historial
   GET  /api/agente/leads/{id}         <- detalle de un lead
@@ -21,7 +23,7 @@ from typing import Optional
 
 from app.database import get_db
 from app import models
-from app.services import agente_service, telegram_service, agente_admin
+from app.services import agente_service, telegram_service, agente_admin, whatsapp_service
 from app.services.admin_actions import TOOLS as TOOL_NAMES
 
 router = APIRouter(prefix="/api/agente", tags=["agente"])
@@ -155,6 +157,56 @@ async def instagram_webhook(request: Request, background: BackgroundTasks, db: S
                     # await instagram_service.send_message(sid, oracion)
 
                 background.add_task(_process)
+
+    return {"ok": True}
+
+
+# ── WhatsApp webhook ──────────────────────────────────────────────────────────
+@router.get("/webhook/whatsapp")
+async def whatsapp_verify(request: Request):
+    """Verificación de webhook de WhatsApp Cloud API (Meta hub.challenge)."""
+    params = request.query_params
+    verify_token = os.getenv("WHATSAPP_VERIFY_TOKEN", "ciudad_whatsapp_token")
+    if (
+        params.get("hub.mode") == "subscribe"
+        and params.get("hub.verify_token") == verify_token
+    ):
+        return int(params.get("hub.challenge", 0))
+    raise HTTPException(403, "Token de verificación inválido")
+
+
+@router.post("/webhook/whatsapp")
+async def whatsapp_webhook(request: Request, background: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Webhook de WhatsApp Cloud API.
+    Requiere en .env: WHATSAPP_VERIFY_TOKEN, WHATSAPP_TOKEN, WHATSAPP_PHONE_ID
+    y registrar el webhook en Meta Business Suite.
+    """
+    data = await request.json()
+    for entry in data.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            for message in value.get("messages", []):
+                sender_id = message.get("from", "")
+                msg_id = message.get("id", "")
+                text = ""
+                if message.get("type") == "text":
+                    text = message.get("text", {}).get("body", "")
+
+                if sender_id and text:
+                    async def _process(sid=sender_id, t=text, mid=msg_id):
+                        oraciones = await agente_service.procesar_mensaje(
+                            canal_id=sid,
+                            texto=t,
+                            canal="whatsapp",
+                            db=db,
+                            usar_debounce=True,
+                        )
+                        await whatsapp_service.mark_read(mid)
+                        for oracion in oraciones:
+                            await whatsapp_service.send_message(sid, oracion)
+
+                    background.add_task(_process)
 
     return {"ok": True}
 

@@ -237,6 +237,7 @@ class LeadEstado(str, Enum):
 class LeadCanal(str, Enum):
     telegram = "telegram"
     instagram = "instagram"
+    whatsapp = "whatsapp"
     web = "web"
 
 class Lead(Base):
