@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Users, Pencil, X, ShieldCheck, Plus } from 'lucide-react'
+import { Users, Pencil, X, ShieldCheck, Plus, Trash2, Mail } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import api from '../utils/api'
 import { useAuth } from '../context/AuthContext'
@@ -27,9 +27,33 @@ export default function Equipo() {
   const [list, setList] = useState([])
   const [editing, setEditing] = useState(null)
   const [creating, setCreating] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [toast, setToast] = useState(null)  // {kind:'success'|'error', text}
 
   const load = () => api.get('/api/users').then(r => setList(r.data)).catch(() => {})
   useEffect(() => { load() }, [])
+
+  // Auto-cierre del toast a los 5s
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 5000)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const deleteUser = async u => {
+    try {
+      await api.delete(`/api/users/${u.id}`)
+      setToast({ kind: 'success', text: `Usuario ${u.nombre} eliminado.` })
+      load()
+    } catch (e) {
+      setToast({
+        kind: 'error',
+        text: e.response?.data?.detail || 'Error al eliminar.',
+      })
+    } finally {
+      setConfirmDelete(null)
+    }
+  }
 
   return (
     <Layout>
@@ -108,12 +132,24 @@ export default function Equipo() {
                       </div>
                     </td>
                     <td className="td">
-                      <button
-                        onClick={() => setEditing(u)}
-                        className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-[#1E1E1E] text-muted hover:text-primary dark:hover:text-white transition"
-                      >
-                        <Pencil size={13} />
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => setEditing(u)}
+                          title="Editar rol"
+                          className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-[#1E1E1E] text-muted hover:text-primary dark:hover:text-white transition"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        {u.id !== me?.id && (
+                          <button
+                            onClick={() => setConfirmDelete(u)}
+                            title="Eliminar usuario"
+                            className="p-1.5 rounded-lg hover:bg-danger/10 text-muted hover:text-danger transition"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -177,7 +213,19 @@ export default function Equipo() {
       {creating && (
         <ModalNuevoUsuario
           onClose={() => setCreating(false)}
-          onSaved={() => { setCreating(false); load() }}
+          onSaved={(info) => {
+            setCreating(false)
+            load()
+            // info = {user, email_enviado, email_motivo}
+            if (info?.email_enviado) {
+              setToast({ kind: 'success', text: `Usuario creado. Email enviado a ${info.user.email}.` })
+            } else {
+              setToast({
+                kind: 'error',
+                text: `Usuario creado pero email NO enviado: ${info?.email_motivo || 'sin SMTP'}`,
+              })
+            }
+          }}
         />
       )}
 
@@ -187,6 +235,25 @@ export default function Equipo() {
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load() }}
         />
+      )}
+
+      {confirmDelete && (
+        <ModalConfirmDelete
+          user={confirmDelete}
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={() => deleteUser(confirmDelete)}
+        />
+      )}
+
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-2xl shadow-lift animate-fade-in flex items-center gap-2 max-w-md
+          ${toast.kind === 'success'
+            ? 'bg-success text-white'
+            : 'bg-danger text-white'}`}
+        >
+          {toast.kind === 'success' ? <Mail size={14} /> : <X size={14} />}
+          <span className="text-[13px]">{toast.text}</span>
+        </div>
       )}
     </Layout>
   )
@@ -209,16 +276,17 @@ function ModalNuevoUsuario({ onClose, onSaved }) {
     }
     setLoading(true); setErr('')
     try {
-      // /auth/register acepta {nombre,email,password,telefono?,role?} y crea
-      // el usuario sin pisar la sesión actual (devuelve un token nuevo que ignoramos).
-      await api.post('/auth/register', {
+      // POST /api/users (admin only) — crea el usuario y dispara welcome email
+      // si SMTP está configurado. Devuelve {user, email_enviado, email_motivo}.
+      const r = await api.post('/api/users/', {
         nombre: form.nombre.trim(),
         email: form.email.trim().toLowerCase(),
         password: form.password,
         telefono: form.telefono || null,
         role: form.role,
+        enviar_email: true,
       })
-      onSaved()
+      onSaved(r.data)
     } catch (e) {
       setErr(e.response?.data?.detail || 'Error al crear el usuario.')
     } finally { setLoading(false) }
@@ -338,6 +406,54 @@ function ModalEditRol({ user, onClose, onSaved }) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+
+function ModalConfirmDelete({ user, onClose, onConfirm }) {
+  const [loading, setLoading] = useState(false)
+  const handle = async () => {
+    setLoading(true)
+    await onConfirm()
+    setLoading(false)
+  }
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 grid place-items-center p-4"
+      onClick={onClose}>
+      <div className="card p-8 w-full max-w-sm shadow-lift animate-scale-in"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-danger/10 text-danger grid place-items-center">
+            <Trash2 size={18} />
+          </div>
+          <h2 className="hero-title text-xl">Eliminar usuario.</h2>
+        </div>
+
+        <p className="text-[13px] text-muted dark:text-gray-400 mb-2">
+          Vas a eliminar permanentemente a:
+        </p>
+        <div className="bg-neutral-50 dark:bg-[#1A1A1A] rounded-2xl p-4 mb-6">
+          <p className="font-semibold text-[14px]">{user.nombre}</p>
+          <p className="text-[12px] text-muted dark:text-gray-500">{user.email}</p>
+        </div>
+        <p className="text-[12px] text-muted dark:text-gray-500 mb-6">
+          Esta acción no se puede deshacer. El usuario perderá acceso al panel inmediatamente.
+        </p>
+
+        <div className="flex gap-3">
+          <button type="button" className="btn-secondary flex-1" onClick={onClose} disabled={loading}>
+            Cancelar
+          </button>
+          <button
+            className="flex-1 px-4 py-2.5 rounded-full bg-danger text-white text-[13px] font-medium hover:bg-danger/90 transition disabled:opacity-50"
+            onClick={handle}
+            disabled={loading}
+          >
+            {loading ? "Eliminando…" : "Sí, eliminar"}
+          </button>
+        </div>
       </div>
     </div>
   )

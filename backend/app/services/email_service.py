@@ -26,8 +26,13 @@ def enviar_email(
     cuerpo: str,
     pdf_bytes: bytes | None = None,
     pdf_filename: str = "documento.pdf",
+    html_body: str | None = None,
 ) -> tuple[bool, str]:
-    """Devuelve (ok, mensaje). No levanta excepciones."""
+    """Devuelve (ok, mensaje). No levanta excepciones.
+
+    Si `html_body` viene, el email se envía como multipart con HTML + texto
+    plano. Útil para emails de bienvenida o notificaciones formateadas.
+    """
     if not destinatario:
         return False, "Sin destinatario"
 
@@ -46,6 +51,8 @@ def enviar_email(
     msg["To"] = destinatario
     msg["Subject"] = asunto
     msg.set_content(cuerpo)
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
 
     if pdf_bytes:
         msg.add_attachment(
