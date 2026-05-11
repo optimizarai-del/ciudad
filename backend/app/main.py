@@ -58,9 +58,14 @@ def _migrar_tokko_a_venta():
     modalidad=alquiler y el precio en precio_alquiler. Tokko es solo venta —
     movemos el precio y forzamos la modalidad. Idempotente con marker en
     ciudad_settings.
+
+    Sólo corre en SQLite (DB legacy). En Postgres arrancamos con DB vacía y
+    los enums tienen casts estrictos que rompen estos UPDATE literales.
     """
     from sqlalchemy import text
-    from app.database import SessionLocal
+    from app.database import SessionLocal, IS_POSTGRES
+    if IS_POSTGRES:
+        return
     db = SessionLocal()
     try:
         db.execute(text("""
@@ -88,9 +93,15 @@ def _migrar_tokko_a_venta():
 
 @app.on_event("startup")
 def _migrar_schema():
-    """Migraciones livianas de columnas/datos. Idempotentes."""
+    """Migraciones livianas de columnas/datos. Idempotentes.
+
+    Solo corre en SQLite. En Postgres `create_all` deja el schema correcto
+    de entrada y los UPDATE legacy con enums fallan por casts estrictos.
+    """
     from sqlalchemy import text, inspect
-    from app.database import SessionLocal, engine
+    from app.database import SessionLocal, engine, IS_POSTGRES
+    if IS_POSTGRES:
+        return
     db = SessionLocal()
     try:
         # 1. User.telegram_chat_id (Fase 3 — agente admin con permisos por rol).

@@ -13,3 +13,6 @@ email-validator==2.3.0
 httpx==0.27.0
 anthropic>=0.40.0
 reportlab>=4.0.0
+# Driver Postgres para producción (Supabase). Binary wheel para evitar
+# compilar libpq en el contenedor.
+psycopg2-binary==2.9.9
