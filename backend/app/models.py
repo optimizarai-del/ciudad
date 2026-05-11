@@ -287,7 +287,10 @@ class PropiedadAdjunto(Base):
     mime = Column(String)
     tamano_bytes = Column(Integer)
     descripcion = Column(Text)
-    blob_b64 = Column(Text, nullable=False)   # contenido base64
+    # Legacy: blob inline en la DB. Se mantiene nullable para que las filas
+    # nuevas vayan directo a Supabase Storage (ver `storage_path`).
+    blob_b64 = Column(Text, nullable=True)
+    storage_path = Column(String, nullable=True, index=True)
     es_principal = Column(Boolean, default=False)  # foto destacada
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -308,7 +311,9 @@ class Comprobante(Base):
     monto_total = Column(Float, default=0)
     monto_comision = Column(Float, default=0)   # solo en propietario
     monto_neto = Column(Float, default=0)       # solo en propietario
-    pdf_blob = Column(Text)                     # base64 del PDF para descarga
+    # Legacy: PDF inline. Las filas nuevas suben a Storage (ver storage_path).
+    pdf_blob = Column(Text, nullable=True)
+    storage_path = Column(String, nullable=True, index=True)
     enviado_email = Column(Boolean, default=False)
     fecha_envio = Column(DateTime)
     error_envio = Column(Text)

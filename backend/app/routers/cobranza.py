@@ -25,6 +25,7 @@ from app.services.pdf_comprobantes import (
     generar_pdf_comprobante_propietario,
 )
 from app.services.email_service import enviar_email, smtp_configurado
+from app.services import supabase_storage
 
 router = APIRouter(prefix="/api/cobranza", tags=["cobranza"])
 
@@ -195,7 +196,23 @@ def _crear_comprobante(db: Session, pago: models.Pago, tipo: models.ComprobanteT
                        monto_comision: float = 0, monto_neto: float = 0,
                        enviar_mail: bool = True,
                        asunto: str = "", cuerpo: str = "") -> models.Comprobante:
-    pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii") if pdf_bytes else None
+    # Subir el PDF a Supabase Storage si está habilitado; fallback a blob en DB.
+    storage_path = None
+    pdf_b64 = None
+    if pdf_bytes:
+        if supabase_storage.enabled():
+            sp = supabase_storage.gen_path(f"pago-{pago.id}", f"{tipo.value}.pdf")
+            ok, info = supabase_storage.upload(
+                supabase_storage.BUCKET_COMPROBANTES, sp, pdf_bytes, "application/pdf",
+            )
+            if ok:
+                storage_path = info
+            else:
+                print(f"[cobranza] Storage upload falló: {info} — fallback base64")
+                pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+        else:
+            pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+
     comp = models.Comprobante(
         pago_id=pago.id,
         tipo=tipo,
@@ -205,6 +222,7 @@ def _crear_comprobante(db: Session, pago: models.Pago, tipo: models.ComprobanteT
         monto_comision=monto_comision,
         monto_neto=monto_neto,
         pdf_blob=pdf_b64,
+        storage_path=storage_path,
     )
     db.add(comp)
     db.flush()  # obtener id antes del envío

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.security import get_current_user
 from app import models
+from app.services import supabase_storage
 
 router = APIRouter(prefix="/api/tokko", tags=["tokko"])
 
@@ -192,6 +193,22 @@ async def _sync_fotos_propiedad(db: Session, prop: models.Propiedad, photos: lis
         if len(contenido) > 8 * 1024 * 1024:
             continue
         nombre = url.rsplit("/", 1)[-1].split("?")[0] or f"tokko-{prop.tokko_id}.jpg"
+
+        # Storage si está habilitado, fallback base64
+        storage_path = None
+        b64 = None
+        if supabase_storage.enabled():
+            sp = supabase_storage.gen_path(f"prop-{prop.id}-tokko", nombre)
+            ok, info = supabase_storage.upload(
+                supabase_storage.BUCKET_ADJUNTOS, sp, contenido, "image/jpeg",
+            )
+            if ok:
+                storage_path = info
+            else:
+                b64 = base64.b64encode(contenido).decode("ascii")
+        else:
+            b64 = base64.b64encode(contenido).decode("ascii")
+
         adj = models.PropiedadAdjunto(
             propiedad_id=prop.id,
             tipo=models.AdjuntoTipo.foto,
@@ -199,7 +216,8 @@ async def _sync_fotos_propiedad(db: Session, prop: models.Propiedad, photos: lis
             mime="image/jpeg",
             tamano_bytes=len(contenido),
             descripcion=tag,
-            blob_b64=base64.b64encode(contenido).decode("ascii"),
+            blob_b64=b64,
+            storage_path=storage_path,
             es_principal=ph.get("is_front_cover") and not any(a.es_principal for a in existentes),
         )
         db.add(adj)

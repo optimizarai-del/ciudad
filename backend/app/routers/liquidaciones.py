@@ -21,6 +21,7 @@ from app import models
 from app.services.liquidacion_masiva import calcular_lote
 from app.services.pdf_liquidacion_masiva import generar_pdf_liquidacion_consolidada
 from app.services.email_service import enviar_email, smtp_configurado
+from app.services import supabase_storage
 
 
 router = APIRouter(prefix="/api/liquidaciones", tags=["liquidaciones"])
@@ -72,6 +73,22 @@ def emitir(data: EmitirIn, db: Session = Depends(get_db), user=Depends(get_curre
             "totales": p["totales"],
         })
 
+        # Subir PDF a Storage si está habilitado; fallback a base64 en DB.
+        storage_path = None
+        pdf_b64 = None
+        if supabase_storage.enabled():
+            sp = supabase_storage.gen_path(f"liquidacion-{periodo}", f"prop-{ancla_pago_id}.pdf")
+            ok, info = supabase_storage.upload(
+                supabase_storage.BUCKET_COMPROBANTES, sp, pdf, "application/pdf",
+            )
+            if ok:
+                storage_path = info
+            else:
+                print(f"[liquidaciones] Storage upload falló: {info} — fallback base64")
+                pdf_b64 = base64.b64encode(pdf).decode("ascii")
+        else:
+            pdf_b64 = base64.b64encode(pdf).decode("ascii")
+
         comp = models.Comprobante(
             pago_id=ancla_pago_id,
             tipo=models.ComprobanteTipo.propietario,
@@ -80,7 +97,8 @@ def emitir(data: EmitirIn, db: Session = Depends(get_db), user=Depends(get_curre
             monto_total=p["totales"]["cobrado_total"],
             monto_comision=p["totales"]["comision"],
             monto_neto=p["totales"]["neto"],
-            pdf_blob=base64.b64encode(pdf).decode("ascii"),
+            pdf_blob=pdf_b64,
+            storage_path=storage_path,
         )
         db.add(comp)
         db.flush()

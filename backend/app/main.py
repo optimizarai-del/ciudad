@@ -11,7 +11,7 @@ load_dotenv(override=True)
 from app.database import Base, engine
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
 from app.routers import cobranza, ventas_router, comprobantes
-from app.routers import liquidaciones, finanzas, adjuntos, recordatorios
+from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion
 
 Base.metadata.create_all(bind=engine)
 
@@ -41,6 +41,7 @@ app.include_router(liquidaciones.router)
 app.include_router(finanzas.router)
 app.include_router(adjuntos.router)
 app.include_router(recordatorios.router)
+app.include_router(storage_migracion.router)
 
 
 @app.get("/health")
@@ -135,6 +136,47 @@ def _migrar_schema():
         db.rollback()
     finally:
         db.close()
+
+
+@app.on_event("startup")
+def _migrar_storage_path():
+    """Agrega la columna `storage_path` a `propiedad_adjuntos` y `comprobantes`
+    si no existe todavía. Tanto en SQLite como en Postgres (idempotente).
+    También permite que el campo blob legacy sea NULL en propiedad_adjuntos.
+    """
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine
+    db = SessionLocal()
+    try:
+        ins = inspect(engine)
+        # propiedad_adjuntos.storage_path
+        cols_adj = {c["name"] for c in ins.get_columns("propiedad_adjuntos")}
+        if "storage_path" not in cols_adj:
+            db.execute(text("ALTER TABLE propiedad_adjuntos ADD COLUMN storage_path VARCHAR"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_propiedad_adjuntos_storage_path ON propiedad_adjuntos(storage_path)"))
+            db.commit()
+        # comprobantes.storage_path
+        cols_c = {c["name"] for c in ins.get_columns("comprobantes")}
+        if "storage_path" not in cols_c:
+            db.execute(text("ALTER TABLE comprobantes ADD COLUMN storage_path VARCHAR"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_comprobantes_storage_path ON comprobantes(storage_path)"))
+            db.commit()
+    except Exception as e:
+        print(f"[_migrar_storage_path] {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def _ensure_storage_buckets():
+    """Crea los buckets de Supabase Storage si no existen. Sólo si las env
+    vars `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` están configuradas."""
+    from app.services import supabase_storage
+    if not supabase_storage.enabled():
+        return
+    ok, msg = supabase_storage.ensure_buckets()
+    print(f"[storage] ensure_buckets: ok={ok} | {msg}")
 
 
 @app.on_event("startup")

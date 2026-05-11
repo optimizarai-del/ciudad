@@ -10,13 +10,14 @@ Adjuntos por propiedad (fotos / documentos / planos).
 import base64
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import Response
+from fastapi.responses import Response, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.security import get_current_user
 from app import models
+from app.services import supabase_storage
 
 
 router = APIRouter(prefix="/api/propiedades", tags=["adjuntos"])
@@ -116,6 +117,23 @@ async def subir(
             propiedad_id=prop_id, es_principal=True
         ).update({"es_principal": False})
 
+    # Si Supabase Storage está habilitado, subir el blob ahí y guardar solo
+    # la ruta. Fallback: guardar base64 en la DB (modo legacy).
+    storage_path = None
+    blob_para_db: Optional[str] = b64
+    if supabase_storage.enabled():
+        path = supabase_storage.gen_path(f"prop-{prop_id}", nombre)
+        ok, info = supabase_storage.upload(
+            supabase_storage.BUCKET_ADJUNTOS, path, raw, mime,
+        )
+        if ok:
+            storage_path = info
+            blob_para_db = None
+        else:
+            # Si Storage falla por algún motivo (ej. red), caer al legacy en vez
+            # de bloquear al usuario subiendo el archivo.
+            print(f"[adjuntos] Storage upload falló: {info} — fallback a base64")
+
     a = models.PropiedadAdjunto(
         propiedad_id=prop_id,
         tipo=tipo,
@@ -123,7 +141,8 @@ async def subir(
         mime=mime,
         tamano_bytes=size,
         descripcion=desc,
-        blob_b64=b64,
+        blob_b64=blob_para_db,
+        storage_path=storage_path,
         es_principal=es_principal,
     )
     db.add(a)
@@ -137,6 +156,20 @@ def descargar(prop_id: int, aid: int, db: Session = Depends(get_db), user=Depend
     a = db.query(models.PropiedadAdjunto).filter_by(id=aid, propiedad_id=prop_id).first()
     if not a:
         raise HTTPException(404, "Adjunto no encontrado")
+
+    # Modo Storage: redirigir a una URL firmada (1h)
+    if a.storage_path and supabase_storage.enabled():
+        ok, signed = supabase_storage.get_signed_url(
+            supabase_storage.BUCKET_ADJUNTOS, a.storage_path, expires_in=3600,
+        )
+        if ok:
+            return RedirectResponse(url=signed, status_code=307)
+        # Si falla el sign, intentamos legacy si todavía está el blob
+        print(f"[adjuntos] sign falló: {signed} — intentando blob legacy")
+
+    # Modo legacy: blob inline en la DB
+    if not a.blob_b64:
+        raise HTTPException(404, "Contenido no disponible")
     raw = base64.b64decode(a.blob_b64)
     return Response(
         content=raw,
@@ -180,6 +213,14 @@ def eliminar(prop_id: int, aid: int, db: Session = Depends(get_db), user=Depends
     a = db.query(models.PropiedadAdjunto).filter_by(id=aid, propiedad_id=prop_id).first()
     if not a:
         raise HTTPException(404, "Adjunto no encontrado")
+
+    # Si vivía en Storage, borrarlo allá también (best-effort; si falla
+    # seguimos con el delete de la DB).
+    if a.storage_path and supabase_storage.enabled():
+        ok, info = supabase_storage.delete(supabase_storage.BUCKET_ADJUNTOS, a.storage_path)
+        if not ok:
+            print(f"[adjuntos] Storage delete falló: {info}")
+
     db.delete(a)
     db.commit()
     return {"ok": True}

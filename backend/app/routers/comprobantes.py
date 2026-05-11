@@ -1,13 +1,15 @@
 import base64
+import httpx
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.security import get_current_user
 from app import models
 from app.services.email_service import enviar_email, smtp_configurado
+from app.services import supabase_storage
 
 router = APIRouter(prefix="/api/comprobantes", tags=["comprobantes"])
 
@@ -50,6 +52,16 @@ def descargar(id: int, db: Session = Depends(get_db), user=Depends(get_current_u
     c = db.query(models.Comprobante).filter_by(id=id).first()
     if not c:
         raise HTTPException(404, "Comprobante no encontrado")
+
+    # Modo Storage
+    if c.storage_path and supabase_storage.enabled():
+        ok, signed = supabase_storage.get_signed_url(
+            supabase_storage.BUCKET_COMPROBANTES, c.storage_path, expires_in=3600,
+        )
+        if ok:
+            return RedirectResponse(url=signed, status_code=307)
+
+    # Modo legacy
     if not c.pdf_blob:
         raise HTTPException(404, "PDF no disponible para este comprobante")
     pdf = base64.b64decode(c.pdf_blob)
@@ -71,7 +83,20 @@ def reenviar(id: int, db: Session = Depends(get_db), user=Depends(get_current_us
     if not smtp_configurado():
         raise HTTPException(400, "SMTP no configurado en el servidor")
 
-    pdf = base64.b64decode(c.pdf_blob) if c.pdf_blob else None
+    # PDF: si está en Storage, descargarlo; si no, decodificar el blob.
+    pdf: Optional[bytes] = None
+    if c.storage_path and supabase_storage.enabled():
+        ok, signed = supabase_storage.get_signed_url(
+            supabase_storage.BUCKET_COMPROBANTES, c.storage_path, expires_in=300,
+        )
+        if ok:
+            try:
+                pdf = httpx.get(signed, timeout=10).content
+            except Exception as e:
+                print(f"[comprobantes] fetch signed url falló: {e}")
+    if pdf is None and c.pdf_blob:
+        pdf = base64.b64decode(c.pdf_blob)
+
     asunto = "Liquidación CIUDAD." if c.tipo == models.ComprobanteTipo.propietario else "Recibo de pago CIUDAD."
     cuerpo = f"Estimado/a {c.destinatario_nombre or ''},\n\nAdjuntamos el comprobante solicitado.\n\nCIUDAD."
     ok, msg = enviar_email(c.destinatario_email, asunto, cuerpo, pdf, f"comprobante-{c.id}.pdf")
