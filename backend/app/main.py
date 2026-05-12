@@ -163,6 +163,21 @@ def _migrar_storage_path():
             db.execute(text(f"ALTER TABLE {qual}comprobantes ADD COLUMN storage_path VARCHAR"))
             db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_comprobantes_storage_path ON {qual}comprobantes(storage_path)"))
             db.commit()
+
+        # blob_b64 antes era NOT NULL. Con Storage habilitado, los uploads
+        # nuevos guardan en Storage y dejan blob_b64 = NULL. Hacer la columna
+        # nullable si todavía está con la constraint vieja.
+        if IS_POSTGRES:
+            blob_col = next(
+                (c for c in ins.get_columns("propiedad_adjuntos", schema=schema)
+                 if c["name"] == "blob_b64"),
+                None,
+            )
+            if blob_col and not blob_col.get("nullable", True):
+                db.execute(text(
+                    f"ALTER TABLE {qual}propiedad_adjuntos ALTER COLUMN blob_b64 DROP NOT NULL"
+                ))
+                db.commit()
     except Exception as e:
         print(f"[_migrar_storage_path] {e}")
         db.rollback()
