@@ -359,7 +359,7 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
         fecha = hoy - timedelta(days=mes * 30)
         periodo = f"{fecha.year}-{fecha.month:02d}"
         cobrado = mes != 1  # último mes pendiente
-        estado_pago = models.PagoEstado.cobrado if cobrado else models.PagoEstado.pendiente
+        estado_pago = models.PagoEstado.pagado if cobrado else models.PagoEstado.pendiente
         db.add(models.Pago(
             contrato_id=c_martina.id,
             periodo=periodo,
@@ -379,7 +379,7 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
         fecha = hoy - timedelta(days=mes * 30)
         periodo = f"{fecha.year}-{fecha.month:02d}"
         cobrado = mes != 1
-        estado_pago = models.PagoEstado.cobrado if cobrado else models.PagoEstado.pendiente
+        estado_pago = models.PagoEstado.pagado if cobrado else models.PagoEstado.pendiente
         db.add(models.Pago(
             contrato_id=c_estudio.id,
             periodo=periodo,
@@ -408,7 +408,7 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
             monto_impuestos=0,
             monto_municipal=35_000,
             monto_total=535_000,
-            estado=models.PagoEstado.atrasado,
+            estado=models.PagoEstado.vencido,
             notas=f"{FIXTURE_TAG} En mora",
         ))
 
