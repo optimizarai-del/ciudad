@@ -11,7 +11,7 @@ load_dotenv(override=True)
 from app.database import Base, engine
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
 from app.routers import cobranza, ventas_router, comprobantes
-from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion
+from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture
 
 Base.metadata.create_all(bind=engine)
 
@@ -42,6 +42,7 @@ app.include_router(finanzas.router)
 app.include_router(adjuntos.router)
 app.include_router(recordatorios.router)
 app.include_router(storage_migracion.router)
+app.include_router(demo_fixture.router)
 
 
 @app.get("/health")
