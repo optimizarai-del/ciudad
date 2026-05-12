@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LogOut, Search, Bell, Sun, Moon } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import Logo from './Logo'
+import NotificacionesPanel from './NotificacionesPanel'
 import api from '../utils/api'
 
 export default function HUD() {
@@ -11,12 +12,19 @@ export default function HUD() {
   const { isDark, toggle } = useTheme()
   const nav = useNavigate()
   const [stats, setStats]   = useState(null)
-  const [alertas, setAlertas] = useState(0)
+  const [resumen, setResumen] = useState({ total: 0, criticos: 0 })
+  const [panelOpen, setPanelOpen] = useState(false)
+  const bellRef = useRef(null)
 
   useEffect(() => {
     const fetchAll = () => {
       api.get('/api/dashboard/hud').then(r => setStats(r.data)).catch(() => {})
-      api.get('/api/alertas/vencimientos?dias=30').then(r => setAlertas(r.data.length)).catch(() => {})
+      // Resumen completo: vencimientos + pagos en mora + eventos críticos.
+      // Devuelve {total, criticos, items}. Solo nos quedamos con los counts
+      // para el badge; el panel pide los items al abrirse.
+      api.get('/api/alertas/resumen')
+        .then(r => setResumen({ total: r.data.total, criticos: r.data.criticos }))
+        .catch(() => {})
     }
     fetchAll()
     const t = setInterval(fetchAll, 30000)
@@ -42,15 +50,22 @@ export default function HUD() {
         <div className="ml-auto flex items-center gap-1">
           <IconBtn><Search size={15} /></IconBtn>
 
-          {/* Bell con badge de alertas */}
-          <div className="relative">
-            <IconBtn onClick={() => nav('/contratos')}>
+          {/* Bell con badge + panel dropdown */}
+          <div className="relative" ref={bellRef}>
+            <IconBtn onClick={() => setPanelOpen(o => !o)} title="Notificaciones">
               <Bell size={15} />
             </IconBtn>
-            {alertas > 0 && (
-              <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-danger text-white text-[9px] font-bold grid place-items-center pointer-events-none">
-                {alertas > 9 ? '9+' : alertas}
+            {resumen.total > 0 && (
+              <span className={`absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full text-white text-[9px] font-bold grid place-items-center pointer-events-none
+                ${resumen.criticos > 0 ? 'bg-danger' : 'bg-[#B8893A]'}`}>
+                {resumen.total > 9 ? '9+' : resumen.total}
               </span>
+            )}
+            {panelOpen && (
+              <NotificacionesPanel
+                anchorRef={bellRef}
+                onClose={() => setPanelOpen(false)}
+              />
             )}
           </div>
 
