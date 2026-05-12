@@ -56,7 +56,6 @@ export default function Sidebar() {
         <Section label="Ventas">
           <NavItem to="/ventas/dashboard"    icon={TrendingUp}  label="Dashboard" />
           <NavItem to="/ventas/propiedades"  icon={Building2}   label="Propiedades" />
-          <NavItem to="/ventas/tokko"        icon={Store}       label="Portal Tokko" />
           <NavItem to="/ventas/clientes"     icon={Users}       label="Clientes Ventas" />
         </Section>
       )}

@@ -72,8 +72,11 @@ export default function App() {
         <Route path="/ventas/propiedades" element={
           <ProtectedRoute requireVentas><PropiedadesVenta /></ProtectedRoute>
         } />
+        {/* /ventas/tokko removida — Tokko se sincroniza desde el botón
+           "Sync Tokko" dentro de /ventas/propiedades. Mantengo la ruta
+           apuntando al mismo componente por compatibilidad de links viejos. */}
         <Route path="/ventas/tokko" element={
-          <ProtectedRoute requireVentas><Propiedades /></ProtectedRoute>
+          <ProtectedRoute requireVentas><PropiedadesVenta /></ProtectedRoute>
         } />
         <Route path="/ventas/clientes" element={
           <ProtectedRoute requireVentas><Clientes /></ProtectedRoute>
