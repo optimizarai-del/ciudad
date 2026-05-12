@@ -5,7 +5,15 @@ import SearchBar, { match } from '../components/SearchBar'
 import AdjuntosModal from '../components/AdjuntosModal'
 import api from '../utils/api'
 
-const TIPOS = ['departamento','casa','local','campo']
+const TIPOS = ['departamento','casa','local','oficina','galpon','campo']
+const TIPO_LABEL = {
+  departamento: 'Departamento',
+  casa: 'Casa',
+  local: 'Local',
+  oficina: 'Oficina / Consultorio',
+  galpon: 'Galpón',
+  campo: 'Campo',
+}
 const MODALIDADES = ['alquiler','venta','ambas']
 const ESTADOS = ['disponible','ocupada','reservada','inactiva']
 
@@ -23,10 +31,10 @@ const MODALIDAD_CHIP = {
 }
 
 const empty = {
-  codigo:'', direccion:'', ciudad:'', provincia:'', tipo:'departamento',
+  direccion:'', ciudad:'', provincia:'', tipo:'departamento',
   modalidad:'alquiler', estado:'disponible', superficie_m2:'', ambientes:'',
-  descripcion:'', precio_alquiler:'', precio_venta:'', expensas:'',
-  tasa_municipal:'', tokko_id:'', propietario_id:'',
+  descripcion:'', precio_alquiler:'', expensas:'',
+  tasa_municipal:'', propietario_id:'',
 }
 
 export default function Propiedades() {
@@ -35,16 +43,16 @@ export default function Propiedades() {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [filtroTipo, setFiltroTipo] = useState('todos')
-  const [filtroModalidad, setFiltroModalidad] = useState('todos')
+  const [filtroPropietario, setFiltroPropietario] = useState('todos')
   const [clientes, setClientes] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [adjPropiedad, setAdjPropiedad] = useState(null)
 
   const load = () => {
-    // Tokko = ventas. En el área de alquileres ocultamos las que tienen tokko_id;
-    // se ven en Ventas → Portal Tokko / Ventas → Propiedades.
+    // Solo alquileres en esta página. Las propiedades de venta (incluyendo
+    // las importadas de Tokko) viven en /ventas/propiedades.
     api.get('/api/propiedades').then(r =>
-      setList((r.data || []).filter(p => !p.tokko_id))
+      setList((r.data || []).filter(p => p.modalidad !== 'venta' && !p.tokko_id))
     )
     api.get('/api/clientes').then(r => setClientes(r.data))
   }
@@ -54,12 +62,27 @@ export default function Propiedades() {
   useEffect(() => {
     let r = [...list]
     if (filtroTipo !== 'todos') r = r.filter(p => p.tipo === filtroTipo)
-    if (filtroModalidad !== 'todos') r = r.filter(p => p.modalidad === filtroModalidad)
+    if (filtroPropietario !== 'todos') {
+      r = r.filter(p => String(p.propietario_id || '') === String(filtroPropietario))
+    }
     if (busqueda.trim()) {
-      r = r.filter(p => match(busqueda, p.codigo, p.direccion, p.ciudad, p.provincia, p.tipo, p.tokko_id))
+      r = r.filter(p => match(busqueda,
+        p.direccion, p.ciudad, p.provincia, p.tipo, p.propietario_nombre,
+      ))
     }
     setFiltered(r)
-  }, [list, filtroTipo, filtroModalidad, busqueda])
+  }, [list, filtroTipo, filtroPropietario, busqueda])
+
+  // Lista de propietarios que aparecen en las propiedades — para el filtro.
+  const propietariosEnLista = useMemo(() => {
+    const map = new Map()
+    list.forEach(p => {
+      if (p.propietario_id && p.propietario_nombre) {
+        map.set(p.propietario_id, p.propietario_nombre)
+      }
+    })
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]))
+  }, [list])
 
   const del = async id => {
     if (!confirm('¿Eliminar propiedad?')) return
@@ -71,11 +94,11 @@ export default function Propiedades() {
     <Layout>
       <div className="max-w-7xl mx-auto animate-fade-in">
         <header className="mb-10">
-          <div className="hero-eyebrow">Cartera inmobiliaria</div>
+          <div className="hero-eyebrow">Cartera de alquileres</div>
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div>
               <h1 className="hero-title text-5xl md:text-6xl mb-3">Propiedades.</h1>
-              <p className="hero-sub">Todas las unidades en un solo lugar.</p>
+              <p className="hero-sub">Inmuebles en alquiler — gestión, propietarios y disponibilidad.</p>
             </div>
             <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
               <Plus size={14} /> Nueva propiedad
@@ -86,22 +109,32 @@ export default function Propiedades() {
         {/* Búsqueda */}
         <div className="mb-4 max-w-md">
           <SearchBar value={busqueda} onChange={setBusqueda}
-            placeholder="Buscar por dirección, código, ciudad, Tokko ID..." />
+            placeholder="Buscar por dirección, ciudad, tipo o propietario…" />
         </div>
 
         {/* Filtros */}
-        <div className="flex flex-wrap gap-2 mb-8">
+        <div className="flex flex-wrap items-center gap-2 mb-8">
           <FilterPill active={filtroTipo === 'todos'} onClick={() => setFiltroTipo('todos')}
             label={`Todos (${list.length})`} />
           {TIPOS.map(t => (
             <FilterPill key={t} active={filtroTipo === t} onClick={() => setFiltroTipo(t)}
-              label={`${t} (${list.filter(p => p.tipo === t).length})`} />
+              label={`${TIPO_LABEL[t]} (${list.filter(p => p.tipo === t).length})`} />
           ))}
-          <div className="w-px bg-border mx-1" />
-          {MODALIDADES.map(m => (
-            <FilterPill key={m} active={filtroModalidad === m} onClick={() => setFiltroModalidad(m === filtroModalidad ? 'todos' : m)}
-              label={m} />
-          ))}
+          {propietariosEnLista.length > 0 && (
+            <>
+              <div className="w-px h-6 bg-border mx-1" />
+              <select
+                className="input !w-auto !py-1.5 text-[12px]"
+                value={filtroPropietario}
+                onChange={e => setFiltroPropietario(e.target.value)}
+              >
+                <option value="todos">Todos los propietarios</option>
+                {propietariosEnLista.map(([id, nombre]) => (
+                  <option key={id} value={id}>{nombre}</option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
 
         {filtered.length === 0 ? (
@@ -134,7 +167,13 @@ export default function Propiedades() {
                     <MapPin size={11} className="text-muted shrink-0" />
                     <p className="text-[12px] text-muted capitalize">{p.ciudad}{p.provincia ? `, ${p.provincia}` : ''}</p>
                   </div>
-                  <p className="text-[11px] text-muted mt-1 capitalize">{p.tipo} {p.superficie_m2 ? `· ${p.superficie_m2} m²` : ''} {p.ambientes ? `· ${p.ambientes} amb.` : ''}</p>
+                  <p className="text-[11px] text-muted mt-1">{TIPO_LABEL[p.tipo] || p.tipo} {p.superficie_m2 ? `· ${p.superficie_m2} m²` : ''} {p.ambientes ? `· ${p.ambientes} amb.` : ''}</p>
+                  {p.propietario_nombre && (
+                    <p className="text-[11px] text-muted mt-1 flex items-center gap-1">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary/40" />
+                      <span className="font-medium">Propietario:</span> {p.propietario_nombre}
+                    </p>
+                  )}
                 </div>
 
                 {/* Precios */}
@@ -143,12 +182,6 @@ export default function Propiedades() {
                     <div>
                       <p className="stat-label">Alquiler</p>
                       <p className="stat-value text-lg">${p.precio_alquiler?.toLocaleString('es-AR')}</p>
-                    </div>
-                  )}
-                  {p.precio_venta > 0 && (
-                    <div>
-                      <p className="stat-label">Venta</p>
-                      <p className="stat-value text-lg">${p.precio_venta?.toLocaleString('es-AR')}</p>
                     </div>
                   )}
                   {p.expensas > 0 && (
@@ -220,7 +253,12 @@ function Modal({ initial, clientes, onClose, onSaved }) {
   const [form, setForm] = useState(initial ? { ...initial } : { ...empty })
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
+  const [clientesLocal, setClientesLocal] = useState(clientes)
+  const [creandoProp, setCreandoProp] = useState(false)
   const set = k => e => setForm({ ...form, [k]: e.target.value })
+
+  // Mantener sincronizado si el padre recarga la lista
+  useEffect(() => { setClientesLocal(clientes) }, [clientes])
 
   const submit = async e => {
     e.preventDefault(); setLoading(true); setErr('')
@@ -257,17 +295,11 @@ function Modal({ initial, clientes, onClose, onSaved }) {
         </div>
 
         <form onSubmit={submit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Código</label>
-              <input className="input" placeholder="DEP-001" value={form.codigo || ''} onChange={set('codigo')} />
-            </div>
-            <div>
-              <label className="label">Tipo *</label>
-              <select className="input" value={form.tipo} onChange={set('tipo')} required>
-                {TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
+          <div>
+            <label className="label">Tipo *</label>
+            <select className="input" value={form.tipo} onChange={set('tipo')} required>
+              {TIPOS.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
+            </select>
           </div>
 
           <div>
@@ -286,13 +318,7 @@ function Modal({ initial, clientes, onClose, onSaved }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="label">Modalidad</label>
-              <select className="input" value={form.modalidad} onChange={set('modalidad')}>
-                {MODALIDADES.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Estado</label>
               <select className="input" value={form.estado} onChange={set('estado')}>
@@ -311,10 +337,17 @@ function Modal({ initial, clientes, onClose, onSaved }) {
               <input className="input" type="number" value={form.superficie_m2 || ''} onChange={set('superficie_m2')} />
             </div>
             <div>
-              <label className="label">Propietario</label>
+              <div className="flex items-center justify-between">
+                <label className="label">Propietario</label>
+                <button type="button"
+                  onClick={() => setCreandoProp(true)}
+                  className="text-[11px] text-primary dark:text-white hover:underline font-medium">
+                  + Nuevo propietario
+                </button>
+              </div>
               <select className="input" value={form.propietario_id || ''} onChange={set('propietario_id')}>
                 <option value="">Sin asignar</option>
-                {clientes.filter(c => c.rol === 'propietario').map(c => (
+                {clientesLocal.filter(c => c.rol === 'propietario').map(c => (
                   <option key={c.id} value={c.id}>{c.nombre} {c.apellido}</option>
                 ))}
               </select>
@@ -324,14 +357,10 @@ function Modal({ initial, clientes, onClose, onSaved }) {
           <div className="divider !my-1" />
           <p className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Costos mensuales</p>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="label">Alquiler base $</label>
               <input className="input" type="number" value={form.precio_alquiler || ''} onChange={set('precio_alquiler')} />
-            </div>
-            <div>
-              <label className="label">Precio venta $</label>
-              <input className="input" type="number" value={form.precio_venta || ''} onChange={set('precio_venta')} />
             </div>
             <div>
               <label className="label">Expensas $</label>
@@ -343,10 +372,6 @@ function Modal({ initial, clientes, onClose, onSaved }) {
                 value={form.tasa_municipal || ''}
                 onChange={set('tasa_municipal')}
                 placeholder="Inmobiliario + ABL + alumbrado…" />
-            </div>
-            <div>
-              <label className="label">ID Tokko (venta)</label>
-              <input className="input" placeholder="TKO-0000" value={form.tokko_id || ''} onChange={set('tokko_id')} />
             </div>
           </div>
 
@@ -361,6 +386,92 @@ function Modal({ initial, clientes, onClose, onSaved }) {
             <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
             <button className="btn-primary flex-1" disabled={loading}>
               {loading ? 'Guardando…' : initial ? 'Guardar cambios' : 'Crear propiedad'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {creandoProp && (
+        <ModalNuevoPropietario
+          onClose={() => setCreandoProp(false)}
+          onSaved={nuevo => {
+            setClientesLocal(prev => [...prev, nuevo])
+            setForm(f => ({ ...f, propietario_id: nuevo.id }))
+            setCreandoProp(false)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+
+function ModalNuevoPropietario({ onClose, onSaved }) {
+  const [form, setForm] = useState({
+    nombre: '', apellido: '', razon_social: '',
+    documento: '', email: '', telefono: '',
+    rol: 'propietario', notas: '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+  const set = k => e => setForm({ ...form, [k]: e.target.value })
+
+  const submit = async e => {
+    e.preventDefault(); setLoading(true); setErr('')
+    try {
+      const r = await api.post('/api/clientes', form)
+      onSaved(r.data)
+    } catch (ex) {
+      setErr(ex.response?.data?.detail || 'Error al crear el propietario.')
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] grid place-items-center p-4"
+      onClick={onClose}>
+      <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="hero-title text-2xl">Nuevo propietario.</h2>
+          <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
+        </div>
+
+        <form onSubmit={submit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Nombre *</label>
+              <input className="input" required value={form.nombre} onChange={set('nombre')} />
+            </div>
+            <div>
+              <label className="label">Apellido</label>
+              <input className="input" value={form.apellido} onChange={set('apellido')} />
+            </div>
+          </div>
+          <div>
+            <label className="label">Razón social (opcional)</label>
+            <input className="input" value={form.razon_social} onChange={set('razon_social')} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">DNI / CUIT</label>
+              <input className="input" value={form.documento} onChange={set('documento')} />
+            </div>
+            <div>
+              <label className="label">Teléfono</label>
+              <input className="input" value={form.telefono} onChange={set('telefono')} />
+            </div>
+          </div>
+          <div>
+            <label className="label">Email</label>
+            <input className="input" type="email" value={form.email} onChange={set('email')} />
+          </div>
+
+          {err && <p className="text-[13px] text-danger bg-danger/5 px-4 py-2 rounded-xl">{err}</p>}
+
+          <div className="flex gap-3 pt-2">
+            <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
+            <button className="btn-primary flex-1" disabled={loading}>
+              {loading ? 'Creando…' : 'Crear propietario'}
             </button>
           </div>
         </form>

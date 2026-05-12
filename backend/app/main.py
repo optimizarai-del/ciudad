@@ -164,6 +164,22 @@ def _migrar_storage_path():
             db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_comprobantes_storage_path ON {qual}comprobantes(storage_path)"))
             db.commit()
 
+        # Agregar valores al enum propiedadtipo si Postgres no los tiene.
+        # ALTER TYPE ADD VALUE no puede correr dentro de una transacción;
+        # usamos una conexión con AUTOCOMMIT explícito.
+        if IS_POSTGRES:
+            try:
+                with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as raw:
+                    for nuevo_tipo in ("oficina", "galpon"):
+                        try:
+                            raw.execute(text(
+                                f"ALTER TYPE {qual}propiedadtipo ADD VALUE IF NOT EXISTS '{nuevo_tipo}'"
+                            ))
+                        except Exception as e:
+                            print(f"[migrar] enum propiedadtipo += {nuevo_tipo}: {e}")
+            except Exception as e:
+                print(f"[migrar] enum propiedadtipo conn: {e}")
+
         # blob_b64 antes era NOT NULL. Con Storage habilitado, los uploads
         # nuevos guardan en Storage y dejan blob_b64 = NULL. Hacer la columna
         # nullable si todavía está con la constraint vieja.

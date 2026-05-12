@@ -85,6 +85,7 @@ class PropiedadCreate(PropiedadBase):
 
 class PropiedadOut(PropiedadBase):
     id: int
+    propietario_nombre: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -22,24 +22,41 @@ export default function AdjuntosModal({ propiedad, onClose }) {
   }
   useEffect(() => { cargar() }, [propiedad.id])
 
-  const subir = async (file) => {
-    if (!file) return
+  const [progreso, setProgreso] = useState(null)  // { hechos, total }
+
+  const subir = async (filesList) => {
+    const files = Array.from(filesList || [])
+    if (!files.length) return
     setUploading(true); setErr('')
-    try {
-      const fd = new FormData()
-      fd.append('archivo', file)
-      fd.append('tipo', tipo)
-      if (descripcion) fd.append('descripcion', descripcion)
-      fd.append('es_principal', esPrincipal ? 'true' : 'false')
-      await api.post(`/api/propiedades/${propiedad.id}/adjuntos`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-      setDescripcion(''); setPrincipal(false)
-      if (fileRef.current) fileRef.current.value = ''
-      cargar()
-    } catch (e) {
-      setErr(e.response?.data?.detail || 'Error al subir')
-    } finally { setUploading(false) }
+    setProgreso({ hechos: 0, total: files.length })
+
+    const errores = []
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      try {
+        const fd = new FormData()
+        fd.append('archivo', file)
+        fd.append('tipo', tipo)
+        if (descripcion) fd.append('descripcion', descripcion)
+        // Solo el primer archivo del batch puede ser principal (sino se pisan)
+        fd.append('es_principal', (esPrincipal && i === 0) ? 'true' : 'false')
+        await api.post(`/api/propiedades/${propiedad.id}/adjuntos`, fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+      } catch (e) {
+        errores.push(`${file.name}: ${e.response?.data?.detail || 'falló'}`)
+      }
+      setProgreso({ hechos: i + 1, total: files.length })
+    }
+
+    setDescripcion(''); setPrincipal(false)
+    if (fileRef.current) fileRef.current.value = ''
+    if (errores.length) {
+      setErr(`${errores.length} archivo(s) fallaron: ${errores.slice(0, 3).join(' | ')}`)
+    }
+    cargar()
+    setUploading(false)
+    setTimeout(() => setProgreso(null), 1500)
   }
 
   const eliminar = async (a) => {
@@ -92,14 +109,21 @@ export default function AdjuntosModal({ propiedad, onClose }) {
             <input
               ref={fileRef}
               type="file"
-              onChange={e => subir(e.target.files?.[0])}
+              multiple
+              onChange={e => subir(e.target.files)}
               accept="image/*,application/pdf"
               className="hidden"
             />
             <button className="btn-primary" onClick={() => fileRef.current?.click()} disabled={uploading}>
-              <Upload size={13} />{uploading ? 'Subiendo…' : 'Subir archivo'}
+              <Upload size={13} />
+              {uploading
+                ? (progreso ? `Subiendo ${progreso.hechos}/${progreso.total}…` : 'Subiendo…')
+                : 'Subir archivos'}
             </button>
           </div>
+          <p className="text-[11px] text-muted dark:text-gray-500 mt-2">
+            Podés seleccionar varios archivos a la vez (Ctrl/⌘ + click).
+          </p>
           {err && <p className="text-[12px] text-danger mt-2">{err}</p>}
         </div>
 

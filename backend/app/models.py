@@ -20,6 +20,8 @@ class PropiedadTipo(str, Enum):
     departamento = "departamento"
     casa = "casa"
     local = "local"
+    oficina = "oficina"
+    galpon = "galpon"
     campo = "campo"
 
 
