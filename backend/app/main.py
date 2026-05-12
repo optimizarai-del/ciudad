@@ -164,6 +164,16 @@ def _migrar_storage_path():
             db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_comprobantes_storage_path ON {qual}comprobantes(storage_path)"))
             db.commit()
 
+        # contratos: 4 columnas para archivo firmado/actualizado manualmente
+        cols_k = {c["name"] for c in ins.get_columns("contratos", schema=schema)}
+        if "archivo_path" not in cols_k:
+            db.execute(text(f"ALTER TABLE {qual}contratos ADD COLUMN archivo_path VARCHAR"))
+            db.execute(text(f"ALTER TABLE {qual}contratos ADD COLUMN archivo_nombre VARCHAR"))
+            db.execute(text(f"ALTER TABLE {qual}contratos ADD COLUMN archivo_mime VARCHAR"))
+            db.execute(text(f"ALTER TABLE {qual}contratos ADD COLUMN archivo_subido_at TIMESTAMP"))
+            db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_contratos_archivo_path ON {qual}contratos(archivo_path)"))
+            db.commit()
+
         # Agregar valores al enum propiedadtipo si Postgres no los tiene.
         # ALTER TYPE ADD VALUE no puede correr dentro de una transacción;
         # usamos una conexión con AUTOCOMMIT explícito.

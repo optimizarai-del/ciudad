@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, DollarSign } from 'lucide-react'
+import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, DollarSign, FileType2, Upload, FileCheck2 } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import HistorialPagos from '../components/HistorialPagos'
 import SearchBar, { match } from '../components/SearchBar'
@@ -50,6 +50,41 @@ async function descargarPDF(c) {
   }
 }
 
+async function descargarDocx(c) {
+  try {
+    const r = await api.get(`/api/contratos/${c.id}/docx`, { responseType: 'blob' })
+    const url = URL.createObjectURL(new Blob([r.data], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `contrato-${c.codigo || c.id}.docx`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (e) {
+    alert(e.response?.data?.detail || 'Error al generar el Word.')
+  }
+}
+
+async function descargarArchivo(c) {
+  // Archivo subido manualmente — el backend devuelve 307 a Storage signed URL.
+  try {
+    const r = await api.get(`/api/contratos/${c.id}/archivo`, { responseType: 'blob' })
+    const url = URL.createObjectURL(r.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = c.archivo_nombre || `contrato-${c.codigo || c.id}.docx`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (e) {
+    alert(e.response?.data?.detail || 'No se pudo descargar el archivo.')
+  }
+}
+
 export default function Contratos() {
   const [list, setList]         = useState([])
   const [propiedades, setProp]  = useState([])
@@ -88,6 +123,20 @@ export default function Contratos() {
     if (!confirm('¿Eliminar contrato?')) return
     await api.delete(`/api/contratos/${id}`)
     load()
+  }
+
+  const subirArchivo = async (c, file) => {
+    if (!file) return
+    const fd = new FormData()
+    fd.append('archivo', file)
+    try {
+      await api.post(`/api/contratos/${c.id}/archivo`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      load()
+    } catch (e) {
+      alert(e.response?.data?.detail || 'No se pudo subir el archivo.')
+    }
   }
 
   const propName = id => propiedades.find(p => p.id === id)?.direccion || `Propiedad #${id}`
@@ -166,12 +215,20 @@ export default function Contratos() {
                   </span>
                 </div>
 
-                <div className="flex gap-2 mt-4">
+                {c.archivo_nombre && (
+                  <div className="mt-3 px-3 py-2 rounded-xl bg-success/5 border border-success/20 text-[11px] text-success flex items-center gap-2">
+                    <FileCheck2 size={12} />
+                    <span className="truncate flex-1">{c.archivo_nombre}</span>
+                    <button className="underline" onClick={() => descargarArchivo(c)}>Descargar</button>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2 mt-4">
                   <button className="btn-secondary flex-1 text-[12px] py-2"
                     onClick={() => setHistorialContrato(c)}>
                     <DollarSign size={12} /> Pagos
                   </button>
-                  <button className="btn-ghost py-2 px-3 text-[12px]"
+                  <button className="btn-ghost py-2 px-3 text-[12px]" title="Editar"
                     onClick={() => { setEditing(c); setOpen(true) }}>
                     <Pencil size={12} />
                   </button>
@@ -179,6 +236,16 @@ export default function Contratos() {
                     onClick={() => descargarPDF(c)}>
                     <Download size={12} />
                   </button>
+                  <button className="btn-ghost py-2 px-3 text-[12px]" title="Descargar Word editable"
+                    onClick={() => descargarDocx(c)}>
+                    <FileType2 size={12} />
+                  </button>
+                  <label className="btn-ghost py-2 px-3 text-[12px] cursor-pointer" title="Subir contrato firmado / actualizado">
+                    <Upload size={12} />
+                    <input type="file" className="hidden"
+                      accept=".docx,.doc,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+                      onChange={e => { subirArchivo(c, e.target.files?.[0]); e.target.value = '' }} />
+                  </label>
                   <button className="btn-danger py-2 px-3" onClick={() => del(c.id)}>
                     <Trash2 size={12} />
                   </button>
@@ -235,7 +302,13 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
   const [form, setForm]   = useState(initial ? { ...initial, fecha_inicio: initial.fecha_inicio || '', fecha_fin: initial.fecha_fin || '' } : { ...empty })
   const [loading, setLoading] = useState(false)
   const [err, setErr]     = useState('')
+  const [propsLocal, setPropsLocal] = useState(propiedades)
+  const [clientesLocal, setClientesLocal] = useState(clientes)
+  const [creando, setCreando] = useState(null)  // 'propiedad' | 'propietario' | 'inquilino' | null
   const set = k => e => setForm({ ...form, [k]: e.target.value })
+
+  useEffect(() => { setPropsLocal(propiedades) }, [propiedades])
+  useEffect(() => { setClientesLocal(clientes) }, [clientes])
 
   const submit = async e => {
     e.preventDefault(); setLoading(true); setErr('')
@@ -266,32 +339,40 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
         </div>
 
         <form onSubmit={submit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Código</label>
-              <input className="input" placeholder="ALQ-2026-001" value={form.codigo || ''} onChange={set('codigo')} />
-            </div>
-            <div>
-              <label className="label">Tipo *</label>
-              <select className="input" value={form.tipo} onChange={set('tipo')} required>
-                {TIPOS.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
-              </select>
-            </div>
-          </div>
-
           <div>
-            <label className="label">Propiedad *</label>
-            <select className="input" value={form.propiedad_id || ''} onChange={set('propiedad_id')} required>
-              <option value="">Seleccionar propiedad…</option>
-              {propiedades.map(p => <option key={p.id} value={p.id}>{p.direccion}</option>)}
+            <label className="label">Tipo *</label>
+            <select className="input" value={form.tipo} onChange={set('tipo')} required>
+              {TIPOS.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
             </select>
           </div>
 
           <div>
-            <label className="label">Inquilino / Comprador</label>
+            <div className="flex items-center justify-between">
+              <label className="label">Propiedad *</label>
+              <button type="button" onClick={() => setCreando('propiedad')}
+                className="text-[11px] text-primary dark:text-white hover:underline font-medium">
+                + Nueva propiedad
+              </button>
+            </div>
+            <select className="input" value={form.propiedad_id || ''} onChange={set('propiedad_id')} required>
+              <option value="">Seleccionar propiedad…</option>
+              {propsLocal.map(p => <option key={p.id} value={p.id}>{p.direccion}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="label">Inquilino / Comprador</label>
+              <button type="button" onClick={() => setCreando('inquilino')}
+                className="text-[11px] text-primary dark:text-white hover:underline font-medium">
+                + Nuevo inquilino
+              </button>
+            </div>
             <select className="input" value={form.inquilino_id || ''} onChange={set('inquilino_id')}>
               <option value="">Sin asignar</option>
-              {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre} {c.apellido}</option>)}
+              {clientesLocal
+                .filter(c => c.rol === 'inquilino' || c.rol === 'comprador')
+                .map(c => <option key={c.id} value={c.id}>{c.nombre} {c.apellido}</option>)}
             </select>
           </div>
 
@@ -365,6 +446,158 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
             <button className="btn-primary flex-1" disabled={loading}>
               {loading ? 'Guardando…' : initial ? 'Guardar' : 'Crear contrato'}
             </button>
+          </div>
+        </form>
+      </div>
+
+      {creando === 'propiedad' && (
+        <ModalQuickPropiedad
+          onClose={() => setCreando(null)}
+          onSaved={p => {
+            setPropsLocal(prev => [p, ...prev])
+            setForm(f => ({ ...f, propiedad_id: p.id }))
+            setCreando(null)
+          }}
+        />
+      )}
+      {creando === 'inquilino' && (
+        <ModalQuickCliente
+          rol="inquilino"
+          onClose={() => setCreando(null)}
+          onSaved={c => {
+            setClientesLocal(prev => [c, ...prev])
+            setForm(f => ({ ...f, inquilino_id: c.id }))
+            setCreando(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+
+function ModalQuickPropiedad({ onClose, onSaved }) {
+  const [form, setForm] = useState({
+    direccion: '', tipo: 'departamento', ciudad: '', provincia: '',
+    modalidad: 'alquiler', estado: 'disponible',
+    precio_alquiler: '', expensas: '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+  const set = k => e => setForm({ ...form, [k]: e.target.value })
+  const submit = async e => {
+    e.preventDefault(); setLoading(true); setErr('')
+    const payload = { ...form }
+    ;['precio_alquiler','expensas'].forEach(k => {
+      payload[k] = payload[k] === '' ? null : Number(payload[k]) || null
+    })
+    try {
+      const r = await api.post('/api/propiedades', payload)
+      onSaved(r.data)
+    } catch (e) { setErr(e.response?.data?.detail || 'Error al crear propiedad.') }
+    finally { setLoading(false) }
+  }
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] grid place-items-center p-4"
+      onClick={onClose}>
+      <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="hero-title text-xl">Nueva propiedad.</h3>
+          <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="label">Dirección *</label>
+            <input className="input" required value={form.direccion} onChange={set('direccion')} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Tipo</label>
+              <select className="input" value={form.tipo} onChange={set('tipo')}>
+                {['departamento','casa','local','oficina','galpon','campo'].map(t =>
+                  <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Ciudad</label>
+              <input className="input" value={form.ciudad} onChange={set('ciudad')} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Alquiler $</label>
+              <input className="input" type="number" value={form.precio_alquiler} onChange={set('precio_alquiler')} />
+            </div>
+            <div>
+              <label className="label">Expensas $</label>
+              <input className="input" type="number" value={form.expensas} onChange={set('expensas')} />
+            </div>
+          </div>
+          {err && <p className="text-[12px] text-danger">{err}</p>}
+          <div className="flex gap-3 pt-2">
+            <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
+            <button className="btn-primary flex-1" disabled={loading}>{loading ? 'Creando…' : 'Crear'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+
+function ModalQuickCliente({ rol, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    nombre: '', apellido: '', razon_social: '',
+    documento: '', email: '', telefono: '', rol, notas: '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+  const set = k => e => setForm({ ...form, [k]: e.target.value })
+  const submit = async e => {
+    e.preventDefault(); setLoading(true); setErr('')
+    try {
+      const r = await api.post('/api/clientes', form)
+      onSaved(r.data)
+    } catch (e) { setErr(e.response?.data?.detail || 'Error al crear.') }
+    finally { setLoading(false) }
+  }
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] grid place-items-center p-4"
+      onClick={onClose}>
+      <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="hero-title text-xl">Nuevo {rol}.</h3>
+          <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Nombre *</label>
+              <input className="input" required value={form.nombre} onChange={set('nombre')} />
+            </div>
+            <div>
+              <label className="label">Apellido</label>
+              <input className="input" value={form.apellido} onChange={set('apellido')} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">DNI / CUIT</label>
+              <input className="input" value={form.documento} onChange={set('documento')} />
+            </div>
+            <div>
+              <label className="label">Teléfono</label>
+              <input className="input" value={form.telefono} onChange={set('telefono')} />
+            </div>
+          </div>
+          <div>
+            <label className="label">Email</label>
+            <input className="input" type="email" value={form.email} onChange={set('email')} />
+          </div>
+          {err && <p className="text-[12px] text-danger">{err}</p>}
+          <div className="flex gap-3 pt-2">
+            <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
+            <button className="btn-primary flex-1" disabled={loading}>{loading ? 'Creando…' : 'Crear'}</button>
           </div>
         </form>
       </div>

@@ -170,6 +170,13 @@ class Contrato(Base):
     notas = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Archivo del contrato firmado / actualizado manualmente (subido por el
+    # admin tras editarlo en Word). Storage path en bucket ciudad-contratos.
+    archivo_path = Column(String, nullable=True, index=True)
+    archivo_nombre = Column(String, nullable=True)
+    archivo_mime = Column(String, nullable=True)
+    archivo_subido_at = Column(DateTime, nullable=True)
+
     pagos = relationship("Pago", back_populates="contrato", cascade="all, delete")
     ajustes = relationship("AjusteContrato", back_populates="contrato", cascade="all, delete")
 

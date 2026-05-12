@@ -25,6 +25,7 @@ from typing import Optional
 
 BUCKET_ADJUNTOS = "ciudad-adjuntos"
 BUCKET_COMPROBANTES = "ciudad-comprobantes"
+BUCKET_CONTRATOS = "ciudad-contratos"
 
 
 def _base_url() -> Optional[str]:
@@ -66,7 +67,7 @@ def ensure_buckets() -> tuple[bool, str]:
 
     base = _base_url()
     created = []
-    for bucket in (BUCKET_ADJUNTOS, BUCKET_COMPROBANTES):
+    for bucket in (BUCKET_ADJUNTOS, BUCKET_COMPROBANTES, BUCKET_CONTRATOS):
         try:
             r = httpx.post(
                 f"{base}/storage/v1/bucket",

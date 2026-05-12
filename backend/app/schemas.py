@@ -115,6 +115,8 @@ class ContratoCreate(ContratoBase):
 
 class ContratoOut(ContratoBase):
     id: int
+    archivo_nombre: Optional[str] = None
+    archivo_subido_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

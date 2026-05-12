@@ -16,3 +16,5 @@ reportlab>=4.0.0
 # Driver Postgres para producción (Supabase). Binary wheel para evitar
 # compilar libpq en el contenedor.
 psycopg2-binary==2.9.9
+# Generación de contratos en .docx editables.
+python-docx==1.1.2
