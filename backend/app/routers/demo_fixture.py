@@ -143,7 +143,7 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
             notas=f"{FIXTURE_TAG} Galpón comercial",
         ),
         models.Cliente(
-            nombre=None, apellido=None,
+            nombre="Inversiones Pampa", apellido="SRL",
             razon_social="Inversiones Pampa SRL",
             documento="30-71456789-5", email="contacto.pampa.demo@ciudad.com",
             telefono="+54 9 11 4500-1003",
@@ -179,7 +179,7 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
             notas=f"{FIXTURE_TAG} Borrador firmado pendiente",
         ),
         models.Cliente(
-            nombre=None, apellido=None,
+            nombre="Estudio Notarial", apellido="Ríos & Asoc.",
             razon_social="Estudio Notarial Ríos & Asoc.",
             documento="30-71987654-2", email="estudio.rios.demo@ciudad.com",
             telefono="+54 9 11 4500-2004",
