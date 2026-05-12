@@ -12,10 +12,16 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel, EmailStr
 
-from app.database import get_db
+from app.database import get_db, IS_POSTGRES, CIUDAD_SCHEMA
 from app.security import get_current_user, hash_pw
 from app import models, schemas
 from app.services import welcome_email
+
+
+# Prefijo de schema para SQL crudo. En Postgres todas las tablas viven en
+# `ciudad.`, así que las queries text() necesitan calificarlas explícitamente
+# para no depender del search_path (que con Supavisor a veces falla).
+SCHEMA_PREFIX = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -146,10 +152,14 @@ def eliminar(id: int, db: Session = Depends(get_db), user=Depends(get_current_us
             )
 
     # Limpiar FKs débiles antes del delete (los registros se mantienen sin owner)
-    db.execute(text("UPDATE eventos SET user_id = NULL WHERE user_id = :id"),
-               {"id": id})
-    db.execute(text("UPDATE consultas_ia SET user_id = NULL WHERE user_id = :id"),
-               {"id": id})
+    db.execute(
+        text(f"UPDATE {SCHEMA_PREFIX}eventos SET user_id = NULL WHERE user_id = :id"),
+        {"id": id},
+    )
+    db.execute(
+        text(f"UPDATE {SCHEMA_PREFIX}consultas_ia SET user_id = NULL WHERE user_id = :id"),
+        {"id": id},
+    )
     db.delete(obj)
     db.commit()
     return None

@@ -24,19 +24,29 @@ CIUDAD_SCHEMA = os.getenv("CIUDAD_DB_SCHEMA", "ciudad")
 if IS_POSTGRES:
     # pool_pre_ping evita errores de "connection has been closed" cuando el
     # pooler de Supabase cierra conexiones idle.
+    #
+    # `options=-c search_path=...` se envía en el startup packet de Postgres,
+    # así que vale TANTO para conexiones nuevas como para las reusadas por
+    # Supavisor (event listener `connect` no es 100% fiable con el pooler).
     engine = create_engine(
         DATABASE_URL,
         pool_pre_ping=True,
         pool_recycle=1800,
+        connect_args={
+            "options": f"-c search_path={CIUDAD_SCHEMA},public",
+        },
     )
 
-    # Forzar search_path a `ciudad` en cada conexión. Así todos los modelos
-    # quedan en ese schema sin tocar __table_args__ en cada modelo.
+    # Cinturón y tirantes: además del options, seteamos via SQL al abrir cada
+    # conexión física. Si una no funciona, la otra cubre.
     @event.listens_for(engine, "connect")
     def _set_search_path(dbapi_conn, _):
-        cursor = dbapi_conn.cursor()
-        cursor.execute(f"SET search_path TO {CIUDAD_SCHEMA}, public")
-        cursor.close()
+        try:
+            cursor = dbapi_conn.cursor()
+            cursor.execute(f"SET search_path TO {CIUDAD_SCHEMA}, public")
+            cursor.close()
+        except Exception as e:
+            print(f"[database] _set_search_path warning: {e}")
 
     metadata = MetaData(schema=CIUDAD_SCHEMA)
 else:

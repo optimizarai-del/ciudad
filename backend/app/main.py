@@ -145,21 +145,23 @@ def _migrar_storage_path():
     También permite que el campo blob legacy sea NULL en propiedad_adjuntos.
     """
     from sqlalchemy import text, inspect
-    from app.database import SessionLocal, engine
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
     db = SessionLocal()
     try:
         ins = inspect(engine)
         # propiedad_adjuntos.storage_path
-        cols_adj = {c["name"] for c in ins.get_columns("propiedad_adjuntos")}
+        cols_adj = {c["name"] for c in ins.get_columns("propiedad_adjuntos", schema=schema)}
         if "storage_path" not in cols_adj:
-            db.execute(text("ALTER TABLE propiedad_adjuntos ADD COLUMN storage_path VARCHAR"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_propiedad_adjuntos_storage_path ON propiedad_adjuntos(storage_path)"))
+            db.execute(text(f"ALTER TABLE {qual}propiedad_adjuntos ADD COLUMN storage_path VARCHAR"))
+            db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_propiedad_adjuntos_storage_path ON {qual}propiedad_adjuntos(storage_path)"))
             db.commit()
         # comprobantes.storage_path
-        cols_c = {c["name"] for c in ins.get_columns("comprobantes")}
+        cols_c = {c["name"] for c in ins.get_columns("comprobantes", schema=schema)}
         if "storage_path" not in cols_c:
-            db.execute(text("ALTER TABLE comprobantes ADD COLUMN storage_path VARCHAR"))
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_comprobantes_storage_path ON comprobantes(storage_path)"))
+            db.execute(text(f"ALTER TABLE {qual}comprobantes ADD COLUMN storage_path VARCHAR"))
+            db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_comprobantes_storage_path ON {qual}comprobantes(storage_path)"))
             db.commit()
     except Exception as e:
         print(f"[_migrar_storage_path] {e}")
