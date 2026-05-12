@@ -27,8 +27,8 @@ router = APIRouter(prefix="/api/propiedades", tags=["adjuntos"])
 MAX_BYTES = 8 * 1024 * 1024
 
 
-def _serialize(a: models.PropiedadAdjunto) -> dict:
-    return {
+def _serialize(a: models.PropiedadAdjunto, incluir_url: bool = False) -> dict:
+    out = {
         "id": a.id,
         "propiedad_id": a.propiedad_id,
         "tipo": a.tipo.value if hasattr(a.tipo, "value") else a.tipo,
@@ -39,10 +39,41 @@ def _serialize(a: models.PropiedadAdjunto) -> dict:
         "es_principal": a.es_principal,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
+    if incluir_url:
+        out["url"] = _url_directa(a)
+    return out
+
+
+def _url_directa(a: models.PropiedadAdjunto) -> str | None:
+    """URL firmada de Supabase Storage o data URI legacy. Sirve para usar
+    directamente en <img src> y <a href> desde el frontend, sin pasar por el
+    backend (que requiere Authorization header)."""
+    if a.storage_path and supabase_storage.enabled():
+        ok, signed = supabase_storage.get_signed_url(
+            supabase_storage.BUCKET_ADJUNTOS, a.storage_path, expires_in=3600,
+        )
+        if ok:
+            return signed
+    if a.blob_b64:
+        # Legacy: data URI inline (sirve para imágenes y PDFs pequeños)
+        return f"data:{a.mime or 'application/octet-stream'};base64,{a.blob_b64}"
+    return None
 
 
 @router.get("/{prop_id}/adjuntos")
-def listar(prop_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def listar(
+    prop_id: int,
+    incluir_url: bool = False,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Lista adjuntos de una propiedad.
+
+    Si `incluir_url=true`, cada item trae un campo `url` con la URL firmada
+    de Supabase Storage (válida 1h) o un data URI base64 para legacy. Útil
+    para previsualizar thumbnails en el frontend sin tener que pasar por el
+    backend con auth header en cada <img src>.
+    """
     prop = db.query(models.Propiedad).filter_by(id=prop_id).first()
     if not prop:
         raise HTTPException(404, "Propiedad no encontrada")
@@ -53,7 +84,7 @@ def listar(prop_id: int, db: Session = Depends(get_db), user=Depends(get_current
                   models.PropiedadAdjunto.created_at.desc())
         .all()
     )
-    return [_serialize(a) for a in adj]
+    return [_serialize(a, incluir_url=incluir_url) for a in adj]
 
 
 class AdjuntoCreateJSON(BaseModel):
