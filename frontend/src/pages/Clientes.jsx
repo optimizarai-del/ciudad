@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Users, Pencil, Trash2, X, Phone, Mail } from 'lucide-react'
+import { Plus, Users, Pencil, Trash2, X, Phone, Mail, History, Home, Calendar } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import SearchBar, { match } from '../components/SearchBar'
 import api from '../utils/api'
@@ -14,15 +14,54 @@ const ROL_CHIP = {
 
 const empty = { nombre:'', apellido:'', razon_social:'', documento:'', email:'', telefono:'', rol:'inquilino', notas:'' }
 
+// El área de alquileres muestra principalmente inquilinos. Por eso el filtro
+// arranca en 'inquilino'. Si querés ver propietarios u otros, cambialo desde
+// las pills.
+const FILTRO_DEFAULT = 'inquilino'
+
+function fmtFecha(s) {
+  if (!s) return '—'
+  try { return new Date(s).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) }
+  catch { return s }
+}
+
 export default function Clientes() {
   const [list, setList] = useState([])
-  const [filtro, setFiltro] = useState('todos')
+  const [filtro, setFiltro] = useState(FILTRO_DEFAULT)
   const [busqueda, setBusqueda] = useState('')
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(null)
+  // historiales por cliente_id → {alquilando, contratos_total, cliente_desde}
+  const [hist, setHist] = useState({})
+  const [verHistorial, setVerHistorial] = useState(null)
 
   const load = () => api.get('/api/clientes').then(r => setList(r.data))
   useEffect(() => { load() }, [])
+
+  // Para cada inquilino consultamos el resumen del historial — un solo round
+  // por cliente, en paralelo. Si ya está cargado no se repite.
+  useEffect(() => {
+    const inquilinos = list.filter(c => c.rol === 'inquilino' && !(c.id in hist))
+    if (!inquilinos.length) return
+    let cancelled = false
+    Promise.all(inquilinos.map(c =>
+      api.get(`/api/clientes/${c.id}/historial-alquiler`)
+        .then(r => [c.id, {
+          alquilando: r.data.alquilando,
+          contratos_total: r.data.contratos_total,
+          cliente_desde: r.data.cliente_desde,
+        }])
+        .catch(() => [c.id, null])
+    )).then(pares => {
+      if (cancelled) return
+      setHist(prev => {
+        const next = { ...prev }
+        pares.forEach(([id, info]) => { next[id] = info })
+        return next
+      })
+    })
+    return () => { cancelled = true }
+  }, [list])
 
   const filtered = useMemo(() => {
     let r = filtro === 'todos' ? list : list.filter(c => c.rol === filtro)
@@ -84,9 +123,10 @@ export default function Clientes() {
                 <tr>
                   <th className="th">Nombre</th>
                   <th className="th hidden md:table-cell">Contacto</th>
-                  <th className="th hidden lg:table-cell">Documento</th>
+                  <th className="th hidden lg:table-cell">Cliente desde</th>
+                  <th className="th">Estado</th>
                   <th className="th">Rol</th>
-                  <th className="th w-20" />
+                  <th className="th w-28" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -120,13 +160,42 @@ export default function Clientes() {
                       </div>
                     </td>
                     <td className="td hidden lg:table-cell">
-                      <span className="text-[12px] text-muted">{c.documento || '—'}</span>
+                      <span className="text-[12px] text-muted">
+                        {fmtFecha(hist[c.id]?.cliente_desde || c.created_at)}
+                      </span>
+                    </td>
+                    <td className="td">
+                      {c.rol === 'inquilino' ? (
+                        hist[c.id] === undefined ? (
+                          <span className="text-[11px] text-muted">…</span>
+                        ) : hist[c.id]?.alquilando ? (
+                          <span className="chip-success">
+                            <span className="w-1.5 h-1.5 rounded-full bg-white inline-block mr-1.5" />
+                            Alquilando
+                          </span>
+                        ) : (
+                          <span className="chip-muted">
+                            {hist[c.id]?.contratos_total > 0
+                              ? `${hist[c.id]?.contratos_total} contrato(s) prev.`
+                              : 'Sin contratos'}
+                          </span>
+                        )
+                      ) : (
+                        <span className="text-[11px] text-muted">—</span>
+                      )}
                     </td>
                     <td className="td">
                       <span className={ROL_CHIP[c.rol] || 'chip-muted'}>{c.rol}</span>
                     </td>
                     <td className="td">
                       <div className="flex gap-1">
+                        {c.rol === 'inquilino' && (
+                          <button className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-[#1E1E1E] text-muted hover:text-primary transition"
+                            title="Ver historial de alquileres"
+                            onClick={() => setVerHistorial(c)}>
+                            <History size={13} />
+                          </button>
+                        )}
                         <button className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-[#1E1E1E] text-muted hover:text-primary transition"
                           onClick={() => { setEditing(c); setOpen(true) }}>
                           <Pencil size={13} />
@@ -146,7 +215,100 @@ export default function Clientes() {
       </div>
 
       {open && <Modal initial={editing} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); load() }} />}
+      {verHistorial && <ModalHistorial cliente={verHistorial} onClose={() => setVerHistorial(null)} />}
     </Layout>
+  )
+}
+
+
+function ModalHistorial({ cliente, onClose }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.get(`/api/clientes/${cliente.id}/historial-alquiler`)
+      .then(r => setData(r.data))
+      .finally(() => setLoading(false))
+  }, [cliente.id])
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto" onClick={onClose}>
+      <div className="card w-full max-w-2xl shadow-lift animate-scale-in flex flex-col max-h-[88vh] my-6"
+        onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-border dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
+          <div>
+            <h2 className="hero-title text-2xl mb-0.5">Historial.</h2>
+            <p className="text-[12px] text-muted">{cliente.nombre} {cliente.apellido}</p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {loading ? (
+            <p className="text-center text-muted text-sm py-8">Cargando…</p>
+          ) : !data ? (
+            <p className="text-center text-muted text-sm py-8">No se pudo cargar.</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+                <div className="card p-4">
+                  <p className="stat-label flex items-center gap-1.5"><Calendar size={11} /> Cliente desde</p>
+                  <p className="stat-value text-lg mt-1">{fmtFecha(data.cliente_desde)}</p>
+                </div>
+                <div className="card p-4">
+                  <p className="stat-label">Contratos totales</p>
+                  <p className="stat-value text-lg mt-1">{data.contratos_total}</p>
+                </div>
+                <div className="card p-4">
+                  <p className="stat-label">Estado actual</p>
+                  <p className="mt-1.5">
+                    {data.alquilando ? (
+                      <span className="chip-success">Alquilando</span>
+                    ) : (
+                      <span className="chip-muted">No alquilando</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {data.contratos.length === 0 ? (
+                <p className="text-center text-muted text-sm py-8">
+                  Este cliente todavía no firmó ningún contrato.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {data.contratos.map(k => (
+                    <div key={k.contrato_id} className={`card p-4 flex items-start gap-3 ${k.vigente_hoy ? 'border-l-4 !border-l-success' : ''}`}>
+                      <div className="w-9 h-9 rounded-2xl bg-neutral-100 dark:bg-[#1E1E1E] grid place-items-center shrink-0">
+                        <Home size={14} className="text-muted" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-medium text-[13px] truncate">
+                            {k.propiedad?.direccion || `Contrato #${k.contrato_id}`}
+                          </p>
+                          <span className={`chip-${k.estado === 'vigente' ? 'success' : k.estado === 'vencido' ? 'muted' : 'gray'}`}>
+                            {k.estado}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted mt-0.5">
+                          {fmtFecha(k.fecha_inicio)} → {fmtFecha(k.fecha_fin)}
+                          {k.propiedad?.ciudad ? ` · ${k.propiedad.ciudad}` : ''}
+                        </p>
+                        <p className="text-[11px] text-muted mt-0.5 capitalize">
+                          {k.tipo?.replace(/_/g, ' ')}
+                          {k.monto_inicial > 0 ? ` · $${k.monto_inicial.toLocaleString('es-AR')}/mes inicial` : ''}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 

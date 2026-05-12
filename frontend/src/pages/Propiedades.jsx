@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Building2, Trash2, Pencil, X, MapPin, Home, RefreshCw, Image as ImageIcon } from 'lucide-react'
+import { Plus, Building2, Trash2, Pencil, X, MapPin, Home, RefreshCw, Image as ImageIcon, FileDown } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import SearchBar, { match } from '../components/SearchBar'
 import AdjuntosModal from '../components/AdjuntosModal'
@@ -88,6 +88,22 @@ export default function Propiedades() {
     if (!confirm('¿Eliminar propiedad?')) return
     await api.delete(`/api/propiedades/${id}`)
     load()
+  }
+
+  const descargarFicha = async (p) => {
+    try {
+      const r = await api.post(`/api/propiedades/${p.id}/ficha-pdf`, {}, {
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(r.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ficha-${(p.direccion || `propiedad-${p.id}`).replace(/\s+/g, '-')}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      alert(e.response?.data?.detail || 'No se pudo generar la ficha PDF.')
+    }
   }
 
   return (
@@ -209,6 +225,10 @@ export default function Propiedades() {
                   <button className="btn-ghost py-2 px-3" title="Fotos y documentos"
                     onClick={() => setAdjPropiedad(p)}>
                     <ImageIcon size={12} />
+                  </button>
+                  <button className="btn-ghost py-2 px-3" title="Descargar ficha PDF"
+                    onClick={() => descargarFicha(p)}>
+                    <FileDown size={12} />
                   </button>
                   <button className="btn-danger py-2 px-3" onClick={() => del(p.id)}>
                     <Trash2 size={12} />

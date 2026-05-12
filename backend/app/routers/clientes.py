@@ -1,3 +1,4 @@
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
@@ -37,3 +38,55 @@ def eliminar(id: int, db: Session = Depends(get_db), user=Depends(get_current_us
     if not obj: raise HTTPException(404, "No encontrado")
     db.delete(obj); db.commit()
     return {"ok": True}
+
+
+@router.get("/{id}/historial-alquiler")
+def historial_alquiler(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Devuelve todos los contratos donde el cliente figura como inquilino
+    junto con el status actual (alquilando o no).
+
+    Útil para la vista de Clientes en el área de alquileres."""
+    c = db.query(models.Cliente).filter_by(id=id).first()
+    if not c:
+        raise HTTPException(404, "Cliente no encontrado")
+
+    contratos = (
+        db.query(models.Contrato)
+          .filter(models.Contrato.inquilino_id == id)
+          .order_by(models.Contrato.fecha_inicio.desc().nullslast())
+          .all()
+    )
+
+    hoy = date.today()
+    items = []
+    for k in contratos:
+        prop = k.propiedad
+        items.append({
+            "contrato_id": k.id,
+            "tipo": k.tipo.value if hasattr(k.tipo, "value") else k.tipo,
+            "estado": k.estado.value if hasattr(k.estado, "value") else k.estado,
+            "fecha_inicio": k.fecha_inicio.isoformat() if k.fecha_inicio else None,
+            "fecha_fin": k.fecha_fin.isoformat() if k.fecha_fin else None,
+            "propiedad": {
+                "id": prop.id if prop else None,
+                "direccion": prop.direccion if prop else None,
+                "ciudad": prop.ciudad if prop else None,
+            } if prop else None,
+            "monto_inicial": k.monto_inicial,
+            "vigente_hoy": bool(
+                k.fecha_inicio and k.fecha_fin
+                and k.fecha_inicio <= hoy <= k.fecha_fin
+                and (k.estado.value if hasattr(k.estado, "value") else k.estado) == "vigente"
+            ),
+        })
+
+    alquilando = any(it["vigente_hoy"] for it in items)
+
+    return {
+        "cliente_id": c.id,
+        "nombre": f"{c.nombre or ''} {c.apellido or ''}".strip(),
+        "cliente_desde": c.created_at.isoformat() if c.created_at else None,
+        "alquilando": alquilando,
+        "contratos_total": len(items),
+        "contratos": items,
+    }
