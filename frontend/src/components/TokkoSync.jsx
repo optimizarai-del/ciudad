@@ -31,10 +31,28 @@ export default function TokkoSync({ onClose, onSynced }) {
 
   const sincronizar = () => {
     setSyncing(true); setErr('')
-    api.post('/api/tokko/sync')
+    // Importamos sin fotos (rápido). Las fotos se descargan después por
+    // propiedad para no exceder el timeout del proxy.
+    api.post('/api/tokko/sync?importar_fotos=false', {}, { timeout: 60000 })
       .then(r => { setResult(r.data); cargarSincronizadas(); onSynced?.() })
-      .catch(e => setErr(e.response?.data?.detail || 'Error al sincronizar.'))
+      .catch(e => {
+        const detail = e.response?.data?.detail
+        if (e.code === 'ECONNABORTED' || !e.response) {
+          setErr('La sincronización tardó demasiado. Reintentá en unos segundos.')
+        } else {
+          setErr(detail || `Error al sincronizar (${e.response?.status || '?'}).`)
+        }
+      })
       .finally(() => setSyncing(false))
+  }
+
+  const sincronizarFotos = async (propId) => {
+    try {
+      await api.post(`/api/tokko/sync-fotos/${propId}`, {}, { timeout: 120000 })
+      cargarSincronizadas()
+    } catch (e) {
+      console.warn('sync-fotos falló', propId, e)
+    }
   }
 
   return (

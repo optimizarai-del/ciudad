@@ -228,10 +228,17 @@ async def _sync_fotos_propiedad(db: Session, prop: models.Propiedad, photos: lis
 
 @router.post("/sync")
 async def sync(
-    importar_fotos: bool = True,
+    importar_fotos: bool = False,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    """Importa propiedades desde Tokko.
+
+    `importar_fotos=False` por default — el sync con fotos es lento (cada
+    foto se descarga + sube a Supabase Storage) y excede el timeout del
+    proxy reverso. Las fotos se importan en bloque aparte vía
+    POST /api/tokko/sync-fotos/{prop_id} o /api/tokko/sync-fotos-todas.
+    """
     if not TOKKO_KEY:
         raise HTTPException(400, "TOKKO_API_KEY no configurada en el archivo .env del backend.")
 
@@ -297,3 +304,37 @@ async def sync(
         "fotos_descargadas": fotos_total,
         "modalidad": "venta (forzada en todas)",
     }
+
+
+@router.post("/sync-fotos/{prop_id}")
+async def sync_fotos_propiedad(
+    prop_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Descarga las fotos desde Tokko para una propiedad ya sincronizada.
+
+    Se separa del /sync principal porque cada foto implica una descarga
+    desde Tokko + un upload a Supabase Storage, y 30 fotos seguidas
+    exceden el timeout del proxy.
+    """
+    if not TOKKO_KEY:
+        raise HTTPException(400, "TOKKO_API_KEY no configurada")
+    prop = db.query(models.Propiedad).filter_by(id=prop_id).first()
+    if not prop or not prop.tokko_id:
+        raise HTTPException(404, "Propiedad no encontrada o sin tokko_id")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            r = await client.get(
+                f"{TOKKO_URL}/property/{prop.tokko_id}/",
+                params={"key": TOKKO_KEY, "format": "json", "lang": "es_ar"},
+            )
+            r.raise_for_status()
+            item = r.json()
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"Error consultando Tokko: {e}")
+
+        fotos = await _sync_fotos_propiedad(db, prop, item.get("photos") or [], client)
+    db.commit()
+    return {"ok": True, "propiedad_id": prop_id, "fotos_descargadas": fotos}
