@@ -102,8 +102,27 @@ export default function Contratos() {
   }
   useEffect(() => { load() }, [])
 
+  // "Por vencer": contrato vigente cuyo fecha_fin cae dentro de los próximos
+  // 60 días (incluye los ya vencidos en los últimos 0 días si estado sigue
+  // vigente — el ajuste no se hizo todavía).
+  const diasParaVencer = (c) => {
+    if (!c.fecha_fin) return null
+    const fin = new Date(c.fecha_fin)
+    const hoy = new Date(); hoy.setHours(0,0,0,0)
+    return Math.round((fin - hoy) / 86400000)
+  }
+  const esPorVencer = (c) => {
+    if (c.estado !== 'vigente') return false
+    const d = diasParaVencer(c)
+    return d !== null && d <= 60
+  }
+  const porVencerCount = useMemo(() => list.filter(esPorVencer).length, [list])
+
   const filtered = useMemo(() => {
-    let r = filtro === 'todos' ? list : list.filter(c => c.estado === filtro)
+    let r
+    if (filtro === 'por_vencer') r = list.filter(esPorVencer)
+    else if (filtro === 'todos') r = list
+    else r = list.filter(c => c.estado === filtro)
     if (busqueda.trim()) {
       r = r.filter(c => {
         const prop = propiedades.find(p => p.id === c.propiedad_id)
@@ -168,6 +187,8 @@ export default function Contratos() {
 
         <div className="flex flex-wrap gap-2 mb-8">
           <FilterPill active={filtro === 'todos'} onClick={() => setFiltro('todos')} label={`Todos (${list.length})`} />
+          <FilterPill active={filtro === 'por_vencer'} onClick={() => setFiltro('por_vencer')}
+            label={`Por vencer · ≤60 días (${porVencerCount})`} />
           {ESTADOS.map(e => (
             <FilterPill key={e} active={filtro === e} onClick={() => setFiltro(e)}
               label={`${e} (${list.filter(c => c.estado === e).length})`} />

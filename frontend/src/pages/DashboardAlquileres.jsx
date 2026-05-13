@@ -80,9 +80,23 @@ export default function DashboardAlquileres() {
         )}
 
         {/* Métricas principales */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <MetricCard label="Contratos activos" value={stats?.contratos_vigentes ?? '—'} icon={FileText} />
+          <MetricCard
+            label="Propiedades disponibles"
+            value={stats ? Math.max((stats.propiedades_total ?? 0) - (stats.propiedades_ocupadas ?? 0), 0) : '—'}
+            sub={stats ? `de ${stats.propiedades_total ?? 0} totales` : ''}
+            icon={Home}
+            color="blue"
+          />
           <MetricCard label="Propiedades ocupadas" value={stats?.propiedades_ocupadas ?? '—'} icon={Home} />
+          <MetricCard
+            label="Contratos cobrados"
+            value={cobranza ? `${cobranza.pagos_count ?? 0}/${cobranza.contratos_activos ?? 0}` : '—'}
+            sub="del mes en curso"
+            icon={CheckCircle}
+            color={cobranza && cobranza.pagos_count === cobranza.contratos_activos ? 'green' : 'amber'}
+          />
           <MetricCard
             label="Cobrado este mes"
             value={cobranza ? `$${(cobranza.cobrado/1000).toFixed(0)}K` : '—'}

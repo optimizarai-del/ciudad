@@ -64,6 +64,12 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
             .first()
         )
 
+        # Componentes sugeridos para precargar el modal de "Registrar pago".
+        # El usuario los puede editar antes de confirmar.
+        alquiler_sug = float(c.monto_inicial or (prop.precio_alquiler if prop else 0) or 0)
+        tasas_sug = float((prop.tasa_municipal if prop else 0) or 0) + float((prop.impuesto_inmobiliario if prop else 0) or 0)
+        expensas_sug = float((prop.expensas if prop else 0) or 0)
+
         # Esperado total: si no hay pago, calculamos por contrato + costos asociados
         if pago:
             estado = pago.estado.value if hasattr(pago.estado, "value") else pago.estado
@@ -72,10 +78,7 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
             fecha_pago = pago.fecha_pago.isoformat() if pago.fecha_pago else None
         else:
             estado = "pendiente"
-            base = float(c.monto_inicial or (prop.precio_alquiler if prop else 0) or 0)
-            tasas = (prop.tasa_municipal if prop else 0) + (prop.impuesto_inmobiliario if prop else 0)
-            extras = (prop.expensas if prop else 0) + (tasas or 0)
-            monto_total = round(base + (extras or 0), 2)
+            monto_total = round(alquiler_sug + expensas_sug + tasas_sug, 2)
             fecha_venc = None
             fecha_pago = None
 
@@ -95,6 +98,9 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
             "propietario_email": propietario.email if propietario else None,
             "comision_porc": c.comision_porc or 0,
             "monto_total": monto_total,
+            "monto_alquiler_sug": round(alquiler_sug, 2),
+            "monto_expensas_sug": round(expensas_sug, 2),
+            "monto_tasas_sug": round(tasas_sug, 2),
             "fecha_vencimiento": fecha_venc,
             "fecha_pago": fecha_pago,
             "estado": estado,

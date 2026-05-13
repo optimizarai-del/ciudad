@@ -205,10 +205,13 @@ function Stat({ label, value, color = '' }) {
 }
 
 function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
+  // Precarga: si el backend mandó componentes sugeridos (alquiler vigente
+  // del contrato + expensas y tasa municipal vigentes de la propiedad), los
+  // usamos. Fallback al monto_total para no romper compatibilidad.
   const [form, setForm] = useState({
-    monto_alquiler: item.monto_total || 0,
-    monto_expensas: 0,
-    monto_tasas_municipales: 0,
+    monto_alquiler: item.monto_alquiler_sug ?? item.monto_total ?? 0,
+    monto_expensas: item.monto_expensas_sug ?? 0,
+    monto_tasas_municipales: item.monto_tasas_sug ?? 0,
     monto_otros: 0,
     fecha_pago: new Date().toISOString().slice(0, 10),
     notas: '',

@@ -44,6 +44,7 @@ export default function Propiedades() {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [filtroTipo, setFiltroTipo] = useState('todos')
+  const [filtroEstado, setFiltroEstado] = useState('todos')
   const [filtroPropietario, setFiltroPropietario] = useState('todos')
   const [clientes, setClientes] = useState([])
   const [busqueda, setBusqueda] = useState('')
@@ -64,6 +65,7 @@ export default function Propiedades() {
   useEffect(() => {
     let r = [...list]
     if (filtroTipo !== 'todos') r = r.filter(p => p.tipo === filtroTipo)
+    if (filtroEstado !== 'todos') r = r.filter(p => p.estado === filtroEstado)
     if (filtroPropietario !== 'todos') {
       r = r.filter(p => String(p.propietario_id || '') === String(filtroPropietario))
     }
@@ -73,7 +75,7 @@ export default function Propiedades() {
       ))
     }
     setFiltered(r)
-  }, [list, filtroTipo, filtroPropietario, busqueda])
+  }, [list, filtroTipo, filtroEstado, filtroPropietario, busqueda])
 
   // Lista de propietarios que aparecen en las propiedades — para el filtro.
   const propietariosEnLista = useMemo(() => {
@@ -144,6 +146,16 @@ export default function Propiedades() {
         <div className="mb-4 max-w-md">
           <SearchBar value={busqueda} onChange={setBusqueda}
             placeholder="Buscar por dirección, ciudad, tipo o propietario…" />
+        </div>
+
+        {/* Filtros por estado (disponibilidad) */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <FilterPill active={filtroEstado === 'todos'} onClick={() => setFiltroEstado('todos')}
+            label={`Todas (${list.length})`} />
+          {ESTADOS.map(e => (
+            <FilterPill key={e} active={filtroEstado === e} onClick={() => setFiltroEstado(e)}
+              label={`${e[0].toUpperCase() + e.slice(1)} (${list.filter(p => p.estado === e).length})`} />
+          ))}
         </div>
 
         {/* Filtros */}
@@ -592,7 +604,7 @@ function Modal({ initial, clientes, onClose, onSaved }) {
               <input id="prop-expensas" name="expensas" className="input" type="number" value={form.expensas || ''} onChange={set('expensas')} />
             </div>
             <div>
-              <label className="label" htmlFor="prop-tasa">Tasas municipales $</label>
+              <label className="label" htmlFor="prop-tasa">Ref. municipal $</label>
               <input id="prop-tasa" name="tasa_municipal" className="input" type="number"
                 value={form.tasa_municipal || ''}
                 onChange={set('tasa_municipal')}
