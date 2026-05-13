@@ -84,6 +84,22 @@ export default function Propiedades() {
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]))
   }, [list])
 
+  // Subconjunto que respeta búsqueda y propietario, pero NO el filtro de tipo.
+  // Lo usamos para que los contadores de los tabs reflejen el resultado real
+  // de tocar cada tab dado el resto de filtros activos.
+  const subsetParaTabs = useMemo(() => {
+    let r = [...list]
+    if (filtroPropietario !== 'todos') {
+      r = r.filter(p => String(p.propietario_id || '') === String(filtroPropietario))
+    }
+    if (busqueda.trim()) {
+      r = r.filter(p => match(busqueda,
+        p.direccion, p.ciudad, p.provincia, p.tipo, p.propietario_nombre,
+      ))
+    }
+    return r
+  }, [list, filtroPropietario, busqueda])
+
   const del = async id => {
     if (!confirm('¿Eliminar propiedad?')) return
     await api.delete(`/api/propiedades/${id}`)
@@ -131,10 +147,10 @@ export default function Propiedades() {
         {/* Filtros */}
         <div className="flex flex-wrap items-center gap-2 mb-8">
           <FilterPill active={filtroTipo === 'todos'} onClick={() => setFiltroTipo('todos')}
-            label={`Todos (${list.length})`} />
+            label={`Todos (${subsetParaTabs.length})`} />
           {TIPOS.map(t => (
             <FilterPill key={t} active={filtroTipo === t} onClick={() => setFiltroTipo(t)}
-              label={`${TIPO_LABEL[t]} (${list.filter(p => p.tipo === t).length})`} />
+              label={`${TIPO_LABEL[t]} (${subsetParaTabs.filter(p => p.tipo === t).length})`} />
           ))}
           {propietariosEnLista.length > 0 && (
             <>
@@ -273,15 +289,44 @@ function Modal({ initial, clientes, onClose, onSaved }) {
   const [form, setForm] = useState(initial ? { ...initial } : { ...empty })
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
+  const [errors, setErrors] = useState({})
   const [clientesLocal, setClientesLocal] = useState(clientes)
   const [creandoProp, setCreandoProp] = useState(false)
-  const set = k => e => setForm({ ...form, [k]: e.target.value })
+  const set = k => e => {
+    setForm({ ...form, [k]: e.target.value })
+    if (errors[k]) {
+      setErrors(prev => {
+        const n = { ...prev }
+        delete n[k]
+        return n
+      })
+    }
+  }
 
   // Mantener sincronizado si el padre recarga la lista
   useEffect(() => { setClientesLocal(clientes) }, [clientes])
 
+  const validate = () => {
+    const e = {}
+    if (!form.direccion || !form.direccion.trim()) {
+      e.direccion = 'La dirección es obligatoria.'
+    }
+    if (!form.precio_alquiler || Number(form.precio_alquiler) <= 0) {
+      e.precio_alquiler = 'El alquiler base es obligatorio y debe ser mayor a 0.'
+    }
+    return e
+  }
+
   const submit = async e => {
-    e.preventDefault(); setLoading(true); setErr('')
+    e.preventDefault()
+    const v = validate()
+    if (Object.keys(v).length) {
+      setErrors(v)
+      setErr('Revisá los campos marcados — hay datos obligatorios sin completar.')
+      return
+    }
+    setErrors({})
+    setLoading(true); setErr('')
     const payload = { ...form }
     // Convertir numéricos
     ;['superficie_m2','ambientes','precio_alquiler','precio_venta','expensas',
@@ -304,6 +349,9 @@ function Modal({ initial, clientes, onClose, onSaved }) {
     } finally { setLoading(false) }
   }
 
+  const errClass = 'mt-1 text-[12px] text-danger'
+  const inputErr = '!border-danger !bg-danger/5 focus:!border-danger focus:!ring-danger/10'
+
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto"
       onClick={onClose}>
@@ -314,58 +362,72 @@ function Modal({ initial, clientes, onClose, onSaved }) {
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <label className="label">Tipo *</label>
-            <select className="input" value={form.tipo} onChange={set('tipo')} required>
-              {TIPOS.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
-            </select>
+        <form onSubmit={submit} className="space-y-4" noValidate>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label" htmlFor="prop-tipo">Tipo *</label>
+              <select id="prop-tipo" name="tipo" className="input" value={form.tipo} onChange={set('tipo')} required>
+                {TIPOS.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label" htmlFor="prop-modalidad">Modalidad *</label>
+              <select id="prop-modalidad" name="modalidad" className="input" value={form.modalidad} onChange={set('modalidad')} required>
+                {MODALIDADES.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
           </div>
 
           <div>
-            <label className="label">Dirección *</label>
-            <input className="input" placeholder="Av. Corrientes 1234, 5°A" value={form.direccion || ''} onChange={set('direccion')} required />
+            <label className="label" htmlFor="prop-direccion">Dirección *</label>
+            <input id="prop-direccion" name="direccion" className={`input ${errors.direccion ? inputErr : ''}`}
+              placeholder="Av. Corrientes 1234, 5°A" value={form.direccion || ''}
+              onChange={set('direccion')}
+              aria-invalid={!!errors.direccion}
+              aria-describedby={errors.direccion ? 'prop-direccion-err' : undefined}
+              required />
+            {errors.direccion && <p id="prop-direccion-err" className={errClass}>{errors.direccion}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Ciudad</label>
-              <input className="input" placeholder="CABA" value={form.ciudad || ''} onChange={set('ciudad')} />
+              <label className="label" htmlFor="prop-ciudad">Ciudad</label>
+              <input id="prop-ciudad" name="ciudad" className="input" placeholder="CABA" value={form.ciudad || ''} onChange={set('ciudad')} />
             </div>
             <div>
-              <label className="label">Provincia</label>
-              <input className="input" placeholder="Buenos Aires" value={form.provincia || ''} onChange={set('provincia')} />
+              <label className="label" htmlFor="prop-provincia">Provincia</label>
+              <input id="prop-provincia" name="provincia" className="input" placeholder="Buenos Aires" value={form.provincia || ''} onChange={set('provincia')} />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Estado</label>
-              <select className="input" value={form.estado} onChange={set('estado')}>
+              <label className="label" htmlFor="prop-estado">Estado</label>
+              <select id="prop-estado" name="estado" className="input" value={form.estado} onChange={set('estado')}>
                 {ESTADOS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
             <div>
-              <label className="label">Ambientes</label>
-              <input className="input" type="number" min="0" value={form.ambientes || ''} onChange={set('ambientes')} />
+              <label className="label" htmlFor="prop-ambientes">Ambientes</label>
+              <input id="prop-ambientes" name="ambientes" className="input" type="number" min="0" value={form.ambientes || ''} onChange={set('ambientes')} />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Superficie m²</label>
-              <input className="input" type="number" value={form.superficie_m2 || ''} onChange={set('superficie_m2')} />
+              <label className="label" htmlFor="prop-superficie">Superficie m²</label>
+              <input id="prop-superficie" name="superficie_m2" className="input" type="number" value={form.superficie_m2 || ''} onChange={set('superficie_m2')} />
             </div>
             <div>
               <div className="flex items-center justify-between">
-                <label className="label">Propietario</label>
+                <label className="label" htmlFor="prop-propietario">Propietario</label>
                 <button type="button"
                   onClick={() => setCreandoProp(true)}
                   className="text-[11px] text-primary dark:text-white hover:underline font-medium">
                   + Nuevo propietario
                 </button>
               </div>
-              <select className="input" value={form.propietario_id || ''} onChange={set('propietario_id')}>
+              <select id="prop-propietario" name="propietario_id" className="input" value={form.propietario_id || ''} onChange={set('propietario_id')}>
                 <option value="">Sin asignar</option>
                 {clientesLocal.filter(c => c.rol === 'propietario').map(c => (
                   <option key={c.id} value={c.id}>{c.nombre} {c.apellido}</option>
@@ -379,16 +441,24 @@ function Modal({ initial, clientes, onClose, onSaved }) {
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="label">Alquiler base $</label>
-              <input className="input" type="number" value={form.precio_alquiler || ''} onChange={set('precio_alquiler')} />
+              <label className="label" htmlFor="prop-alquiler-base">Alquiler base $ *</label>
+              <input id="prop-alquiler-base" name="precio_alquiler"
+                className={`input ${errors.precio_alquiler ? inputErr : ''}`}
+                type="number" min="0"
+                value={form.precio_alquiler || ''}
+                onChange={set('precio_alquiler')}
+                aria-invalid={!!errors.precio_alquiler}
+                aria-describedby={errors.precio_alquiler ? 'prop-alquiler-base-err' : undefined}
+                required />
+              {errors.precio_alquiler && <p id="prop-alquiler-base-err" className={errClass}>{errors.precio_alquiler}</p>}
             </div>
             <div>
-              <label className="label">Expensas $</label>
-              <input className="input" type="number" value={form.expensas || ''} onChange={set('expensas')} />
+              <label className="label" htmlFor="prop-expensas">Expensas $</label>
+              <input id="prop-expensas" name="expensas" className="input" type="number" value={form.expensas || ''} onChange={set('expensas')} />
             </div>
             <div>
-              <label className="label">Tasas municipales $</label>
-              <input className="input" type="number"
+              <label className="label" htmlFor="prop-tasa">Tasas municipales $</label>
+              <input id="prop-tasa" name="tasa_municipal" className="input" type="number"
                 value={form.tasa_municipal || ''}
                 onChange={set('tasa_municipal')}
                 placeholder="Inmobiliario + ABL + alumbrado…" />
@@ -396,8 +466,8 @@ function Modal({ initial, clientes, onClose, onSaved }) {
           </div>
 
           <div>
-            <label className="label">Descripción</label>
-            <textarea className="input resize-none" rows={2} value={form.descripcion || ''} onChange={set('descripcion')} />
+            <label className="label" htmlFor="prop-descripcion">Descripción</label>
+            <textarea id="prop-descripcion" name="descripcion" className="input resize-none" rows={2} value={form.descripcion || ''} onChange={set('descripcion')} />
           </div>
 
           {err && <p className="text-[13px] text-danger bg-danger/5 px-4 py-2 rounded-xl">{err}</p>}
