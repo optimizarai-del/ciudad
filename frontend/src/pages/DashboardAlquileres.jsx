@@ -31,15 +31,21 @@ export default function DashboardAlquileres() {
   useEffect(() => {
     const hoy = new Date()
     const mes = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`
-    Promise.all([
+    // allSettled: si una falla (p.ej. alertas tira 500 por algo en el seed),
+    // las otras igual cargan. Antes con Promise.all una sola falla dejaba las
+    // 3 tarjetas en "—".
+    Promise.allSettled([
       api.get('/api/dashboard/stats'),
       api.get(`/api/cobranza/resumen?mes=${mes}`),
       api.get('/api/alertas/vencimientos?dias=60'),
     ]).then(([s, c, a]) => {
-      setStats(s.data)
-      setCobranza(c.data)
-      setAlertas(a.data)
-    }).catch(console.error)
+      if (s.status === 'fulfilled') setStats(s.value.data)
+      else console.error('dashboard/stats:', s.reason)
+      if (c.status === 'fulfilled') setCobranza(c.value.data)
+      else console.error('cobranza/resumen:', c.reason)
+      if (a.status === 'fulfilled') setAlertas(a.value.data || [])
+      else console.error('alertas/vencimientos:', a.reason)
+    })
   }, [])
 
   // Mismo criterio que Dashboard panel principal: 'críticas' = ≤7 días,
