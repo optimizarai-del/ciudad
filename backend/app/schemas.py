@@ -77,6 +77,8 @@ class PropiedadBase(BaseModel):
     tasa_municipal: Optional[float] = 0
     tokko_id: Optional[str] = None
     propietario_id: Optional[int] = None
+    # Padrón municipal (Santa Rosa). Opcional.
+    numero_referencia: Optional[str] = None
 
 
 class PropiedadCreate(PropiedadBase):
@@ -86,6 +88,7 @@ class PropiedadCreate(PropiedadBase):
 class PropiedadOut(PropiedadBase):
     id: int
     propietario_nombre: Optional[str] = None
+    tasa_consultada_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

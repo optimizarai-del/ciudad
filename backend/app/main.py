@@ -11,7 +11,7 @@ load_dotenv(override=True)
 from app.database import Base, engine
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
 from app.routers import cobranza, ventas_router, comprobantes
-from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture
+from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr
 
 Base.metadata.create_all(bind=engine)
 
@@ -43,6 +43,7 @@ app.include_router(adjuntos.router)
 app.include_router(recordatorios.router)
 app.include_router(storage_migracion.router)
 app.include_router(demo_fixture.router)
+app.include_router(tasas_msr.router)
 
 
 @app.get("/health")
@@ -163,6 +164,16 @@ def _migrar_storage_path():
         if "storage_path" not in cols_c:
             db.execute(text(f"ALTER TABLE {qual}comprobantes ADD COLUMN storage_path VARCHAR"))
             db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_comprobantes_storage_path ON {qual}comprobantes(storage_path)"))
+            db.commit()
+
+        # propiedades: 3 columnas para integración con consulta de deuda
+        # de la Municipalidad de Santa Rosa.
+        cols_p = {c["name"] for c in ins.get_columns("propiedades", schema=schema)}
+        if "numero_referencia" not in cols_p:
+            db.execute(text(f"ALTER TABLE {qual}propiedades ADD COLUMN numero_referencia VARCHAR"))
+            db.execute(text(f"ALTER TABLE {qual}propiedades ADD COLUMN tasa_consultada_at TIMESTAMP"))
+            db.execute(text(f"ALTER TABLE {qual}propiedades ADD COLUMN tasa_detalle TEXT"))
+            db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_propiedades_numero_referencia ON {qual}propiedades(numero_referencia)"))
             db.commit()
 
         # contratos: 4 columnas para archivo firmado/actualizado manualmente

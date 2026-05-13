@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Building2, Trash2, Pencil, X, MapPin, Home, RefreshCw, Image as ImageIcon, FileDown } from 'lucide-react'
+import { Plus, Building2, Trash2, Pencil, X, MapPin, Home, RefreshCw, Image as ImageIcon, FileDown, Landmark, Eye } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import SearchBar, { match } from '../components/SearchBar'
 import AdjuntosModal from '../components/AdjuntosModal'
+import ModalTasaMSR from '../components/ModalTasaMSR'
 import api from '../utils/api'
 
 const TIPOS = ['departamento','casa','local','oficina','galpon','campo']
@@ -34,7 +35,7 @@ const empty = {
   direccion:'', ciudad:'', provincia:'', tipo:'departamento',
   modalidad:'alquiler', estado:'disponible', superficie_m2:'', ambientes:'',
   descripcion:'', precio_alquiler:'', expensas:'',
-  tasa_municipal:'', propietario_id:'',
+  tasa_municipal:'', propietario_id:'', numero_referencia:'',
 }
 
 export default function Propiedades() {
@@ -47,6 +48,7 @@ export default function Propiedades() {
   const [clientes, setClientes] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [adjPropiedad, setAdjPropiedad] = useState(null)
+  const [tasaMSR, setTasaMSR] = useState(null)  // {propiedad, modo: 'consultar'|'ver'}
 
   const load = () => {
     // Solo alquileres en esta página. Las propiedades de venta (incluyendo
@@ -232,8 +234,21 @@ export default function Propiedades() {
                   </div>
                 )}
 
+                {/* Padrón municipal (si está cargado) */}
+                {p.numero_referencia && (
+                  <div className="text-[10px] text-muted dark:text-gray-500 flex items-center gap-1.5 -mt-1">
+                    <Landmark size={10} />
+                    <span>Padrón <span className="font-mono">{p.numero_referencia}</span></span>
+                    {p.tasa_consultada_at && (
+                      <span className="chip-success !text-[9px] !py-0">
+                        Tasa al {new Date(p.tasa_consultada_at).toLocaleDateString('es-AR')}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {/* Acciones */}
-                <div className="flex gap-2 mt-auto">
+                <div className="flex flex-wrap gap-2 mt-auto">
                   <button className="btn-secondary flex-1 text-[12px] py-2"
                     onClick={() => { setEditing(p); setOpen(true) }}>
                     <Pencil size={12} /> Editar
@@ -246,6 +261,23 @@ export default function Propiedades() {
                     onClick={() => descargarFicha(p)}>
                     <FileDown size={12} />
                   </button>
+                  <button
+                    className="btn-ghost py-2 px-3"
+                    title={p.numero_referencia ? "Buscar tasa en Municipalidad de Santa Rosa" : "Cargá el Nº de referencia para usar este botón"}
+                    onClick={() => setTasaMSR({ propiedad: p, modo: 'consultar' })}
+                    disabled={!p.numero_referencia}
+                  >
+                    <Landmark size={12} />
+                  </button>
+                  {p.tasa_consultada_at && (
+                    <button
+                      className="btn-ghost py-2 px-3"
+                      title="Ver última consulta de deuda"
+                      onClick={() => setTasaMSR({ propiedad: p, modo: 'ver' })}
+                    >
+                      <Eye size={12} />
+                    </button>
+                  )}
                   <button className="btn-danger py-2 px-3" onClick={() => del(p.id)}>
                     <Trash2 size={12} />
                   </button>
@@ -271,7 +303,110 @@ export default function Propiedades() {
           onClose={() => setAdjPropiedad(null)}
         />
       )}
+
+      {tasaMSR && tasaMSR.modo === 'consultar' && (
+        <ModalTasaMSR
+          propiedad={tasaMSR.propiedad}
+          onClose={() => setTasaMSR(null)}
+          onActualizado={() => load()}
+        />
+      )}
+
+      {tasaMSR && tasaMSR.modo === 'ver' && (
+        <ModalTasaMSRCache
+          propiedad={tasaMSR.propiedad}
+          onClose={() => setTasaMSR(null)}
+          onRefresh={() => setTasaMSR({ propiedad: tasaMSR.propiedad, modo: 'consultar' })}
+        />
+      )}
     </Layout>
+  )
+}
+
+
+// Modal liviano que solo muestra el último resultado guardado, sin pedir
+// captcha. Tiene un botón "Actualizar" que cambia al ModalTasaMSR pleno.
+function ModalTasaMSRCache({ propiedad, onClose, onRefresh }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.get(`/api/propiedades/${propiedad.id}/tasa-msr-cache`)
+      .then(r => setData(r.data))
+      .finally(() => setLoading(false))
+  }, [propiedad.id])
+
+  const fmt = v => v == null ? '—' : `$ ${Number(v).toLocaleString('es-AR', { maximumFractionDigits: 0 })}`
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto"
+      onClick={onClose}>
+      <div className="card w-full max-w-2xl shadow-lift animate-scale-in flex flex-col max-h-[90vh] my-6"
+        onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-border dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
+          <div>
+            <h2 className="hero-title text-2xl mb-0.5">Tasa MSR — Cache</h2>
+            <p className="text-[12px] text-muted dark:text-gray-500">
+              {propiedad.direccion}
+              {data?.detalle?.consultado_at && (
+                <> · Consultado: {new Date(data.detalle.consultado_at).toLocaleString('es-AR')}</>
+              )}
+            </p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3">
+          {loading ? (
+            <p className="text-center text-muted py-8 text-[13px]">Cargando…</p>
+          ) : !data?.disponible ? (
+            <p className="text-center text-muted py-8 text-[13px]">No hay consulta previa.</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="card p-4">
+                  <p className="stat-label">Cuotas</p>
+                  <p className="stat-value text-lg mt-1">{data.detalle.cantidad}</p>
+                </div>
+                <div className="card p-4">
+                  <p className="stat-label">Total adeudado</p>
+                  <p className="stat-value text-lg mt-1">{fmt(data.detalle.total)}</p>
+                </div>
+                <div className="card p-4">
+                  <p className="stat-label">Tasa actual</p>
+                  <p className="stat-value text-lg mt-1">{fmt(data.tasa_municipal_actual)}</p>
+                </div>
+              </div>
+
+              {data.detalle.cuotas?.length > 0 && (
+                <div className="card overflow-hidden">
+                  <ul className="divide-y divide-border dark:divide-[#2A2A2A]">
+                    {data.detalle.cuotas.slice(0, 20).map((c, i) => (
+                      <li key={i} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-medium">{c.periodo || c.concepto || `Cuota ${i + 1}`}</p>
+                          <p className="text-[10px] text-muted dark:text-gray-500">
+                            {c.vencimiento || ''} {c.estado ? `· ${c.estado}` : ''}
+                          </p>
+                        </div>
+                        <p className="text-[13px] font-semibold tabular-nums">{fmt(c.importe)}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="px-6 py-3 border-t border-border dark:border-[#2A2A2A] flex justify-between items-center shrink-0">
+          <button className="btn-secondary text-[12px] py-1.5 px-4" onClick={onClose}>Cerrar</button>
+          <button className="btn-primary text-[12px] py-1.5 px-4" onClick={onRefresh}>
+            <RefreshCw size={11} /> Actualizar
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -463,6 +598,23 @@ function Modal({ initial, clientes, onClose, onSaved }) {
                 onChange={set('tasa_municipal')}
                 placeholder="Inmobiliario + ABL + alumbrado…" />
             </div>
+          </div>
+
+          <div>
+            <label className="label flex items-center gap-1.5" htmlFor="prop-padron">
+              <Landmark size={11} /> Nº de referencia municipal (padrón Santa Rosa)
+            </label>
+            <input
+              id="prop-padron"
+              name="numero_referencia"
+              className="input font-mono"
+              placeholder="ej. 123456"
+              value={form.numero_referencia || ''}
+              onChange={set('numero_referencia')}
+            />
+            <p className="text-[11px] text-muted dark:text-gray-500 mt-1">
+              Permite consultar la deuda y la tasa actual desde el portal de la municipalidad con 1 click.
+            </p>
           </div>
 
           <div>

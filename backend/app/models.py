@@ -123,6 +123,13 @@ class Propiedad(Base):
     tokko_id = Column(String, index=True)
     tokko_sync_at = Column(DateTime)
 
+    # Padrón municipal (Santa Rosa La Pampa). Se usa para consultar la
+    # tasa/deuda real desde https://consultadeuda.santarosa.gob.ar/
+    numero_referencia = Column(String, index=True, nullable=True)
+    tasa_consultada_at = Column(DateTime, nullable=True)
+    # JSON con últimos cuotas/montos devueltos por la municipalidad
+    tasa_detalle = Column(Text, nullable=True)
+
     propietario_id = Column(Integer, ForeignKey("clientes.id"))
     propietario = relationship("Cliente", foreign_keys=[propietario_id])
     created_at = Column(DateTime, default=datetime.utcnow)
