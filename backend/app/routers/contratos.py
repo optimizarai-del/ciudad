@@ -1,5 +1,5 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body
 from fastapi.responses import Response, RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List
@@ -11,6 +11,7 @@ from app.services.pdf_service import generar_pdf_contrato
 from app.services.contrato_docx import generar_docx
 from app.services import supabase_storage
 from app.services.workspace import apply_workspace_filter, workspace_flag
+from app.services import contrato_import
 
 router = APIRouter(prefix="/api/contratos", tags=["contratos"])
 
@@ -347,3 +348,57 @@ def borrar_archivo(id: int, db: Session = Depends(get_db), user=Depends(get_curr
     contrato.archivo_subido_at = None
     db.commit()
     return {"ok": True}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Importación desde PDF con IA
+# ─────────────────────────────────────────────────────────────────────
+
+MAX_PDF_IMPORT_BYTES = 15 * 1024 * 1024   # 15 MB; PDFs muy grandes hacen explotar costo del LLM
+
+
+@router.post("/importar-pdf-preview")
+async def importar_pdf_preview(
+    archivo: UploadFile = File(...),
+    user=Depends(get_current_user),
+):
+    """Recibe un PDF, lo pasa por la IA y devuelve los datos extraídos
+    SIN guardar nada. El frontend muestra esos datos como preview editable;
+    cuando el usuario confirma, se llama /importar-pdf-confirmar.
+    """
+    if archivo.content_type and "pdf" not in archivo.content_type.lower():
+        raise HTTPException(400, "El archivo debe ser un PDF.")
+    raw = await archivo.read()
+    if len(raw) > MAX_PDF_IMPORT_BYTES:
+        raise HTTPException(413, f"PDF demasiado grande (máx {MAX_PDF_IMPORT_BYTES // 1024 // 1024} MB).")
+    if len(raw) < 100:
+        raise HTTPException(400, "El archivo parece vacío o corrupto.")
+    try:
+        datos = contrato_import.parsear_contrato_pdf(raw, filename=archivo.filename or "contrato.pdf")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        print(f"[importar-pdf-preview] {type(e).__name__}: {e}")
+        raise HTTPException(502, f"La IA no pudo procesar el PDF: {type(e).__name__}: {str(e)[:200]}")
+    return {"ok": True, "datos": datos}
+
+
+@router.post("/importar-pdf-confirmar")
+def importar_pdf_confirmar(
+    datos: dict = Body(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Recibe el JSON ya revisado por el usuario y crea las entidades
+    (propietario, inquilino, propiedad, contrato). Devuelve qué creó y qué
+    reutilizó (por DNI o por dirección)."""
+    try:
+        resumen = contrato_import.crear_desde_parsed(db, datos, user)
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        db.rollback()
+        print(f"[importar-pdf-confirmar] {type(e).__name__}: {e}")
+        raise HTTPException(500, f"No se pudo importar: {type(e).__name__}: {str(e)[:200]}")
+    return {"ok": True, **resumen}

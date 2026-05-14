@@ -41,10 +41,56 @@ def editar(id: int, data: schemas.ClienteCreate, db: Session = Depends(get_db), 
 
 
 @router.delete("/{id}")
-def eliminar(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def eliminar(
+    id: int,
+    forzar: bool = False,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Elimina cliente. Si tiene contratos o propiedades vinculadas, bloquea
+    con un mensaje claro a menos que se pase ?forzar=true (cascada manual).
+
+    Cascada: si forzar=true,
+      - si es propietario → desvincula sus propiedades (propietario_id = NULL)
+      - si es inquilino → bloquea siempre (no se eliminan contratos)
+    """
     obj = _scope(db, user).filter_by(id=id).first()
-    if not obj: raise HTTPException(404, "No encontrado")
-    db.delete(obj); db.commit()
+    if not obj:
+        raise HTTPException(404, "Cliente no encontrado")
+
+    # Verificar contratos donde figura como inquilino (FK)
+    contratos = (
+        db.query(models.Contrato)
+          .filter(models.Contrato.inquilino_id == id)
+          .count()
+    )
+    if contratos > 0:
+        raise HTTPException(
+            409,
+            f"No se puede eliminar: este cliente figura como inquilino en "
+            f"{contratos} contrato{'s' if contratos != 1 else ''}. "
+            f"Eliminá o reasigná esos contratos primero.",
+        )
+
+    # Si es propietario y tiene propiedades, decidir según `forzar`
+    if obj.rol == models.ClienteRol.propietario:
+        props = db.query(models.Propiedad).filter_by(propietario_id=id).all()
+        if props and not forzar:
+            raise HTTPException(
+                409,
+                f"Este propietario tiene {len(props)} propiedad"
+                f"{'es' if len(props) != 1 else ''} asignada"
+                f"{'s' if len(props) != 1 else ''}. "
+                f"Pasá ?forzar=true para desvincularlas y eliminar, "
+                f"o reasigná las propiedades primero.",
+            )
+        # Desvincular propiedades
+        for p in props:
+            p.propietario_id = None
+        db.flush()
+
+    db.delete(obj)
+    db.commit()
     return {"ok": True}
 
 

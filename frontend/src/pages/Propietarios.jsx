@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, KeyRound, Mail, Phone, Building2, Search, X, Pencil } from 'lucide-react'
+import { Plus, KeyRound, Mail, Phone, Building2, Search, X, Pencil, Trash2 } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import { match } from '../components/SearchBar'
 import api from '../utils/api'
@@ -37,6 +37,29 @@ export default function Propietarios() {
     return map
   }, [propiedades])
 
+  const del = async (id) => {
+    if (!confirm('¿Eliminar propietario?')) return
+    try {
+      await api.delete(`/api/clientes/${id}`)
+      load()
+    } catch (e) {
+      const msg = e.response?.data?.detail || 'No se pudo eliminar.'
+      // Si tiene propiedades asignadas, el backend devuelve 409 y nos sugiere forzar.
+      if (e.response?.status === 409 && /forzar/i.test(msg)) {
+        if (confirm(`${msg}\n\n¿Desvincular las propiedades y eliminarlo igual?`)) {
+          try {
+            await api.delete(`/api/clientes/${id}?forzar=true`)
+            load()
+          } catch (e2) {
+            alert(e2.response?.data?.detail || 'No se pudo forzar.')
+          }
+        }
+      } else {
+        alert(msg)
+      }
+    }
+  }
+
   const filtrados = useMemo(() => {
     if (!busqueda.trim()) return propietarios
     return propietarios.filter(p => {
@@ -59,7 +82,7 @@ export default function Propietarios() {
           <div className="hero-eyebrow">Cartera</div>
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Propietarios.</h1>
+              <h1 className="hero-title text-5xl md:text-6xl mb-3">Propietarios</h1>
               <p className="hero-sub">Listado de dueños y sus propiedades en cartera.</p>
             </div>
             <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
@@ -107,10 +130,19 @@ export default function Propietarios() {
                       <p className="font-semibold text-[15px] tracking-tight truncate">{nombre}</p>
                       {p.documento && <p className="text-[11px] text-muted">{p.documento}</p>}
                     </div>
-                    <button className="btn-ghost p-1.5"
-                      onClick={() => { setEditing(p); setOpen(true) }}>
-                      <Pencil size={12} />
-                    </button>
+                    <div className="flex gap-1 shrink-0">
+                      <button className="btn-ghost p-1.5"
+                        title="Editar"
+                        onClick={() => { setEditing(p); setOpen(true) }}>
+                        <Pencil size={12} />
+                      </button>
+                      <button
+                        className="p-1.5 rounded-lg hover:bg-danger/10 text-muted hover:text-danger transition"
+                        title="Eliminar propietario"
+                        onClick={() => del(p.id)}>
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-1 text-[12px] text-muted border-t border-border pt-3">
@@ -178,7 +210,7 @@ function Modal({ initial, onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto" onClick={onClose}>
       <div className="card p-8 w-full max-w-xl shadow-lift animate-scale-in my-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">{initial ? 'Editar propietario' : 'Nuevo propietario'}.</h2>
+          <h2 className="hero-title text-2xl">{initial ? 'Editar propietario' : 'Nuevo propietario'}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
         <form onSubmit={submit} className="space-y-4">

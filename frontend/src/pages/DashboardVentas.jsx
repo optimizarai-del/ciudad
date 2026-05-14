@@ -15,7 +15,7 @@ export default function DashboardVentas() {
       <div className="p-6 space-y-6">
         <div>
           <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Ventas</p>
-          <h1 className="text-3xl font-black">Dashboard Ventas</h1>
+          <h1 className="hero-title text-5xl md:text-6xl mb-3">Dashboard Ventas</h1>
         </div>
 
         <div className="grid grid-cols-4 gap-4">

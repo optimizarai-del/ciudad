@@ -133,7 +133,7 @@ export default function Propiedades() {
           <div className="hero-eyebrow">Cartera de alquileres</div>
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Propiedades.</h1>
+              <h1 className="hero-title text-5xl md:text-6xl mb-3">Propiedades</h1>
               <p className="hero-sub">Inmuebles en alquiler — gestión, propietarios y disponibilidad.</p>
             </div>
             <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
@@ -505,7 +505,7 @@ function Modal({ initial, clientes, onClose, onSaved }) {
       <div className="card p-8 w-full max-w-2xl shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">{initial ? 'Editar propiedad' : 'Nueva propiedad'}.</h2>
+          <h2 className="hero-title text-2xl">{initial ? 'Editar propiedad' : 'Nueva propiedad'}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
@@ -686,7 +686,7 @@ function ModalNuevoPropietario({ onClose, onSaved }) {
       <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">Nuevo propietario.</h2>
+          <h2 className="hero-title text-2xl">Nuevo propietario</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 

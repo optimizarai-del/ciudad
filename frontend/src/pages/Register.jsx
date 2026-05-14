@@ -40,7 +40,7 @@ export default function Register() {
         </div>
 
         <div className="card p-8 shadow-card">
-          <h2 className="hero-title text-3xl mb-7">Registro.</h2>
+          <h2 className="hero-title text-3xl mb-7">Registro</h2>
 
           <form onSubmit={handle} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">

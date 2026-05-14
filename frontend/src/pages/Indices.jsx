@@ -28,7 +28,7 @@ export default function Indices() {
           <div className="hero-eyebrow">Datos económicos</div>
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Índices.</h1>
+              <h1 className="hero-title text-5xl md:text-6xl mb-3">Índices</h1>
               <p className="hero-sub">IPC, ICL, UVA y tipo de cambio en tiempo real.</p>
             </div>
             <div className="flex items-center gap-3">

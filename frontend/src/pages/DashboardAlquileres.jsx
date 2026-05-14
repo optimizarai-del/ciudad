@@ -63,7 +63,7 @@ export default function DashboardAlquileres() {
         {/* Header */}
         <div>
           <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Alquileres</p>
-          <h1 className="text-3xl font-black capitalize">{mesLabel}</h1>
+          <h1 className="hero-title text-5xl md:text-6xl mb-3 capitalize">{mesLabel}</h1>
         </div>
 
         {/* Alertas críticas */}

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, DollarSign, FileType2, Upload, FileCheck2 } from 'lucide-react'
+import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, DollarSign, FileType2, Upload, FileCheck2, Sparkles } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import HistorialPagos from '../components/HistorialPagos'
 import SearchBar, { match } from '../components/SearchBar'
+import ImportarContratoPDF from '../components/ImportarContratoPDF'
 import api from '../utils/api'
 
 const TIPOS = ['alquiler_vivienda','alquiler_comercial','boleto_compraventa','sena_alquiler']
@@ -94,6 +95,7 @@ export default function Contratos() {
   const [open, setOpen]         = useState(false)
   const [editing, setEditing]   = useState(null)
   const [historialContrato, setHistorialContrato] = useState(null)
+  const [importOpen, setImportOpen] = useState(false)
 
   const load = () => {
     api.get('/api/contratos').then(r => setList(r.data))
@@ -171,12 +173,18 @@ export default function Contratos() {
           <div className="hero-eyebrow">Gestión contractual</div>
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Contratos.</h1>
+              <h1 className="hero-title text-5xl md:text-6xl mb-3">Contratos</h1>
               <p className="hero-sub">Alquileres y boletos de compraventa.</p>
             </div>
-            <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
-              <Plus size={14} /> Nuevo contrato
-            </button>
+            <div className="flex gap-2">
+              <button className="btn-secondary" onClick={() => setImportOpen(true)}
+                title="Importar contrato desde PDF — la IA crea propietario, inquilino, propiedad y contrato">
+                <Sparkles size={14} /> Importar PDF
+              </button>
+              <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
+                <Plus size={14} /> Nuevo contrato
+              </button>
+            </div>
           </div>
         </header>
 
@@ -287,6 +295,13 @@ export default function Contratos() {
         />
       )}
 
+      {importOpen && (
+        <ImportarContratoPDF
+          onClose={() => setImportOpen(false)}
+          onSaved={() => { setImportOpen(false); load() }}
+        />
+      )}
+
       {historialContrato && (
         <HistorialPagos
           contrato={historialContrato}
@@ -355,7 +370,7 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
       <div className="card p-8 w-full max-w-xl shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">{initial ? 'Editar contrato' : 'Nuevo contrato'}.</h2>
+          <h2 className="hero-title text-2xl">{initial ? 'Editar contrato' : 'Nuevo contrato'}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
@@ -523,7 +538,7 @@ function ModalQuickPropiedad({ onClose, onSaved }) {
       onClick={onClose}>
       <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h3 className="hero-title text-xl">Nueva propiedad.</h3>
+          <h3 className="hero-title text-xl">Nueva propiedad</h3>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
         <form onSubmit={submit} className="space-y-3">
@@ -587,7 +602,7 @@ function ModalQuickCliente({ rol, onClose, onSaved }) {
       onClick={onClose}>
       <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h3 className="hero-title text-xl">Nuevo {rol}.</h3>
+          <h3 className="hero-title text-xl">Nuevo {rol}</h3>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
         <form onSubmit={submit} className="space-y-3">

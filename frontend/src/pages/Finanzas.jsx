@@ -39,7 +39,7 @@ export default function Finanzas() {
       <div className="max-w-6xl mx-auto animate-fade-in">
         <header className="mb-10">
           <div className="hero-eyebrow">Análisis financiero</div>
-          <h1 className="hero-title text-5xl md:text-6xl mb-3">Finanzas.</h1>
+          <h1 className="hero-title text-5xl md:text-6xl mb-3">Finanzas</h1>
           <p className="hero-sub">Histórico, mora y proyección de la cartera.</p>
         </header>
 

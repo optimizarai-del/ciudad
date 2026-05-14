@@ -316,7 +316,7 @@ function Modal({ initial, propiedades, contratos, onClose, onSaved }) {
       <div className="card p-8 w-full max-w-xl shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">{initial ? 'Editar refacción' : 'Nueva refacción'}.</h2>
+          <h2 className="hero-title text-2xl">{initial ? 'Editar refacción' : 'Nueva refacción'}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 

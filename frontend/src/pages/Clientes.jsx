@@ -71,10 +71,27 @@ export default function Clientes() {
     return r
   }, [list, filtro, busqueda])
 
-  const del = async id => {
+  const del = async (id) => {
     if (!confirm('¿Eliminar cliente?')) return
-    await api.delete(`/api/clientes/${id}`)
-    load()
+    try {
+      await api.delete(`/api/clientes/${id}`)
+      load()
+    } catch (e) {
+      const msg = e.response?.data?.detail || 'No se pudo eliminar.'
+      // Si el backend devuelve 409 con sugerencia de forzar, ofrecemos hacerlo
+      if (e.response?.status === 409 && /forzar/i.test(msg)) {
+        if (confirm(`${msg}\n\n¿Forzar eliminación desvinculando sus propiedades?`)) {
+          try {
+            await api.delete(`/api/clientes/${id}?forzar=true`)
+            load()
+          } catch (e2) {
+            alert(e2.response?.data?.detail || 'No se pudo forzar la eliminación.')
+          }
+        }
+      } else {
+        alert(msg)
+      }
+    }
   }
 
   return (
@@ -84,7 +101,7 @@ export default function Clientes() {
           <div className="hero-eyebrow">Base de contactos</div>
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Clientes.</h1>
+              <h1 className="hero-title text-5xl md:text-6xl mb-3">Clientes</h1>
               <p className="hero-sub">Propietarios, inquilinos, compradores y vendedores.</p>
             </div>
             <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
@@ -237,7 +254,7 @@ function ModalHistorial({ cliente, onClose }) {
         onClick={e => e.stopPropagation()}>
         <div className="px-6 py-5 border-b border-border dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
           <div>
-            <h2 className="hero-title text-2xl mb-0.5">Historial.</h2>
+            <h2 className="hero-title text-2xl mb-0.5">Historial</h2>
             <p className="text-[12px] text-muted">{cliente.nombre} {cliente.apellido}</p>
           </div>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
@@ -345,7 +362,7 @@ function Modal({ initial, onClose, onSaved }) {
       <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">{initial ? 'Editar cliente' : 'Nuevo cliente'}.</h2>
+          <h2 className="hero-title text-2xl">{initial ? 'Editar cliente' : 'Nuevo cliente'}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 

@@ -56,7 +56,7 @@ export default function Liquidaciones() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Alquileres</p>
-            <h1 className="text-3xl font-black">Liquidaciones masivas</h1>
+            <h1 className="hero-title text-5xl md:text-6xl mb-3">Liquidaciones masivas</h1>
             <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
               Genera un PDF consolidado por propietario con todos sus pagos cobrados del mes.
             </p>

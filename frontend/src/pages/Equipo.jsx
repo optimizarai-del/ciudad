@@ -63,7 +63,7 @@ export default function Equipo() {
           <div className="hero-eyebrow">Administración</div>
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Equipo.</h1>
+              <h1 className="hero-title text-5xl md:text-6xl mb-3">Equipo</h1>
               <p className="hero-sub">Usuarios del sistema y sus permisos.</p>
             </div>
             <button className="btn-primary" onClick={() => setCreating(true)}>
@@ -298,7 +298,7 @@ function ModalNuevoUsuario({ onClose, onSaved }) {
       <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">Nuevo usuario.</h2>
+          <h2 className="hero-title text-2xl">Nuevo usuario</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
@@ -375,7 +375,7 @@ function ModalEditRol({ user, onClose, onSaved }) {
       <div className="card p-8 w-full max-w-sm shadow-lift animate-scale-in"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-xl">Editar rol.</h2>
+          <h2 className="hero-title text-xl">Editar rol</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
@@ -428,7 +428,7 @@ function ModalConfirmDelete({ user, onClose, onConfirm }) {
           <div className="w-10 h-10 rounded-full bg-danger/10 text-danger grid place-items-center">
             <Trash2 size={18} />
           </div>
-          <h2 className="hero-title text-xl">Eliminar usuario.</h2>
+          <h2 className="hero-title text-xl">Eliminar usuario</h2>
         </div>
 
         <p className="text-[13px] text-muted dark:text-gray-400 mb-2">
