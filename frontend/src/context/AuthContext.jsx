@@ -32,8 +32,11 @@ export function AuthProvider({ children }) {
     window.location.href = '/login'
   }
 
-  const isAdmin    = user?.role === 'admin'
-  const isFinanzas = user?.role === 'finanzas' || user?.role === 'admin'
+  // admin_demo cuenta como admin/finanzas pero en su propio workspace aislado
+  // (lo aísla el backend con is_demo). Si no lo incluyéramos, el usuario demo
+  // no podría entrar a Equipo, Finanzas, etc. y vería redirecciones silenciosas.
+  const isAdmin    = user?.role === 'admin' || user?.role === 'admin_demo'
+  const isFinanzas = ['finanzas', 'admin', 'admin_demo'].includes(user?.role)
 
   return (
     <AuthContext.Provider value={{ user, login, logout, loading, isAdmin, isFinanzas }}>

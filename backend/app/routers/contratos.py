@@ -22,6 +22,29 @@ def _scope(db: Session, user):
     return apply_workspace_filter(db.query(models.Contrato), models.Contrato, user)
 
 
+def _generar_codigo(db: Session, is_demo: bool) -> str:
+    """Genera un código único para el contrato con formato CONT-YYYY-NNNN.
+
+    La numeración es por año y por workspace (real vs demo). Si por algún
+    motivo el código candidato ya existe (colisión por race condition o
+    importación manual), recorre hasta encontrar uno libre.
+    """
+    year = datetime.utcnow().year
+    prefix = f"CONT-{year}-"
+    base = db.query(models.Contrato).filter(
+        models.Contrato.is_demo == is_demo,
+        models.Contrato.codigo.like(f"{prefix}%"),
+    ).count()
+    # Probamos secuencialmente desde base+1; en el peor caso recorremos un
+    # rango razonable, luego caemos a un fallback con timestamp.
+    for i in range(base + 1, base + 1000):
+        candidato = f"{prefix}{i:04d}"
+        existe = db.query(models.Contrato).filter_by(codigo=candidato).first()
+        if not existe:
+            return candidato
+    return f"{prefix}{int(datetime.utcnow().timestamp())}"
+
+
 @router.get("/", response_model=List[schemas.ContratoOut])
 def listar(db: Session = Depends(get_db), user=Depends(get_current_user)):
     return _scope(db, user).order_by(models.Contrato.id.desc()).all()
@@ -66,9 +89,23 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
     if bool(prop.is_demo) != workspace_flag(user):
         raise HTTPException(403, "La propiedad no pertenece a tu workspace.")
 
+    is_demo = workspace_flag(user)
+
+    # Autogenerar el código si vino vacío. Con la restricción UNIQUE en
+    # Postgres, cadena vacía repetida tira IntegrityError; NULL permite
+    # múltiples filas pero acá preferimos un código humano-legible.
+    codigo = (payload.get("codigo") or "").strip()
+    if not codigo:
+        codigo = _generar_codigo(db, is_demo)
+    else:
+        # Si el usuario forzó un código, validamos que no esté en uso
+        if db.query(models.Contrato).filter_by(codigo=codigo).first():
+            raise HTTPException(409, f"Ya existe un contrato con el código '{codigo}'.")
+    payload["codigo"] = codigo
+
     try:
         obj = models.Contrato(**payload)
-        obj.is_demo = workspace_flag(user)
+        obj.is_demo = is_demo
         db.add(obj); db.commit(); db.refresh(obj)
         return obj
     except Exception as e:

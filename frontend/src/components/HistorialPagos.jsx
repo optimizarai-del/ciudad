@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, CheckCircle, Clock, AlertCircle, Circle, DollarSign, FileText, Download } from 'lucide-react'
+import { X, CheckCircle, Clock, AlertCircle, Circle, DollarSign, FileText, Download, Info } from 'lucide-react'
 import api from '../utils/api'
 
 const ESTADO_CONFIG = {
@@ -74,6 +74,16 @@ export default function HistorialPagos({ contrato, onClose }) {
             </p>
           </div>
           <button onClick={onClose} className="btn-ghost p-2 mt-0.5"><X size={16} /></button>
+        </div>
+
+        <div className="px-6 pt-4 shrink-0">
+          <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-900/40">
+            <Info size={14} className="text-blue-600 dark:text-blue-300 shrink-0 mt-0.5" />
+            <p className="text-[12px] text-blue-700 dark:text-blue-200 leading-snug">
+              Esta vista es <strong>solo lectura</strong>. Los pagos se registran desde
+              el módulo <strong>Cobranza</strong> con el botón <em>Registrar pago</em>.
+            </p>
+          </div>
         </div>
 
         <div className="px-6 py-4 grid grid-cols-3 gap-3 shrink-0 border-b border-[#E5E5E5] dark:border-[#2A2A2A]">

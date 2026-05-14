@@ -284,6 +284,35 @@ def _migrar_workspace_demo():
 
 
 @app.on_event("startup")
+def _limpiar_codigos_contrato_vacios():
+    """Convierte contratos.codigo='' (cadena vacía) en NULL.
+
+    El UNIQUE INDEX en `codigo` permite múltiples NULL pero NO permite
+    múltiples cadenas vacías, así que si quedó algún registro huérfano
+    con codigo='' bloquea cualquier inserción que no traiga código.
+    Idempotente: si no hay filas afectadas, no hace nada.
+    """
+    from sqlalchemy import text
+    from app.database import SessionLocal, IS_POSTGRES, CIUDAD_SCHEMA
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+    db = SessionLocal()
+    try:
+        # 1) Vaciar codigos vacíos.
+        res = db.execute(text(
+            f"UPDATE {qual}contratos SET codigo = NULL "
+            f"WHERE codigo IS NOT NULL AND TRIM(codigo) = ''"
+        ))
+        if res.rowcount:
+            print(f"[migrar] contratos.codigo='' → NULL en {res.rowcount} fila(s)")
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[migrar] limpiar codigos vacíos: {e}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _crear_tabla_refacciones():
     """Defensivo: si por algún motivo `create_all` no dejó la tabla creada,
     la creamos manualmente. Idempotente."""
