@@ -49,6 +49,20 @@ class ClienteRol(str, Enum):
     vendedor = "vendedor"
 
 
+class ClienteEtapaVenta(str, Enum):
+    """Etapa del pipeline comercial de un cliente del área de Ventas.
+
+    Sólo aplica a clientes con rol=comprador/vendedor. Se usa para
+    seguimiento en CRM: el operador puede mover un prospecto a "seña"
+    cuando deja la reserva, a "comprador" cuando cierra, etc.
+    """
+    prospecto = "prospecto"           # primer contacto, evaluando
+    seguimiento = "seguimiento"       # se le hace follow-up periódico
+    sena = "sena"                     # dejó una seña / reserva
+    comprador = "comprador"           # cerró la compra
+    no_interesado = "no_interesado"   # descartado, no avanza
+
+
 class ContratoTipo(str, Enum):
     alquiler_vivienda = "alquiler_vivienda"
     alquiler_comercial = "alquiler_comercial"
@@ -151,6 +165,9 @@ class Cliente(Base):
     email = Column(String, index=True)
     telefono = Column(String)
     rol = Column(SQLEnum(ClienteRol), default=ClienteRol.inquilino)
+    # Etapa del pipeline comercial. Sólo aplica cuando rol=comprador/vendedor
+    # (los inquilinos/propietarios no tienen pipeline). Nullable.
+    etapa_venta = Column(SQLEnum(ClienteEtapaVenta), nullable=True, index=True)
     notas = Column(Text)
     is_demo = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)

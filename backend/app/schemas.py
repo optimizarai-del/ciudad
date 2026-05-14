@@ -44,6 +44,9 @@ class ClienteBase(BaseModel):
     email: Optional[str] = None
     telefono: Optional[str] = None
     rol: Optional[str] = "inquilino"
+    # Solo para clientes del área de ventas. Valores válidos:
+    # prospecto, seguimiento, sena, comprador, no_interesado
+    etapa_venta: Optional[str] = None
     notas: Optional[str] = None
 
 

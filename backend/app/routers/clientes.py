@@ -20,9 +20,34 @@ def listar(db: Session = Depends(get_db), user=Depends(get_current_user)):
     return _scope(db, user).order_by(models.Cliente.id.desc()).all()
 
 
+def _sanitizar_payload(payload: dict) -> dict:
+    """Convierte strings vacíos a None para campos enum/opcionales y valida
+    enums. Lanza HTTPException con mensaje legible si algún valor no matchea."""
+    # etapa_venta: '' → None, sino validar enum
+    et = payload.get("etapa_venta")
+    if et == "" or et is None:
+        payload["etapa_venta"] = None
+    else:
+        try:
+            payload["etapa_venta"] = models.ClienteEtapaVenta(et).value
+        except ValueError:
+            opciones = ", ".join(e.value for e in models.ClienteEtapaVenta)
+            raise HTTPException(400, f"etapa_venta inválida: '{et}'. Opciones: {opciones}")
+    # rol: validar también
+    rol = payload.get("rol")
+    if rol:
+        try:
+            payload["rol"] = models.ClienteRol(rol).value
+        except ValueError:
+            opciones = ", ".join(r.value for r in models.ClienteRol)
+            raise HTTPException(400, f"rol inválido: '{rol}'. Opciones: {opciones}")
+    return payload
+
+
 @router.post("/", response_model=schemas.ClienteOut)
 def crear(data: schemas.ClienteCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    obj = models.Cliente(**data.model_dump())
+    payload = _sanitizar_payload(data.model_dump())
+    obj = models.Cliente(**payload)
     obj.is_demo = workspace_flag(user)
     db.add(obj); db.commit(); db.refresh(obj)
     return obj
@@ -32,7 +57,8 @@ def crear(data: schemas.ClienteCreate, db: Session = Depends(get_db), user=Depen
 def editar(id: int, data: schemas.ClienteCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     obj = _scope(db, user).filter_by(id=id).first()
     if not obj: raise HTTPException(404, "No encontrado")
-    for k, v in data.model_dump(exclude_unset=True).items():
+    payload = _sanitizar_payload(data.model_dump(exclude_unset=True))
+    for k, v in payload.items():
         if k == "is_demo":
             continue
         setattr(obj, k, v)

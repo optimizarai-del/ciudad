@@ -24,6 +24,7 @@ import Liquidaciones      from './pages/Liquidaciones'
 import Recordatorios      from './pages/Recordatorios'
 import ActualizarTasas    from './pages/ActualizarTasas'
 import Refacciones        from './pages/Refacciones'
+import ClientesVentas     from './pages/ClientesVentas'
 
 export default function App() {
   return (
@@ -87,7 +88,7 @@ export default function App() {
           <ProtectedRoute requireVentas><PropiedadesVenta /></ProtectedRoute>
         } />
         <Route path="/ventas/clientes" element={
-          <ProtectedRoute requireVentas><Clientes /></ProtectedRoute>
+          <ProtectedRoute requireVentas><ClientesVentas /></ProtectedRoute>
         } />
 
         {/* Legacy / shared routes */}

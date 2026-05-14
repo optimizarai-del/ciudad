@@ -313,6 +313,59 @@ def _limpiar_codigos_contrato_vacios():
 
 
 @app.on_event("startup")
+def _migrar_etapa_venta():
+    """Agrega la columna `etapa_venta` y el enum clienteetapaventa (Postgres).
+
+    Idempotente. El enum se crea si no existe; la columna nullable se agrega
+    sin default — los registros previos quedan en NULL, que para inquilinos
+    y propietarios es correcto (no aplica pipeline).
+    """
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+
+    # 1. Crear el enum (Postgres). En SQLite se crea automáticamente con la columna.
+    if IS_POSTGRES:
+        try:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as raw:
+                # Existe?
+                existe = raw.execute(text(
+                    f"SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace "
+                    f"WHERE t.typname='clienteetapaventa' AND n.nspname='{CIUDAD_SCHEMA}'"
+                )).first()
+                if not existe:
+                    raw.execute(text(
+                        f"CREATE TYPE {qual}clienteetapaventa AS ENUM "
+                        f"('prospecto','seguimiento','sena','comprador','no_interesado')"
+                    ))
+                    print("[migrar] enum clienteetapaventa creado")
+        except Exception as e:
+            print(f"[migrar] enum clienteetapaventa: {e}")
+
+    # 2. ALTER TABLE clientes ADD COLUMN etapa_venta
+    db = SessionLocal()
+    try:
+        ins = inspect(engine)
+        cols = {c["name"] for c in ins.get_columns("clientes", schema=schema)}
+        if "etapa_venta" not in cols:
+            tipo_col = f"{qual}clienteetapaventa" if IS_POSTGRES else "VARCHAR"
+            db.execute(text(
+                f"ALTER TABLE {qual}clientes ADD COLUMN etapa_venta {tipo_col}"
+            ))
+            db.execute(text(
+                f"CREATE INDEX IF NOT EXISTS ix_clientes_etapa_venta ON {qual}clientes(etapa_venta)"
+            ))
+            db.commit()
+            print("[migrar] clientes.etapa_venta agregada")
+    except Exception as e:
+        db.rollback()
+        print(f"[migrar] clientes.etapa_venta: {e}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _crear_tabla_refacciones():
     """Defensivo: si por algún motivo `create_all` no dejó la tabla creada,
     la creamos manualmente. Idempotente."""
