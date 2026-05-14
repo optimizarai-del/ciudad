@@ -1,196 +1,496 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import {
-  ChevronLeft, ChevronRight, Download, FileText, Send, AlertTriangle,
-  CheckCircle, KeyRound, RefreshCw,
+  Receipt, CheckCircle2, Clock, RefreshCw, Search, X, AlertCircle,
+  RotateCcw, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import api from '../utils/api'
 
-const fmt$ = n => `$${(Number(n) || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 })}`
-const prevMes = m => { const [y, mm] = m.split('-').map(Number); return mm === 1 ? `${y - 1}-12` : `${y}-${String(mm - 1).padStart(2, '0')}` }
-const nextMes = m => { const [y, mm] = m.split('-').map(Number); return mm === 12 ? `${y + 1}-01` : `${y}-${String(mm + 1).padStart(2, '0')}` }
-const mesLabel = m => { const [y, mm] = m.split('-').map(Number); return new Date(y, mm - 1, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' }) }
 
+const fmt = (n) => '$ ' + Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 })
+const fmtFecha = (s) => {
+  if (!s) return '—'
+  try { return new Date(s).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) }
+  catch { return s }
+}
+
+
+/**
+ * Liquidaciones a propietarios.
+ *
+ * Flujo: cuando el inquilino paga, el pago queda "pendiente de liquidar".
+ * Cuando el propietario viene a buscar su parte, lo marcamos como liquidado
+ * y queda registrado en la DB con fecha y monto entregado.
+ *
+ * Vista por default: pendientes agrupados por propietario para que el
+ * operador pueda rápidamente buscar al dueño que llega y marcar todos los
+ * pagos que se le entregan.
+ */
 export default function Liquidaciones() {
-  const hoy = new Date()
-  const [mes, setMes] = useState(`${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`)
-  const [preview, setPreview] = useState(null)
+  const [estado, setEstado] = useState('pendientes')   // pendientes | liquidadas | todas
+  const [busqueda, setBusqueda] = useState('')
+  const [data, setData] = useState(null)
+  const [resumen, setResumen] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [emitir, setEmitir]   = useState(null)   // resultado del POST
-  const [emitiendo, setEm]    = useState(false)
-  const [enviarEmail, setEnv] = useState(true)
+  const [err, setErr] = useState('')
+  const [marcando, setMarcando] = useState(null)       // pago activo en modal "marcar"
+  const [revertiendo, setRevertiendo] = useState(null)
+  const [expandidos, setExpandidos] = useState({})     // {propietarioId: true}
 
-  const cargar = () => {
-    setLoading(true); setEmitir(null)
-    api.get(`/api/liquidaciones/preview?mes=${mes}`)
-      .then(r => setPreview(r.data))
-      .finally(() => setLoading(false))
-  }
-  useEffect(() => { cargar() }, [mes])
+  const cargar = useCallback(() => {
+    setLoading(true); setErr('')
+    Promise.allSettled([
+      api.get(`/api/liquidaciones?estado=${estado}`, { timeout: 15000 }),
+      api.get('/api/liquidaciones/resumen', { timeout: 10000 }),
+    ]).then(([l, r]) => {
+      if (l.status === 'fulfilled') setData(l.value.data)
+      else setErr(l.reason?.response?.data?.detail || l.reason?.message || 'Error al cargar.')
+      if (r.status === 'fulfilled') setResumen(r.value.data)
+    }).finally(() => setLoading(false))
+  }, [estado])
 
-  const ejecutar = async () => {
-    if (!confirm(`Emitir liquidaciones para ${preview.total_propietarios} propietario(s)?`)) return
-    setEm(true)
-    try {
-      const r = await api.post('/api/liquidaciones/emitir', { periodo: mes, enviar_email: enviarEmail })
-      setEmitir(r.data)
-      cargar()
-    } catch (e) {
-      alert(e.response?.data?.detail || 'Error al emitir el lote')
-    } finally { setEm(false) }
-  }
+  useEffect(() => { cargar() }, [cargar])
 
-  const descargar = async (id) => {
-    try {
-      const r = await api.get(`/api/comprobantes/${id}/pdf`, { responseType: 'blob' })
-      const url = URL.createObjectURL(new Blob([r.data], { type: 'application/pdf' }))
-      const a = document.createElement('a'); a.href = url; a.download = `liquidacion-${id}.pdf`
-      document.body.appendChild(a); a.click(); a.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-    } catch { alert('No se pudo descargar el PDF') }
+  // Búsqueda sobre los grupos
+  const gruposFiltrados = useMemo(() => {
+    if (!data?.agrupado_por_propietario) return []
+    if (!busqueda.trim()) return data.agrupado_por_propietario
+    const q = busqueda.toLowerCase()
+    return data.agrupado_por_propietario.filter(g => {
+      if (g.propietario?.nombre?.toLowerCase().includes(q)) return true
+      if (g.propietario?.documento?.includes(busqueda)) return true
+      return g.items.some(it =>
+        it.propiedad_direccion?.toLowerCase().includes(q) ||
+        it.inquilino_nombre?.toLowerCase().includes(q) ||
+        it.contrato_codigo?.toLowerCase().includes(q)
+      )
+    })
+  }, [data, busqueda])
+
+  const toggleGrupo = (id) => {
+    setExpandidos(prev => ({ ...prev, [id]: !prev[id] }))
   }
 
   return (
     <Layout>
-      <div className="p-6 space-y-5 max-w-6xl mx-auto">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Alquileres</p>
-            <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Liquidaciones masivas</h1>
-            <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-              Genera un PDF consolidado por propietario con todos sus pagos cobrados del mes.
+      <div className="max-w-6xl mx-auto animate-fade-in">
+        <header className="mb-6">
+          <div className="hero-eyebrow">Operación de caja</div>
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
+            <div>
+              <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3 flex items-center gap-3">
+                <Receipt className="text-[#B8893A]" /> Liquidaciones
+              </h1>
+              <p className="hero-sub">
+                Pagos cobrados al inquilino, esperando ser entregados al propietario.
+              </p>
+            </div>
+            <button onClick={cargar} className="btn-ghost p-2 self-end" title="Recargar">
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+        </header>
+
+        {/* Stats */}
+        {resumen && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            <Stat
+              icon={Clock}
+              label="Pendientes de entregar"
+              value={resumen.pendientes}
+              sub={fmt(resumen.total_neto_pendiente) + ' total'}
+              color={resumen.pendientes > 0 ? 'amber' : 'green'}
+            />
+            <Stat
+              icon={CheckCircle2}
+              label="Liquidados"
+              value={resumen.liquidados}
+              sub={fmt(resumen.total_neto_liquidado) + ' entregado'}
+              color="green"
+            />
+            <Stat
+              label="Total neto pendiente"
+              value={fmt(resumen.total_neto_pendiente)}
+              sub="suma a pagar"
+              color={resumen.total_neto_pendiente > 0 ? 'amber' : 'green'}
+              big
+            />
+            <Stat
+              label="Total entregado"
+              value={fmt(resumen.total_neto_liquidado)}
+              sub="histórico"
+              color="green"
+              big
+            />
+          </div>
+        )}
+
+        {/* Filtros + búsqueda */}
+        <div className="card p-3 mb-4 flex flex-wrap items-center gap-3">
+          <div className="flex gap-1.5">
+            <Pill active={estado === 'pendientes'} onClick={() => setEstado('pendientes')}
+              label="Pendientes" color="warn" />
+            <Pill active={estado === 'liquidadas'} onClick={() => setEstado('liquidadas')}
+              label="Liquidadas" color="success" />
+            <Pill active={estado === 'todas'} onClick={() => setEstado('todas')}
+              label="Todas" />
+          </div>
+          <div className="flex-1 min-w-[200px] relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input
+              className="input pl-9 !py-2 text-[13px]"
+              placeholder="Buscar por propietario, propiedad o inquilino…"
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+            />
+            {busqueda && (
+              <button onClick={() => setBusqueda('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-primary">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {err && (
+          <div className="card p-3 mb-4 border-l-4 !border-l-danger bg-danger/5 text-[12px] text-danger flex items-start gap-2">
+            <AlertCircle size={13} className="shrink-0 mt-0.5" /> <span className="flex-1">{err}</span>
+            <button onClick={cargar} className="underline hover:no-underline">Reintentar</button>
+          </div>
+        )}
+
+        {/* Lista agrupada por propietario */}
+        {loading ? (
+          <div className="card p-12 text-center">
+            <RefreshCw size={24} className="mx-auto text-muted/40 mb-2 animate-spin" />
+            <p className="text-sm text-muted">Cargando liquidaciones…</p>
+          </div>
+        ) : gruposFiltrados.length === 0 ? (
+          <div className="card p-12 text-center">
+            <CheckCircle2 size={36} className="mx-auto text-success/60 mb-3" />
+            <p className="text-[14px] font-medium mb-1">
+              {estado === 'pendientes'
+                ? 'No hay pagos pendientes de liquidar'
+                : 'No hay liquidaciones que coincidan'}
+            </p>
+            <p className="text-[12px] text-muted">
+              {estado === 'pendientes'
+                ? 'Cuando un inquilino pague, va a aparecer acá esperando que el propietario venga a buscar su parte.'
+                : 'Probá cambiar el filtro o limpiar la búsqueda.'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setMes(prevMes(mes))} className="btn-ghost p-2"><ChevronLeft size={16} /></button>
-            <span className="text-sm font-semibold capitalize min-w-[160px] text-center">{mesLabel(mes)}</span>
-            <button onClick={() => setMes(nextMes(mes))} className="btn-ghost p-2"><ChevronRight size={16} /></button>
-          </div>
-        </div>
-
-        {/* Resumen del lote */}
-        {preview && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <KPI label="Propietarios" value={preview.total_propietarios} icon={KeyRound} />
-            <KPI label="Pagos cobrados" value={preview.total_pagos} />
-            <KPI label="Cobrado total" value={fmt$(preview.monto_cobrado_total)} color="text-green-600 dark:text-green-400" />
-            <KPI label="Neto a transferir" value={fmt$(preview.neto_total_propietarios)} color="text-[#B8893A]" />
+        ) : (
+          <div className="space-y-3">
+            {gruposFiltrados.map(g => (
+              <GrupoPropietario
+                key={g.propietario.id || 0}
+                grupo={g}
+                expandido={expandidos[g.propietario.id || 0]}
+                onToggle={() => toggleGrupo(g.propietario.id || 0)}
+                onMarcar={(item) => setMarcando(item)}
+                onRevertir={(item) => setRevertiendo(item)}
+              />
+            ))}
           </div>
         )}
 
-        {/* Preview detalle */}
-        <div className="card overflow-hidden">
-          <div className="px-6 py-4 flex items-center justify-between border-b border-border dark:border-[#2A2A2A] flex-wrap gap-3">
-            <p className="font-semibold text-[14px]">Vista previa del lote</p>
-            <div className="flex items-center gap-3">
-              <label className="text-[12px] text-gray-500 dark:text-gray-400 flex items-center gap-2 select-none">
-                <input type="checkbox" checked={enviarEmail} onChange={e => setEnv(e.target.checked)} />
-                Enviar por email al emitir
-              </label>
-              <button className="btn-secondary text-[12px] py-1.5 px-3" onClick={cargar} disabled={loading}>
-                <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Recargar
-              </button>
-              <button className="btn-primary" onClick={ejecutar}
-                disabled={emitiendo || !preview || !preview.total_propietarios}>
-                <Send size={13} className={emitiendo ? 'animate-pulse' : ''} />
-                {emitiendo ? 'Emitiendo…' : 'Emitir lote'}
-              </button>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="p-8 text-sm text-gray-400 dark:text-gray-500 text-center">Cargando…</div>
-          ) : !preview || preview.total_propietarios === 0 ? (
-            <div className="p-10 text-center">
-              <FileText size={32} className="mx-auto text-gray-300 dark:text-gray-700 mb-2" />
-              <p className="text-sm text-gray-400 dark:text-gray-500">
-                No hay pagos cobrados para liquidar en {mes}. Registra cobranzas y volvé a esta pantalla.
-              </p>
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead className="bg-neutral-50 dark:bg-[#141414] border-b border-border dark:border-[#2A2A2A]">
-                <tr>
-                  <th className="th text-left">Propietario</th>
-                  <th className="th text-right hidden md:table-cell">Propiedades</th>
-                  <th className="th text-right">Cobrado</th>
-                  <th className="th text-right">Comisión</th>
-                  <th className="th text-right">Neto</th>
-                  <th className="th text-center">Email</th>
-                </tr>
-              </thead>
-              <tbody>
-                {preview.propietarios.map(p => (
-                  <tr key={p.propietario_id} className="border-b border-gray-100 dark:border-[#2A2A2A] hover:bg-gray-50 dark:hover:bg-[#1A1A1A]">
-                    <td className="td">
-                      <p className="font-medium text-sm">{p.nombre}</p>
-                      <p className="text-[11px] text-gray-400 dark:text-gray-500">{p.documento || '—'}</p>
-                    </td>
-                    <td className="td text-right text-sm hidden md:table-cell">{p.items.length}</td>
-                    <td className="td text-right font-semibold">{fmt$(p.totales.cobrado_total)}</td>
-                    <td className="td text-right text-amber-600">−{fmt$(p.totales.comision)}</td>
-                    <td className="td text-right font-semibold text-[#B8893A]">{fmt$(p.totales.neto)}</td>
-                    <td className="td text-center text-[11px] text-gray-500 dark:text-gray-400">{p.email || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {/* Resultado del lote */}
-        {emitir && (
-          <div className="card p-5 border-l-4 border-[#B8893A]">
-            <div className="flex items-center gap-3 mb-3">
-              <CheckCircle size={20} className="text-green-600 dark:text-green-400" />
-              <div>
-                <p className="font-semibold">Lote emitido — {emitir.periodo}</p>
-                <p className="text-[12px] text-muted dark:text-gray-500">
-                  {emitir.total_propietarios} propietario(s) · neto total {fmt$(emitir.neto_total_propietarios)}
-                </p>
-              </div>
-            </div>
-            {!emitir.smtp_configurado && (
-              <p className="text-[11px] bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900 rounded-xl p-3 mb-3 flex items-start gap-2">
-                <AlertTriangle size={12} className="text-amber-600 mt-0.5 shrink-0" />
-                <span>SMTP no configurado: los PDFs quedaron guardados y se pueden descargar desde acá.</span>
-              </p>
-            )}
-            <div className="space-y-2">
-              {emitir.salidas.map(s => (
-                <div key={s.comprobante_id} className="flex items-center gap-3 p-2.5 rounded-xl border border-border dark:border-[#2A2A2A]">
-                  <FileText size={14} className="text-muted dark:text-gray-500 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-medium truncate">{s.propietario}</p>
-                    <p className="text-[11px] text-muted dark:text-gray-500 truncate">
-                      {s.email_destinatario || 'sin email'} ·{' '}
-                      {s.enviado_email
-                        ? <span className="text-green-600 dark:text-green-400">enviado ✓</span>
-                        : <span className="text-amber-600">{s.error_envio}</span>}
-                    </p>
-                  </div>
-                  <span className="text-[13px] font-semibold text-[#B8893A]">{fmt$(s.neto)}</span>
-                  <button className="btn-secondary text-[11px] py-1 px-2.5" onClick={() => descargar(s.comprobante_id)}>
-                    <Download size={11} /> PDF
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <p className="text-[11px] text-muted dark:text-gray-500 mt-6 text-center">
+          💡 Las liquidaciones quedan registradas con fecha y monto en la base de datos para auditoría.
+        </p>
       </div>
+
+      {marcando && (
+        <ModalMarcar
+          pago={marcando}
+          onClose={() => setMarcando(null)}
+          onSaved={() => { setMarcando(null); cargar() }}
+        />
+      )}
+      {revertiendo && (
+        <ModalRevertir
+          pago={revertiendo}
+          onClose={() => setRevertiendo(null)}
+          onSaved={() => { setRevertiendo(null); cargar() }}
+        />
+      )}
     </Layout>
   )
 }
 
-function KPI({ label, value, color = '', icon: Icon }) {
+
+function Stat({ icon: Icon, label, value, sub, color = 'black', big }) {
+  const colors = {
+    black:  'text-black dark:text-white',
+    green:  'text-success',
+    amber:  'text-warn',
+  }
   return (
     <div className="card p-4">
-      <div className="flex items-start justify-between mb-2">
-        <p className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-semibold">{label}</p>
-        {Icon && <Icon size={14} className="text-gray-300 dark:text-gray-600" />}
+      <div className="flex items-start justify-between mb-1.5">
+        <p className="stat-label">{label}</p>
+        {Icon && <Icon size={13} className="text-muted/60" />}
       </div>
-      <p className={`text-2xl font-black ${color}`}>{value}</p>
+      <p className={`stat-value ${big ? 'text-xl sm:text-2xl' : 'text-2xl'} mt-1 ${colors[color] || ''}`}>
+        {value}
+      </p>
+      {sub && <p className="text-[10px] text-muted dark:text-gray-500 mt-1">{sub}</p>}
+    </div>
+  )
+}
+
+
+function Pill({ active, onClick, label, color }) {
+  const bg = active
+    ? color === 'warn'    ? 'bg-warn text-white'
+    : color === 'success' ? 'bg-success text-white'
+    : 'bg-[#0A0A0A] dark:bg-white text-white dark:text-[#0A0A0A]'
+    : 'bg-white dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525]'
+  return (
+    <button onClick={onClick}
+      className={`px-4 py-1.5 rounded-full text-[12px] font-medium transition ${bg}`}>
+      {label}
+    </button>
+  )
+}
+
+
+function GrupoPropietario({ grupo, expandido, onToggle, onMarcar, onRevertir }) {
+  const tienePendientes = grupo.pendientes > 0
+  return (
+    <div className="card overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between gap-3 p-4 hover:bg-neutral-50 dark:hover:bg-[#1A1A1A] transition"
+      >
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          {expandido
+            ? <ChevronDown size={16} className="text-muted shrink-0" />
+            : <ChevronRight size={16} className="text-muted shrink-0" />
+          }
+          <div className="text-left min-w-0 flex-1">
+            <p className="font-semibold text-[14px] truncate">
+              {grupo.propietario.nombre}
+            </p>
+            <p className="text-[11px] text-muted truncate">
+              {grupo.propietario.documento && `${grupo.propietario.documento} · `}
+              {grupo.pendientes > 0 && `${grupo.pendientes} pendiente${grupo.pendientes !== 1 ? 's' : ''}`}
+              {grupo.pendientes > 0 && grupo.liquidados > 0 && ' · '}
+              {grupo.liquidados > 0 && `${grupo.liquidados} liquidado${grupo.liquidados !== 1 ? 's' : ''}`}
+            </p>
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          {tienePendientes ? (
+            <>
+              <p className="text-[10px] text-muted uppercase tracking-widest">A entregar</p>
+              <p className="text-[16px] font-bold text-warn tabular-nums">
+                {fmt(grupo.total_neto_pendiente)}
+              </p>
+            </>
+          ) : (
+            <span className="chip-success">Todo entregado</span>
+          )}
+        </div>
+      </button>
+
+      {expandido && (
+        <div className="border-t border-border dark:border-[#2A2A2A] divide-y divide-border dark:divide-[#2A2A2A]">
+          {grupo.items.map(it => (
+            <ItemLiquidacion
+              key={it.pago_id}
+              item={it}
+              onMarcar={() => onMarcar(it)}
+              onRevertir={() => onRevertir(it)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+function ItemLiquidacion({ item, onMarcar, onRevertir }) {
+  return (
+    <div className="px-4 py-3 flex items-center gap-3 hover:bg-neutral-50/50 dark:hover:bg-[#141414] transition">
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-[13px] truncate">
+          {item.propiedad_direccion || `Propiedad #${item.propiedad_id}`}
+          <span className="text-muted font-normal ml-2 text-[11px]">
+            {item.contrato_codigo || ''}
+          </span>
+        </p>
+        <p className="text-[11px] text-muted truncate">
+          Período {item.periodo} · Inquilino: {item.inquilino_nombre || '—'} · Cobrado el {fmtFecha(item.fecha_pago_inquilino)}
+        </p>
+        {item.liquidado && (
+          <p className="text-[10px] text-success mt-0.5 flex items-center gap-1.5">
+            <CheckCircle2 size={10} />
+            Entregado al propietario el {fmtFecha(item.fecha_liquidacion)}
+            {item.monto_liquidado && ` · ${fmt(item.monto_liquidado)}`}
+          </p>
+        )}
+      </div>
+
+      <div className="text-right shrink-0">
+        <p className="text-[10px] text-muted uppercase tracking-widest">Neto</p>
+        <p className={`text-[15px] font-bold tabular-nums ${item.liquidado ? 'text-success' : 'text-[#B8893A]'}`}>
+          {fmt(item.liquidado ? (item.monto_liquidado || item.neto_a_pagar) : item.neto_a_pagar)}
+        </p>
+        {item.comision_porc > 0 && (
+          <p className="text-[10px] text-muted">comisión {item.comision_porc}%</p>
+        )}
+      </div>
+
+      <div className="shrink-0">
+        {item.liquidado ? (
+          <button
+            onClick={onRevertir}
+            className="btn-ghost py-1.5 px-2 text-[11px]"
+            title="Revertir (corregir error)"
+          >
+            <RotateCcw size={11} />
+          </button>
+        ) : (
+          <button onClick={onMarcar} className="btn-primary text-[12px] py-1.5 px-3">
+            <CheckCircle2 size={12} /> Marcar entregado
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+
+function ModalMarcar({ pago, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    fecha: new Date().toISOString().slice(0, 10),
+    monto: pago.neto_a_pagar,
+    notas: '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  const submit = async (e) => {
+    e.preventDefault(); setLoading(true); setErr('')
+    try {
+      await api.post(`/api/liquidaciones/${pago.pago_id}/marcar`, {
+        fecha: form.fecha,
+        monto: Number(form.monto),
+        notas: form.notas || null,
+      })
+      onSaved()
+    } catch (e) {
+      setErr(e.response?.data?.detail || 'No se pudo registrar la liquidación.')
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto"
+      onClick={onClose}>
+      <div className="card p-6 sm:p-8 w-full max-w-md shadow-lift animate-scale-in my-6"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5">Marcar como entregado</h2>
+            <p className="text-[12px] text-muted">
+              {pago.propietario?.nombre} · Período {pago.periodo}
+            </p>
+            <p className="text-[11px] text-muted/70">{pago.propiedad_direccion}</p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
+        </div>
+
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label">Fecha de entrega</label>
+              <input type="date" className="input"
+                value={form.fecha}
+                onChange={e => setForm({ ...form, fecha: e.target.value })} />
+            </div>
+            <div>
+              <label className="label">Monto entregado $</label>
+              <input type="number" className="input"
+                value={form.monto}
+                onChange={e => setForm({ ...form, monto: e.target.value })} />
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Notas (opcional)</label>
+            <textarea className="input resize-none" rows={2}
+              placeholder="Ej: Entregado en efectivo, firma José Pérez"
+              value={form.notas}
+              onChange={e => setForm({ ...form, notas: e.target.value })} />
+          </div>
+
+          <div className="rounded-xl p-3 bg-[#B8893A]/5 border border-[#B8893A]/20 text-[12px] text-muted flex items-start gap-2">
+            <AlertCircle size={13} className="text-[#B8893A] shrink-0 mt-0.5" />
+            <div>
+              Al confirmar queda registrado quién, cuándo y cuánto. Si te equivocás,
+              podés revertirlo después con el botón ↩.
+            </div>
+          </div>
+
+          {err && <p className="text-[13px] text-danger bg-danger/5 px-4 py-2 rounded-xl">{err}</p>}
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
+            <button className="btn-primary flex-1" disabled={loading}>
+              {loading ? 'Guardando…' : 'Confirmar entrega'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+
+function ModalRevertir({ pago, onClose, onSaved }) {
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  const confirmar = async () => {
+    setLoading(true); setErr('')
+    try {
+      await api.post(`/api/liquidaciones/${pago.pago_id}/revertir`)
+      onSaved()
+    } catch (e) {
+      setErr(e.response?.data?.detail || 'No se pudo revertir.')
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 grid place-items-center p-4"
+      onClick={onClose}>
+      <div className="card p-6 w-full max-w-md shadow-lift animate-scale-in"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-warn/10 grid place-items-center">
+            <RotateCcw size={18} className="text-warn" />
+          </div>
+          <h3 className="hero-title text-xl">Revertir liquidación</h3>
+        </div>
+        <p className="text-[13px] text-muted mb-5">
+          El pago va a volver a aparecer como pendiente de entregar al propietario.
+          Las notas quedan registradas para auditoría.
+        </p>
+        <p className="text-[12px] text-muted mb-5 bg-neutral-50 dark:bg-[#1A1A1A] rounded-xl p-3">
+          <strong>{pago.propietario?.nombre}</strong> · Período {pago.periodo}<br />
+          {pago.propiedad_direccion}
+        </p>
+
+        {err && <p className="text-[13px] text-danger bg-danger/5 px-4 py-2 rounded-xl mb-3">{err}</p>}
+
+        <div className="flex gap-3">
+          <button className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
+          <button className="btn-danger flex-1" onClick={confirmar} disabled={loading}>
+            {loading ? 'Revirtiendo…' : 'Sí, revertir'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

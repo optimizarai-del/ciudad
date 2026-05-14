@@ -313,6 +313,40 @@ def _limpiar_codigos_contrato_vacios():
 
 
 @app.on_event("startup")
+def _migrar_liquidacion_propietario():
+    """Agrega columnas de liquidación al propietario sobre `pagos`. Idempotente."""
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+    db = SessionLocal()
+    try:
+        ins = inspect(engine)
+        cols = {c["name"] for c in ins.get_columns("pagos", schema=schema)}
+        nuevas = [
+            ("liquidado_propietario", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("fecha_liquidacion_propietario", "DATE"),
+            ("monto_liquidado_propietario", "FLOAT"),
+            ("notas_liquidacion", "TEXT"),
+        ]
+        for nombre, tipo in nuevas:
+            if nombre not in cols:
+                db.execute(text(f"ALTER TABLE {qual}pagos ADD COLUMN {nombre} {tipo}"))
+                db.commit()
+                print(f"[migrar] pagos.{nombre} agregada")
+        if "liquidado_propietario" not in cols:
+            db.execute(text(
+                f"CREATE INDEX IF NOT EXISTS ix_pagos_liquidado_propietario ON {qual}pagos(liquidado_propietario)"
+            ))
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[migrar] pagos.liquidacion: {e}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _migrar_etapa_venta():
     """Agrega la columna `etapa_venta` y el enum clienteetapaventa (Postgres).
 

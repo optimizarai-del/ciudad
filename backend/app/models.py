@@ -242,6 +242,15 @@ class Pago(Base):
     monto_total = Column(Float, default=0)
     estado = Column(SQLEnum(PagoEstado), default=PagoEstado.pendiente)
     notas = Column(Text)
+    # Liquidación al propietario: cuando el inquilino paga, el propietario
+    # todavía no cobró su parte. Cuando viene a buscar el dinero, la
+    # inmobiliaria marca el pago como "liquidado" y se registra cuándo y
+    # cuánto neto se le entregó. Antes de ese momento, el pago figura como
+    # "pendiente de liquidar" en la página de Liquidaciones.
+    liquidado_propietario = Column(Boolean, default=False, nullable=False, index=True)
+    fecha_liquidacion_propietario = Column(Date, nullable=True)
+    monto_liquidado_propietario = Column(Float, nullable=True)
+    notas_liquidacion = Column(Text)
     is_demo = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
