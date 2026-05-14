@@ -307,9 +307,14 @@ async def procesar_mensaje(
     messages = historial.copy()
     output_json = None
 
+    # Modelo configurable por env. Default a haiku porque es lo que la
+    # mayoría de keys tiene habilitado (más barato y rápido para chat con
+    # tool-use). Override con ANTHROPIC_MODEL en .env si querés Sonnet/Opus.
+    model = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
+
     for _ in range(5):  # máximo 5 iteraciones (tool calls)
         response = client.messages.create(
-            model="claude-sonnet-4-5",
+            model=model,
             max_tokens=1024,
             system=SYSTEM_PROMPT,
             tools=TOOLS,

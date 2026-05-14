@@ -215,14 +215,26 @@ async def whatsapp_webhook(request: Request, background: BackgroundTasks, db: Se
 @router.post("/chat")
 async def chat_test(req: ChatRequest, db: Session = Depends(get_db)):
     """Endpoint para probar el agente desde el panel de Ciudad (sin debounce)."""
-    oraciones = await agente_service.procesar_mensaje(
-        canal_id=req.canal_id,
-        texto=req.mensaje,
-        canal=req.canal,
-        db=db,
-        usar_debounce=False,
-    )
-    return {"respuesta": " ".join(oraciones), "oraciones": oraciones}
+    # Validar config antes de llamar al modelo
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(503, "El agente IA no está configurado: falta ANTHROPIC_API_KEY en el servidor.")
+    try:
+        oraciones = await agente_service.procesar_mensaje(
+            canal_id=req.canal_id,
+            texto=req.mensaje,
+            canal=req.canal,
+            db=db,
+            usar_debounce=False,
+        )
+        return {"respuesta": " ".join(oraciones), "oraciones": oraciones}
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Errores típicos: modelo sin acceso, rate limit, schema inválido de tool.
+        # El frontend lo muestra al operador para poder diagnosticar.
+        msg = f"{type(e).__name__}: {str(e)[:400]}"
+        print(f"[agente.chat] {msg}")
+        raise HTTPException(502, f"El agente falló: {msg}")
 
 
 @router.post("/admin/chat")
@@ -231,10 +243,17 @@ async def chat_admin_test(req: ChatRequest, db: Session = Depends(get_db)):
     Probar el agente admin SIN pasar por Telegram. Acepta opcionalmente un
     `role` para simular permisos de un usuario distinto.
     """
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(503, "El agente admin no está configurado: falta ANTHROPIC_API_KEY en el servidor.")
     role = getattr(req, "role", None) or "admin"
     nombre = getattr(req, "nombre", None) or "Test"
-    respuesta = await agente_admin.responder_admin_llm(req.mensaje, db, role=role, nombre=nombre)
-    return {"respuesta": respuesta, "rol": role}
+    try:
+        respuesta = await agente_admin.responder_admin_llm(req.mensaje, db, role=role, nombre=nombre)
+        return {"respuesta": respuesta, "rol": role}
+    except Exception as e:
+        msg = f"{type(e).__name__}: {str(e)[:400]}"
+        print(f"[agente.admin.chat] {msg}")
+        raise HTTPException(502, f"El agente admin falló: {msg}")
 
 
 @router.get("/admin/status")
@@ -426,6 +445,8 @@ def stats(db: Session = Depends(get_db)):
 
     telegram_ok = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
     instagram_ok = bool(os.getenv("INSTAGRAM_PAGE_ACCESS_TOKEN"))
+    anthropic_ok = bool(os.getenv("ANTHROPIC_API_KEY"))
+    modelo = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
 
     return {
         "total_leads": total,
@@ -434,6 +455,9 @@ def stats(db: Session = Depends(get_db)):
         "a_contactar": a_contactar,
         "leads_hoy": hoy_count,
         "total_mensajes": total_msgs,
+        # Flag de configuración general del agente (la usa el banner del panel)
+        "agente_configurado": anthropic_ok,
+        "modelo": modelo if anthropic_ok else None,
         "canales": {
             "telegram": {"activo": telegram_ok, "nombre": "Telegram"},
             "instagram": {"activo": instagram_ok, "nombre": "Instagram", "pendiente": not instagram_ok},

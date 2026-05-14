@@ -165,10 +165,15 @@ function TestChat() {
         mensaje: texto,
         canal_id: sessionId,
         canal: 'web'
-      })
+      }, { timeout: 60000 })
       setMessages(m => [...m, { rol: 'assistant', contenido: data.respuesta }])
-    } catch {
-      setMessages(m => [...m, { rol: 'assistant', contenido: 'Error al conectar con el agente.' }])
+    } catch (e) {
+      const detail = e.response?.data?.detail || e.message || 'Error al conectar con el agente.'
+      setMessages(m => [...m, {
+        rol: 'assistant',
+        contenido: `⚠ ${detail}`,
+        error: true,
+      }])
     } finally {
       setLoading(false)
     }
@@ -275,7 +280,11 @@ export default function Agente() {
     if (selectedLead?.id === leadId) setSelectedLead(l => ({ ...l, estado: nuevoEstado }))
   }
 
-  const noKey = stats && !stats.canales?.telegram?.activo && !stats.canales?.instagram?.activo
+  // Aviso real: el agente sólo deja de funcionar si falta ANTHROPIC_API_KEY.
+  // Telegram/Instagram son canales opcionales — su falta no impide el chat
+  // de prueba del panel.
+  const agenteOK = stats?.agente_configurado === true
+  const noKey = stats && !agenteOK
 
   return (
     <Layout>
