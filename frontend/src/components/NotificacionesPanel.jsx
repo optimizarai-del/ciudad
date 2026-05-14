@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Bell, AlertTriangle, Clock, FileText, DollarSign, Calendar, X,
+  Bell, AlertTriangle, Clock, FileText, DollarSign, Calendar, X, RefreshCw,
 } from 'lucide-react'
 import api from '../utils/api'
 
@@ -50,15 +50,27 @@ const URGENCIA_STYLES = {
 export default function NotificacionesPanel({ anchorRef, onClose }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState(null)
   const panelRef = useRef(null)
   const nav = useNavigate()
 
-  useEffect(() => {
-    api.get('/api/alertas/resumen')
+  const cargar = useCallback(() => {
+    setLoading(true); setErr(null)
+    // Timeout corto — si el backend se cuelga, mostramos retry en vez de
+    // dejar el panel en "Cargando…" indefinido. Antes pasaba con queries N+1.
+    api.get('/api/alertas/resumen', { timeout: 10000 })
       .then(r => setData(r.data))
-      .catch(() => setData({ total: 0, criticos: 0, items: [] }))
+      .catch(e => {
+        const msg = e.code === 'ECONNABORTED'
+          ? 'El servidor tardó demasiado. Probá de nuevo.'
+          : (e.response?.data?.detail || e.message || 'No se pudo cargar.')
+        setErr(msg)
+        setData({ total: 0, criticos: 0, items: [] })
+      })
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => { cargar() }, [cargar])
 
   // Click fuera → cerrar
   useEffect(() => {
@@ -103,14 +115,32 @@ export default function NotificacionesPanel({ anchorRef, onClose }) {
             </p>
           )}
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-[#1E1E1E] text-muted">
-          <X size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button onClick={cargar} className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-[#1E1E1E] text-muted"
+            title="Recargar">
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-[#1E1E1E] text-muted">
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <p className="p-8 text-center text-[12px] text-muted">Cargando…</p>
+          <div className="p-8 text-center">
+            <RefreshCw size={20} className="mx-auto text-muted/40 mb-2 animate-spin" />
+            <p className="text-[12px] text-muted">Cargando notificaciones…</p>
+          </div>
+        ) : err ? (
+          <div className="p-8 text-center">
+            <AlertTriangle size={22} className="mx-auto text-warn mb-2" />
+            <p className="text-[12px] text-muted mb-3">{err}</p>
+            <button onClick={cargar}
+              className="text-[12px] text-primary dark:text-white hover:underline">
+              Reintentar
+            </button>
+          </div>
         ) : !data || data.items.length === 0 ? (
           <div className="p-10 text-center">
             <Bell size={28} className="mx-auto text-muted/30 mb-3" />

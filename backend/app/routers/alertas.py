@@ -61,135 +61,159 @@ def resumen(db: Session = Depends(get_db), user=Depends(get_current_user)):
     """Resumen tipo 'centro de notificaciones' para el panel de la campana.
 
     Junta varios tipos de alertas en un solo endpoint, ordenadas por
-    urgencia, con link al detalle (contrato_id / propiedad_id) para que
-    el frontend pueda navegar al click.
+    urgencia. Optimizado para evitar N+1: hace prefetch bulk de propiedades,
+    clientes y contratos referenciados antes de armar los items.
     """
+    from sqlalchemy.orm import joinedload
     hoy = date.today()
     items = []
 
-    # 1. Contratos VENCIDOS (estado = vencido)
-    vencidos = (
-        _ws(db.query(models.Contrato), models.Contrato, user)
-          .filter(models.Contrato.estado == models.ContratoEstado.vencido)
-          .order_by(models.Contrato.fecha_fin.desc().nullslast())
-          .limit(20)
-          .all()
-    )
-    for c in vencidos:
-        prop = db.query(models.Propiedad).filter_by(id=c.propiedad_id).first()
-        dias_pasados = (hoy - c.fecha_fin).days if c.fecha_fin else None
-        items.append({
-            "id": f"contrato-vencido-{c.id}",
-            "tipo": "contrato_vencido",
-            "urgencia": "critico",
-            "titulo": f"Contrato vencido — {prop.direccion if prop else f'#{c.id}'}",
-            "descripcion": (
-                f"Venció hace {dias_pasados} día{'s' if dias_pasados != 1 else ''}"
-                if dias_pasados is not None else "Contrato vencido"
-            ),
-            "fecha": c.fecha_fin.isoformat() if c.fecha_fin else None,
-            "link": f"/alquileres/contratos",
-            "contrato_id": c.id,
-            "propiedad_id": c.propiedad_id,
-        })
+    try:
+        # 1. Contratos VENCIDOS + 2. Contratos POR VENCER — un solo query
+        limite = hoy + timedelta(days=30)
+        contratos = (
+            _ws(db.query(models.Contrato), models.Contrato, user)
+              .options(joinedload(models.Contrato.propiedad))
+              .filter(or_(
+                  models.Contrato.estado == models.ContratoEstado.vencido,
+                  (
+                      (models.Contrato.estado == models.ContratoEstado.vigente)
+                      & models.Contrato.fecha_fin.isnot(None)
+                      & (models.Contrato.fecha_fin >= hoy - timedelta(days=180))
+                      & (models.Contrato.fecha_fin <= limite)
+                  ),
+              ))
+              .order_by(models.Contrato.fecha_fin.desc().nullslast())
+              .limit(40)
+              .all()
+        )
 
-    # 2. Contratos POR VENCER en los próximos 30 días
-    limite = hoy + timedelta(days=30)
-    por_vencer = (
-        _ws(db.query(models.Contrato), models.Contrato, user)
-          .filter(
-              models.Contrato.estado == models.ContratoEstado.vigente,
-              models.Contrato.fecha_fin.isnot(None),
-              models.Contrato.fecha_fin >= hoy,
-              models.Contrato.fecha_fin <= limite,
-          )
-          .order_by(models.Contrato.fecha_fin)
-          .limit(20)
-          .all()
-    )
-    for c in por_vencer:
-        prop = db.query(models.Propiedad).filter_by(id=c.propiedad_id).first()
-        dias_restantes = (c.fecha_fin - hoy).days
-        urgencia = "critico" if dias_restantes <= 7 else "pronto" if dias_restantes <= 30 else "normal"
-        items.append({
-            "id": f"contrato-vencer-{c.id}",
-            "tipo": "contrato_por_vencer",
-            "urgencia": urgencia,
-            "titulo": f"Contrato por vencer — {prop.direccion if prop else f'#{c.id}'}",
-            "descripcion": (
-                f"Vence en {dias_restantes} día{'s' if dias_restantes != 1 else ''}"
-                if dias_restantes > 0 else "Vence hoy"
-            ),
-            "fecha": c.fecha_fin.isoformat(),
-            "link": f"/alquileres/contratos",
-            "contrato_id": c.id,
-            "propiedad_id": c.propiedad_id,
-        })
+        for c in contratos:
+            prop_dir = c.propiedad.direccion if c.propiedad else f"#{c.id}"
+            estado = c.estado.value if hasattr(c.estado, "value") else c.estado
+            if estado == "vencido":
+                dias_pasados = (hoy - c.fecha_fin).days if c.fecha_fin else None
+                items.append({
+                    "id": f"contrato-vencido-{c.id}",
+                    "tipo": "contrato_vencido",
+                    "urgencia": "critico",
+                    "titulo": f"Contrato vencido — {prop_dir}",
+                    "descripcion": (
+                        f"Venció hace {dias_pasados} día{'s' if dias_pasados != 1 else ''}"
+                        if dias_pasados is not None else "Contrato vencido"
+                    ),
+                    "fecha": c.fecha_fin.isoformat() if c.fecha_fin else None,
+                    "link": "/alquileres/contratos",
+                    "contrato_id": c.id,
+                    "propiedad_id": c.propiedad_id,
+                })
+            elif c.fecha_fin and hoy <= c.fecha_fin <= limite:
+                dias_restantes = (c.fecha_fin - hoy).days
+                urgencia = "critico" if dias_restantes <= 7 else "pronto"
+                items.append({
+                    "id": f"contrato-vencer-{c.id}",
+                    "tipo": "contrato_por_vencer",
+                    "urgencia": urgencia,
+                    "titulo": f"Contrato por vencer — {prop_dir}",
+                    "descripcion": (
+                        f"Vence en {dias_restantes} día{'s' if dias_restantes != 1 else ''}"
+                        if dias_restantes > 0 else "Vence hoy"
+                    ),
+                    "fecha": c.fecha_fin.isoformat(),
+                    "link": "/alquileres/contratos",
+                    "contrato_id": c.id,
+                    "propiedad_id": c.propiedad_id,
+                })
 
-    # 3. Pagos VENCIDOS o ATRASADOS — vencimiento pasado, sin fecha_pago
-    pagos_atrasados = (
-        _ws(db.query(models.Pago), models.Pago, user)
-          .filter(
-              models.Pago.estado.in_([models.PagoEstado.vencido, models.PagoEstado.pendiente]),
-              models.Pago.fecha_pago.is_(None),
-              models.Pago.fecha_vencimiento.isnot(None),
-              models.Pago.fecha_vencimiento < hoy,
-          )
-          .order_by(models.Pago.fecha_vencimiento)
-          .limit(30)
-          .all()
-    )
-    for p in pagos_atrasados:
-        contrato = _ws(db.query(models.Contrato), models.Contrato, user).filter_by(id=p.contrato_id).first() if p.contrato_id else None
-        prop = db.query(models.Propiedad).filter_by(id=contrato.propiedad_id).first() if contrato else None
-        inquilino = db.query(models.Cliente).filter_by(id=contrato.inquilino_id).first() if contrato and contrato.inquilino_id else None
-        dias_mora = (hoy - p.fecha_vencimiento).days
-        items.append({
-            "id": f"pago-mora-{p.id}",
-            "tipo": "pago_mora",
-            "urgencia": "critico" if dias_mora > 30 else "pronto",
-            "titulo": f"Pago en mora — {prop.direccion if prop else f'Contrato #{p.contrato_id}'}",
-            "descripcion": (
-                f"{inquilino.nombre if inquilino else 'Inquilino'} debe ${(p.monto_total or 0):,.0f}".replace(",", ".")
-                + f" · {dias_mora} día{'s' if dias_mora != 1 else ''} de atraso"
-            ),
-            "fecha": p.fecha_vencimiento.isoformat(),
-            "link": f"/alquileres/cobranza",
-            "contrato_id": p.contrato_id,
-            "pago_id": p.id,
-        })
+        # 3. Pagos en mora — con prefetch de contrato + propiedad + inquilino
+        pagos_atrasados = (
+            _ws(db.query(models.Pago), models.Pago, user)
+              .options(
+                  joinedload(models.Pago.contrato)
+                    .joinedload(models.Contrato.propiedad),
+                  joinedload(models.Pago.contrato)
+                    .joinedload(models.Contrato.inquilino),
+              )
+              .filter(
+                  models.Pago.estado.in_([models.PagoEstado.vencido, models.PagoEstado.pendiente]),
+                  models.Pago.fecha_pago.is_(None),
+                  models.Pago.fecha_vencimiento.isnot(None),
+                  models.Pago.fecha_vencimiento < hoy,
+              )
+              .order_by(models.Pago.fecha_vencimiento)
+              .limit(30)
+              .all()
+        )
+        for p in pagos_atrasados:
+            c = p.contrato
+            prop = c.propiedad if c else None
+            inquilino = c.inquilino if c else None
+            dias_mora = (hoy - p.fecha_vencimiento).days
+            items.append({
+                "id": f"pago-mora-{p.id}",
+                "tipo": "pago_mora",
+                "urgencia": "critico" if dias_mora > 30 else "pronto",
+                "titulo": f"Pago en mora — {prop.direccion if prop else f'Contrato #{p.contrato_id}'}",
+                "descripcion": (
+                    f"{inquilino.nombre if inquilino else 'Inquilino'} debe ${(p.monto_total or 0):,.0f}".replace(",", ".")
+                    + f" · {dias_mora} día{'s' if dias_mora != 1 else ''} de atraso"
+                ),
+                "fecha": p.fecha_vencimiento.isoformat(),
+                "link": "/alquileres/cobranza",
+                "contrato_id": p.contrato_id,
+                "pago_id": p.id,
+            })
 
-    # 4. Eventos críticos de Recordatorios (loop background)
-    eventos_crit = (
-        db.query(models.Evento)
-          .filter(models.Evento.es_critico.is_(True))
-          .order_by(models.Evento.created_at.desc())
-          .limit(10)
-          .all()
-    )
-    for e in eventos_crit:
-        items.append({
-            "id": f"evento-{e.id}",
-            "tipo": "evento_critico",
-            "urgencia": "critico",
-            "titulo": e.titulo,
-            "descripcion": e.descripcion or "",
-            "fecha": e.created_at.isoformat() if e.created_at else None,
-            "link": "/recordatorios",
-            "contrato_id": e.contrato_id,
-            "propiedad_id": e.propiedad_id,
-        })
+        # 4. Eventos críticos — filtrados por workspace via contrato_id
+        # (los eventos sin contrato_id son globales y solo los ve el admin real)
+        ids_contratos_ws = {c.id for c in
+            _ws(db.query(models.Contrato.id), models.Contrato, user).all()
+        } if user else set()
+        # _ws() retorna Query de columnas; reconstruir set de ids:
+        ids_contratos_ws = {row[0] if isinstance(row, tuple) else row.id
+                            for row in _ws(db.query(models.Contrato), models.Contrato, user).all()}
 
-    # Orden global: urgencia crítica primero, después por fecha más reciente
-    urgencia_orden = {"critico": 0, "pronto": 1, "normal": 2}
-    items.sort(key=lambda x: (urgencia_orden.get(x["urgencia"], 99), x.get("fecha") or ""))
+        from app.services.workspace import is_demo_user
+        eventos_q = (
+            db.query(models.Evento)
+              .filter(models.Evento.es_critico.is_(True))
+              .order_by(models.Evento.created_at.desc())
+              .limit(40)
+        )
+        for e in eventos_q.all():
+            # Solo incluir si el evento corresponde al workspace del usuario
+            if e.contrato_id and e.contrato_id not in ids_contratos_ws:
+                continue
+            # Si no tiene contrato_id (evento global), solo lo ve el workspace real
+            if not e.contrato_id and is_demo_user(user):
+                continue
+            items.append({
+                "id": f"evento-{e.id}",
+                "tipo": "evento_critico",
+                "urgencia": "critico",
+                "titulo": e.titulo,
+                "descripcion": e.descripcion or "",
+                "fecha": e.created_at.isoformat() if e.created_at else None,
+                "link": "/recordatorios",
+                "contrato_id": e.contrato_id,
+                "propiedad_id": e.propiedad_id,
+            })
 
-    total_critico = sum(1 for x in items if x["urgencia"] == "critico")
-    return {
-        "total": len(items),
-        "criticos": total_critico,
-        "items": items[:50],   # cap defensivo
-    }
+        # Orden global: urgencia crítica primero, después por fecha más reciente
+        urgencia_orden = {"critico": 0, "pronto": 1, "normal": 2}
+        items.sort(key=lambda x: (urgencia_orden.get(x["urgencia"], 99), x.get("fecha") or ""))
+
+        total_critico = sum(1 for x in items if x["urgencia"] == "critico")
+        return {
+            "total": len(items),
+            "criticos": total_critico,
+            "items": items[:50],   # cap defensivo
+        }
+    except Exception as e:
+        # No queremos que el panel de la campana se cuelgue por un bug del
+        # endpoint: en peor caso devolvemos vacío.
+        print(f"[alertas.resumen] {type(e).__name__}: {e}")
+        return {"total": 0, "criticos": 0, "items": [], "error": str(e)[:200]}
 
 
 @router.post("/enviar-recordatorios")
