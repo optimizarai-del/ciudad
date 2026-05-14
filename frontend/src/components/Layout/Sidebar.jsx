@@ -32,10 +32,22 @@ const Section = ({ label, children }) => (
 )
 
 export default function Sidebar() {
-  const { hasAlquileres, hasVentas, isAdmin, isGerencia, role } = useRole()
+  const { hasAlquileres, hasVentas, isAdmin, isGerencia, isAdminDemo, role } = useRole()
 
   return (
     <aside className="w-60 h-full bg-white dark:bg-[#0A0A0A] border-r border-gray-100 dark:border-gray-900 flex flex-col py-4 px-3">
+
+      {/* Banner cuando estás logueado como admin_demo: workspace aislado */}
+      {isAdminDemo && (
+        <div className="mb-3 px-3 py-2 rounded-xl bg-[#B8893A]/10 border border-[#B8893A]/30">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-[#B8893A]">
+            Modo Demo
+          </p>
+          <p className="text-[10px] text-muted mt-0.5">
+            Solo ves datos de prueba. Tus cambios no afectan la data real.
+          </p>
+        </div>
+      )}
 
       {/* Alquileres section */}
       {hasAlquileres && (

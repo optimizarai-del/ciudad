@@ -123,6 +123,47 @@ def limpiar(db: Session = Depends(get_db), user=Depends(get_current_user)):
     }
 
 
+@router.post("/crear-usuario")
+def crear_usuario_admin_demo(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Crea (o re-genera) el usuario `admin_demo@ciudad.demo` con password
+    `demo1234` y role `admin_demo`. Solo admin puede invocar.
+
+    El usuario admin_demo vive en un sandbox aislado: solo ve filas con
+    is_demo=True (las que carga /api/admin/demo/cargar). Útil para mostrar
+    la plataforma a clientes potenciales sin riesgo de tocar data real.
+    """
+    _require_admin(user)
+    from app.security import hash_pw
+
+    email = "admin_demo@ciudad.demo"
+    existing = db.query(models.User).filter_by(email=email).first()
+    password_plano = "demo1234"
+    if existing:
+        existing.password_hash = hash_pw(password_plano)
+        existing.role = models.UserRole.admin_demo
+        existing.is_active = True
+        db.commit()
+        return {
+            "ok": True, "creado": False, "actualizado": True,
+            "email": email, "password": password_plano,
+            "role": "admin_demo",
+        }
+    u = models.User(
+        nombre="Admin Demo",
+        email=email,
+        password_hash=hash_pw(password_plano),
+        role=models.UserRole.admin_demo,
+        is_active=True,
+    )
+    db.add(u); db.commit(); db.refresh(u)
+    return {
+        "ok": True, "creado": True, "actualizado": False,
+        "email": email, "password": password_plano,
+        "role": "admin_demo",
+        "user_id": u.id,
+    }
+
+
 @router.post("/cargar")
 def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
     """Crea un dataset realista para probar la plataforma.
@@ -162,6 +203,7 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
         ),
     ]
     for c in propietarios:
+        c.is_demo = True
         db.add(c)
     db.flush()  # obtener IDs
 
@@ -198,6 +240,7 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
         ),
     ]
     for c in inquilinos:
+        c.is_demo = True
         db.add(c)
     db.flush()
 
@@ -274,6 +317,7 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
         ),
     ]
     for p in propiedades:
+        p.is_demo = True
         db.add(p)
     db.flush()
 
@@ -358,6 +402,7 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
         ),
     ]
     for k in contratos:
+        k.is_demo = True
         db.add(k)
     db.flush()
 
@@ -478,7 +523,15 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
         ),
     ]
     for r in refacciones:
+        r.is_demo = True
         db.add(r)
+
+    # Sanity post-process: marcar como is_demo=True todo lo nuevo en la session.
+    # Esto cubre los Pago() construidos inline en los loops (3 contratos) sin
+    # tener que tocar cada constructor.
+    for obj in db.new:
+        if hasattr(obj, "is_demo"):
+            obj.is_demo = True
 
     db.commit()
 

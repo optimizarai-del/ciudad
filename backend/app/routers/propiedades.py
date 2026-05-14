@@ -8,6 +8,7 @@ from app.database import get_db
 from app.security import get_current_user
 from app import models, schemas
 from app.services import supabase_storage
+from app.services.workspace import apply_workspace_filter, workspace_flag, is_demo_user
 
 router = APIRouter(prefix="/api/propiedades", tags=["propiedades"])
 
@@ -23,31 +24,39 @@ def _to_out(p: models.Propiedad) -> dict:
     return d
 
 
+def _scope(db: Session, user):
+    """Query base aislada por workspace (demo vs real)."""
+    return apply_workspace_filter(db.query(models.Propiedad), models.Propiedad, user)
+
+
 @router.get("/", response_model=List[schemas.PropiedadOut])
 def listar(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    items = db.query(models.Propiedad).order_by(models.Propiedad.id.desc()).all()
+    items = _scope(db, user).order_by(models.Propiedad.id.desc()).all()
     return [_to_out(p) for p in items]
 
 
 @router.post("/", response_model=schemas.PropiedadOut)
 def crear(data: schemas.PropiedadCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     obj = models.Propiedad(**data.model_dump())
+    obj.is_demo = workspace_flag(user)
     db.add(obj); db.commit(); db.refresh(obj)
     return _to_out(obj)
 
 
 @router.get("/{id}", response_model=schemas.PropiedadOut)
 def detalle(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    obj = db.query(models.Propiedad).filter_by(id=id).first()
+    obj = _scope(db, user).filter_by(id=id).first()
     if not obj: raise HTTPException(404, "No encontrada")
     return _to_out(obj)
 
 
 @router.patch("/{id}", response_model=schemas.PropiedadOut)
 def editar(id: int, data: schemas.PropiedadCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    obj = db.query(models.Propiedad).filter_by(id=id).first()
+    obj = _scope(db, user).filter_by(id=id).first()
     if not obj: raise HTTPException(404, "No encontrada")
     for k, v in data.model_dump(exclude_unset=True).items():
+        if k == "is_demo":  # no se puede cambiar el workspace via API
+            continue
         setattr(obj, k, v)
     db.commit(); db.refresh(obj)
     return _to_out(obj)
@@ -55,7 +64,7 @@ def editar(id: int, data: schemas.PropiedadCreate, db: Session = Depends(get_db)
 
 @router.delete("/{id}")
 def eliminar(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    obj = db.query(models.Propiedad).filter_by(id=id).first()
+    obj = _scope(db, user).filter_by(id=id).first()
     if not obj: raise HTTPException(404, "No encontrada")
     db.delete(obj); db.commit()
     return {"ok": True}
@@ -98,7 +107,7 @@ def ficha_pdf(
 ):
     """Genera un PDF de presentación del inmueble — fotos + características +
     condiciones. SIN propietarios ni inquilinos (es la versión comercial)."""
-    p = db.query(models.Propiedad).filter_by(id=id).first()
+    p = _scope(db, user).filter_by(id=id).first()
     if not p:
         raise HTTPException(404, "Propiedad no encontrada")
 

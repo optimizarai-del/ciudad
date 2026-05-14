@@ -19,9 +19,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.security import get_current_user
 from app import models, schemas
+from app.services.workspace import apply_workspace_filter, workspace_flag
 
 
 router = APIRouter(prefix="/api/refacciones", tags=["refacciones"])
+
+
+def _scope(db: Session, user):
+    return apply_workspace_filter(db.query(models.Refaccion), models.Refaccion, user)
 
 
 def _to_out(r: models.Refaccion) -> dict:
@@ -53,7 +58,7 @@ def listar(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    q = db.query(models.Refaccion)
+    q = _scope(db, user)
     if propiedad_id:
         q = q.filter(models.Refaccion.propiedad_id == propiedad_id)
     if contrato_id:
@@ -69,11 +74,11 @@ def listar(
 @router.get("/resumen")
 def resumen(db: Session = Depends(get_db), user=Depends(get_current_user)):
     """KPIs para el dashboard del módulo."""
-    total_pend_inq = db.query(models.Refaccion).filter(
+    total_pend_inq = _scope(db, user).filter(
         models.Refaccion.estado == models.RefaccionEstado.pendiente,
         models.Refaccion.pagador == models.RefaccionPagador.inquilino,
     ).all()
-    total_pend_prop = db.query(models.Refaccion).filter(
+    total_pend_prop = _scope(db, user).filter(
         models.Refaccion.estado == models.RefaccionEstado.pendiente,
         models.Refaccion.pagador == models.RefaccionPagador.propietario,
     ).all()
@@ -91,8 +96,9 @@ def resumen(db: Session = Depends(get_db), user=Depends(get_current_user)):
 
 @router.post("", response_model=schemas.RefaccionOut)
 def crear(data: schemas.RefaccionCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    # Validar propiedad
-    prop = db.query(models.Propiedad).filter_by(id=data.propiedad_id).first()
+    # Validar propiedad (en el workspace del usuario)
+    from app.services.workspace import apply_workspace_filter as _aw
+    prop = _aw(db.query(models.Propiedad), models.Propiedad, user).filter_by(id=data.propiedad_id).first()
     if not prop:
         raise HTTPException(404, "Propiedad no encontrada")
 
@@ -101,7 +107,7 @@ def crear(data: schemas.RefaccionCreate, db: Session = Depends(get_db), user=Dep
     contrato_id = data.contrato_id
     if not contrato_id:
         c = (
-            db.query(models.Contrato)
+            _aw(db.query(models.Contrato), models.Contrato, user)
             .filter(
                 models.Contrato.propiedad_id == data.propiedad_id,
                 models.Contrato.estado == models.ContratoEstado.vigente,
@@ -119,6 +125,7 @@ def crear(data: schemas.RefaccionCreate, db: Session = Depends(get_db), user=Dep
         pagador=models.RefaccionPagador(data.pagador or "inquilino"),
         estado=models.RefaccionEstado(data.estado or "pendiente"),
         notas=data.notas,
+        is_demo=workspace_flag(user),
     )
     db.add(obj); db.commit(); db.refresh(obj)
     return _to_out(obj)
@@ -126,7 +133,7 @@ def crear(data: schemas.RefaccionCreate, db: Session = Depends(get_db), user=Dep
 
 @router.patch("/{id}", response_model=schemas.RefaccionOut)
 def editar(id: int, data: schemas.RefaccionCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    obj = db.query(models.Refaccion).filter_by(id=id).first()
+    obj = _scope(db, user).filter_by(id=id).first()
     if not obj:
         raise HTTPException(404, "Refacción no encontrada")
     for k, v in data.model_dump(exclude_unset=True).items():
@@ -142,7 +149,7 @@ def editar(id: int, data: schemas.RefaccionCreate, db: Session = Depends(get_db)
 
 @router.delete("/{id}")
 def eliminar(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    obj = db.query(models.Refaccion).filter_by(id=id).first()
+    obj = _scope(db, user).filter_by(id=id).first()
     if not obj:
         raise HTTPException(404, "Refacción no encontrada")
     if obj.estado == models.RefaccionEstado.aplicada:

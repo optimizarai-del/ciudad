@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.security import get_current_user
 from app import models
+from app.services.workspace import apply_workspace_filter, workspace_flag
 from app.services.pdf_comprobantes import (
     generar_pdf_comprobante_inquilino,
     generar_pdf_comprobante_propietario,
@@ -48,7 +49,7 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
         hoy = date.today()
         mes = f"{hoy.year}-{hoy.month:02d}"
 
-    contratos = db.query(models.Contrato).filter(
+    contratos = apply_workspace_filter(db.query(models.Contrato), models.Contrato, user).filter(
         models.Contrato.estado == models.ContratoEstado.vigente
     ).all()
 
@@ -156,7 +157,7 @@ def resumen_cobranza(mes: Optional[str] = None, db: Session = Depends(get_db), u
         hoy = date.today()
         mes = f"{hoy.year}-{hoy.month:02d}"
 
-    contratos = db.query(models.Contrato).filter(
+    contratos = apply_workspace_filter(db.query(models.Contrato), models.Contrato, user).filter(
         models.Contrato.estado == models.ContratoEstado.vigente
     ).all()
 
@@ -293,7 +294,7 @@ def _registrar_pago_impl(
     db: Session,
     user,
 ):
-    contrato = db.query(models.Contrato).filter_by(id=contrato_id).first()
+    contrato = apply_workspace_filter(db.query(models.Contrato), models.Contrato, user).filter_by(id=contrato_id).first()
     if not contrato:
         raise HTTPException(404, "Contrato no encontrado")
     propiedad = contrato.propiedad
@@ -329,7 +330,7 @@ def _registrar_pago_impl(
         .first()
     )
     if pago is None:
-        pago = models.Pago(contrato_id=contrato.id, periodo=periodo)
+        pago = models.Pago(contrato_id=contrato.id, periodo=periodo, is_demo=workspace_flag(user))
         db.add(pago)
     pago.fecha_pago = fecha_pago
     pago.monto_alquiler = data.monto_alquiler

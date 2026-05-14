@@ -14,6 +14,10 @@ class UserRole(str, Enum):
     alquileres = "alquileres"
     ventas = "ventas"
     agente_ia = "agente_ia"
+    # Workspace aislado: este usuario solo ve y crea registros con
+    # is_demo=True. El resto de los roles ven únicamente los registros
+    # con is_demo=False (datos "reales" del estudio).
+    admin_demo = "admin_demo"
 
 
 class PropiedadTipo(str, Enum):
@@ -132,6 +136,8 @@ class Propiedad(Base):
 
     propietario_id = Column(Integer, ForeignKey("clientes.id"))
     propietario = relationship("Cliente", foreign_keys=[propietario_id])
+    # Aislamiento de workspace: True = pertenece al sandbox demo, False = data real.
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -146,6 +152,7 @@ class Cliente(Base):
     telefono = Column(String)
     rol = Column(SQLEnum(ClienteRol), default=ClienteRol.inquilino)
     notas = Column(Text)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -175,6 +182,7 @@ class Contrato(Base):
     comision_porc = Column(Float, default=0)
 
     notas = Column(Text)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Archivo del contrato firmado / actualizado manualmente (subido por el
@@ -217,6 +225,7 @@ class Pago(Base):
     monto_total = Column(Float, default=0)
     estado = Column(SQLEnum(PagoEstado), default=PagoEstado.pendiente)
     notas = Column(Text)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -272,6 +281,7 @@ class Lead(Base):
     habitaciones = Column(String)
     presupuesto = Column(String)
     notas_crm = Column(Text)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     ultima_actividad = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
     mensajes = relationship("MensajeConversacion", back_populates="lead", cascade="all, delete")
@@ -355,6 +365,7 @@ class Refaccion(Base):
     pago = relationship("Pago")
 
     notas = Column(Text)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

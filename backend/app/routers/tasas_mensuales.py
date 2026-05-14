@@ -26,6 +26,7 @@ from sqlalchemy import func
 from app.database import get_db
 from app.security import get_current_user
 from app import models
+from app.services.workspace import apply_workspace_filter as _ws
 
 
 router = APIRouter(prefix="/api/tasas-mensuales", tags=["tasas"])
@@ -46,7 +47,7 @@ def resumen(db: Session = Depends(get_db), user=Depends(get_current_user)):
     """Resumen del estado de las actualizaciones de tasas para el mes actual."""
     # Solo nos importan las propiedades en alquiler (no las de venta)
     props = (
-        db.query(models.Propiedad)
+        _ws(db.query(models.Propiedad), models.Propiedad, user)
           .filter(models.Propiedad.modalidad != models.PropiedadModalidad.venta)
           .order_by(models.Propiedad.direccion)
           .all()
@@ -85,7 +86,7 @@ def lista(db: Session = Depends(get_db), user=Depends(get_current_user)):
     """Lista todas las propiedades en alquiler con su tasa vigente y fecha
     de última actualización. Es la fuente de datos de la página del frontend."""
     props = (
-        db.query(models.Propiedad)
+        _ws(db.query(models.Propiedad), models.Propiedad, user)
           .filter(models.Propiedad.modalidad != models.PropiedadModalidad.venta,
                   models.Propiedad.tokko_id.is_(None) | (models.Propiedad.tokko_id == ""))
           .order_by(models.Propiedad.direccion)
@@ -132,7 +133,7 @@ def aplicar(
     ahora = datetime.utcnow()
 
     for item in data.items:
-        prop = db.query(models.Propiedad).filter_by(id=item.propiedad_id).first()
+        prop = _ws(db.query(models.Propiedad), models.Propiedad, user).filter_by(id=item.propiedad_id).first()
         if not prop:
             no_encontrados.append(item.propiedad_id)
             continue
@@ -162,13 +163,13 @@ def historico(
 ):
     """Historial de lo que se cobró en concepto de tasa municipal mes a mes
     para esta propiedad (de la tabla de pagos)."""
-    prop = db.query(models.Propiedad).filter_by(id=propiedad_id).first()
+    prop = _ws(db.query(models.Propiedad), models.Propiedad, user).filter_by(id=propiedad_id).first()
     if not prop:
         raise HTTPException(404, "Propiedad no encontrada")
 
     # Pagos de todos los contratos asociados a la propiedad
     pagos = (
-        db.query(models.Pago)
+        _ws(db.query(models.Pago), models.Pago, user)
           .join(models.Contrato, models.Pago.contrato_id == models.Contrato.id)
           .filter(models.Contrato.propiedad_id == propiedad_id)
           .filter(models.Pago.monto_municipal > 0)

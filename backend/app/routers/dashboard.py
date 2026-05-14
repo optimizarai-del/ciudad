@@ -7,17 +7,21 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.security import get_current_user
 from app import models
+from app.services.workspace import apply_workspace_filter as _ws
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 @router.get("/hud")
 def hud(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    total_props = db.query(models.Propiedad).count()
-    disponibles = db.query(models.Propiedad).filter_by(estado=models.PropiedadEstado.disponible).count()
-    ocupadas = db.query(models.Propiedad).filter_by(estado=models.PropiedadEstado.ocupada).count()
-    contratos_vigentes = db.query(models.Contrato).filter_by(estado=models.ContratoEstado.vigente).count()
-    clientes = db.query(models.Cliente).count()
+    qp = _ws(db.query(models.Propiedad), models.Propiedad, user)
+    qc = _ws(db.query(models.Contrato), models.Contrato, user)
+    qcli = _ws(db.query(models.Cliente), models.Cliente, user)
+    total_props = qp.count()
+    disponibles = qp.filter_by(estado=models.PropiedadEstado.disponible).count()
+    ocupadas = qp.filter_by(estado=models.PropiedadEstado.ocupada).count()
+    contratos_vigentes = qc.filter_by(estado=models.ContratoEstado.vigente).count()
+    clientes = qcli.count()
     return {
         "propiedades_total": total_props,
         "propiedades_disponibles": disponibles,
@@ -37,11 +41,12 @@ def stats(mes: Optional[str] = None, db: Session = Depends(get_db), user=Depends
         hoy = date.today()
         mes = f"{hoy.year}-{hoy.month:02d}"
 
-    propiedades_ocupadas = db.query(models.Propiedad).filter_by(estado=models.PropiedadEstado.ocupada).count()
-    propiedades_total = db.query(models.Propiedad).count()
-    propiedades_disponibles = db.query(models.Propiedad).filter_by(estado=models.PropiedadEstado.disponible).count()
+    qp = _ws(db.query(models.Propiedad), models.Propiedad, user)
+    propiedades_ocupadas = qp.filter_by(estado=models.PropiedadEstado.ocupada).count()
+    propiedades_total = qp.count()
+    propiedades_disponibles = qp.filter_by(estado=models.PropiedadEstado.disponible).count()
 
-    contratos = db.query(models.Contrato).filter_by(estado=models.ContratoEstado.vigente).all()
+    contratos = _ws(db.query(models.Contrato), models.Contrato, user).filter_by(estado=models.ContratoEstado.vigente).all()
     contratos_activos = len(contratos)
 
     cobrado_mes = pendiente_cobro = vencido_mes = 0.0

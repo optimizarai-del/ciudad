@@ -7,6 +7,7 @@ from app.database import get_db
 from app.security import get_current_user
 from app import models
 from app.services import notificaciones
+from app.services.workspace import apply_workspace_filter as _ws
 
 router = APIRouter(prefix="/api/alertas", tags=["alertas"])
 
@@ -17,7 +18,7 @@ def vencimientos(dias: int = 60, db: Session = Depends(get_db), user=Depends(get
     limite = hoy + timedelta(days=dias)
 
     contratos = (
-        db.query(models.Contrato)
+        _ws(db.query(models.Contrato), models.Contrato, user)
         .filter(
             models.Contrato.estado == models.ContratoEstado.vigente,
             models.Contrato.fecha_fin.isnot(None),
@@ -68,7 +69,7 @@ def resumen(db: Session = Depends(get_db), user=Depends(get_current_user)):
 
     # 1. Contratos VENCIDOS (estado = vencido)
     vencidos = (
-        db.query(models.Contrato)
+        _ws(db.query(models.Contrato), models.Contrato, user)
           .filter(models.Contrato.estado == models.ContratoEstado.vencido)
           .order_by(models.Contrato.fecha_fin.desc().nullslast())
           .limit(20)
@@ -95,7 +96,7 @@ def resumen(db: Session = Depends(get_db), user=Depends(get_current_user)):
     # 2. Contratos POR VENCER en los próximos 30 días
     limite = hoy + timedelta(days=30)
     por_vencer = (
-        db.query(models.Contrato)
+        _ws(db.query(models.Contrato), models.Contrato, user)
           .filter(
               models.Contrato.estado == models.ContratoEstado.vigente,
               models.Contrato.fecha_fin.isnot(None),
@@ -127,7 +128,7 @@ def resumen(db: Session = Depends(get_db), user=Depends(get_current_user)):
 
     # 3. Pagos VENCIDOS o ATRASADOS — vencimiento pasado, sin fecha_pago
     pagos_atrasados = (
-        db.query(models.Pago)
+        _ws(db.query(models.Pago), models.Pago, user)
           .filter(
               models.Pago.estado.in_([models.PagoEstado.vencido, models.PagoEstado.pendiente]),
               models.Pago.fecha_pago.is_(None),
@@ -139,7 +140,7 @@ def resumen(db: Session = Depends(get_db), user=Depends(get_current_user)):
           .all()
     )
     for p in pagos_atrasados:
-        contrato = db.query(models.Contrato).filter_by(id=p.contrato_id).first() if p.contrato_id else None
+        contrato = _ws(db.query(models.Contrato), models.Contrato, user).filter_by(id=p.contrato_id).first() if p.contrato_id else None
         prop = db.query(models.Propiedad).filter_by(id=contrato.propiedad_id).first() if contrato else None
         inquilino = db.query(models.Cliente).filter_by(id=contrato.inquilino_id).first() if contrato and contrato.inquilino_id else None
         dias_mora = (hoy - p.fecha_vencimiento).days
@@ -198,7 +199,7 @@ def enviar_recordatorios(dias: int = 60, db: Session = Depends(get_db), user=Dep
     limite = hoy + timedelta(days=dias)
 
     contratos = (
-        db.query(models.Contrato)
+        _ws(db.query(models.Contrato), models.Contrato, user)
         .filter(
             models.Contrato.estado == models.ContratoEstado.vigente,
             models.Contrato.fecha_fin.isnot(None),

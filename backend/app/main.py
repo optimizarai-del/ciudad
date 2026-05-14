@@ -226,6 +226,64 @@ def _migrar_storage_path():
 
 
 @app.on_event("startup")
+def _migrar_workspace_demo():
+    """Agrega la columna `is_demo` a las tablas principales (idempotente).
+    También agrega el valor `admin_demo` al enum userrole en Postgres.
+
+    Esto aísla la data demo del workspace real: usuarios con role=admin_demo
+    sólo ven filas con is_demo=True; el resto sólo ve is_demo=False.
+    """
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+
+    tablas_con_is_demo = [
+        "propiedades", "clientes", "contratos", "pagos", "leads",
+        # refacciones nunca se creó sin is_demo (modelo nuevo), pero
+        # corremos por las dudas para que sea idempotente.
+        "refacciones",
+    ]
+
+    db = SessionLocal()
+    try:
+        ins = inspect(engine)
+        for tabla in tablas_con_is_demo:
+            try:
+                if tabla not in ins.get_table_names(schema=schema):
+                    continue
+                cols = {c["name"] for c in ins.get_columns(tabla, schema=schema)}
+                if "is_demo" not in cols:
+                    # Default FALSE + NOT NULL; las filas existentes quedan en False
+                    # (que es lo que queremos: la data actual es "real", no demo).
+                    db.execute(text(
+                        f"ALTER TABLE {qual}{tabla} ADD COLUMN is_demo BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                    db.execute(text(
+                        f"CREATE INDEX IF NOT EXISTS ix_{tabla}_is_demo ON {qual}{tabla}(is_demo)"
+                    ))
+                    db.commit()
+                    print(f"[migrar] {tabla}.is_demo agregada")
+            except Exception as e:
+                db.rollback()
+                print(f"[migrar] {tabla}.is_demo falló: {e}")
+
+        # Postgres: agregar valor admin_demo al enum userrole
+        if IS_POSTGRES:
+            try:
+                with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as raw:
+                    raw.execute(text(
+                        f"ALTER TYPE {qual}userrole ADD VALUE IF NOT EXISTS 'admin_demo'"
+                    ))
+            except Exception as e:
+                print(f"[migrar] enum userrole += admin_demo: {e}")
+    except Exception as e:
+        print(f"[_migrar_workspace_demo] {e}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _crear_tabla_refacciones():
     """Defensivo: si por algún motivo `create_all` no dejó la tabla creada,
     la creamos manualmente. Idempotente."""
