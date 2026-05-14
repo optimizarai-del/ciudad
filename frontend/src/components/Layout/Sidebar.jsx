@@ -31,11 +31,19 @@ const Section = ({ label, children }) => (
   </div>
 )
 
-export default function Sidebar() {
+export default function Sidebar({ onNavigate }) {
   const { hasAlquileres, hasVentas, isAdmin, isGerencia, isAdminDemo, role } = useRole()
 
+  // Cuando es drawer mobile, queremos que al tocar un item se cierre el drawer.
+  // El padre (Layout) nos pasa onNavigate para eso. NavLink + click handler
+  // simple porque el NavLink ya dispara la navegación.
+  const handleClick = onNavigate ? () => onNavigate() : undefined
+
   return (
-    <aside className="w-60 h-full bg-white dark:bg-[#0A0A0A] border-r border-gray-100 dark:border-gray-900 flex flex-col py-4 px-3">
+    <aside
+      className="w-64 lg:w-60 h-[calc(100vh-3rem)] lg:h-full bg-white dark:bg-[#0A0A0A] border-r border-gray-100 dark:border-gray-900 flex flex-col py-4 px-3 overflow-y-auto"
+      onClick={handleClick}
+    >
 
       {/* Banner cuando estás logueado como admin_demo: workspace aislado */}
       {isAdminDemo && (

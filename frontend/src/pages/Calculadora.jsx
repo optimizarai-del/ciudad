@@ -44,7 +44,7 @@ export default function Calculadora() {
 
         <header className="mb-10">
           <div className="hero-eyebrow">Herramientas</div>
-          <h1 className="hero-title text-5xl md:text-6xl mb-3">Calculadora</h1>
+          <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Calculadora</h1>
           <p className="hero-sub">
             Escribí la dirección y obtenés el costo total actualizado al instante.
           </p>

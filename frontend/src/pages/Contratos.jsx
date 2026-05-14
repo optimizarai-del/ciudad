@@ -171,9 +171,9 @@ export default function Contratos() {
       <div className="max-w-6xl mx-auto animate-fade-in">
         <header className="mb-10">
           <div className="hero-eyebrow">Gestión contractual</div>
-          <div className="flex items-end justify-between flex-wrap gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Contratos</h1>
+              <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Contratos</h1>
               <p className="hero-sub">Alquileres y boletos de compraventa.</p>
             </div>
             <div className="flex gap-2">
@@ -370,7 +370,7 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
       <div className="card p-8 w-full max-w-xl shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">{initial ? 'Editar contrato' : 'Nuevo contrato'}</h2>
+          <h2 className="hero-title text-xl sm:text-2xl">{initial ? 'Editar contrato' : 'Nuevo contrato'}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
@@ -412,7 +412,7 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Fecha inicio</label>
               <input className="input" type="date" value={form.fecha_inicio || ''} onChange={set('fecha_inicio')} />
@@ -423,7 +423,7 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Monto inicial $</label>
               <input className="input" type="number" value={form.monto_inicial || ''} onChange={set('monto_inicial')} />
@@ -437,7 +437,7 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
           <div className="divider !my-1" />
           <p className="text-[11px] uppercase tracking-[0.12em] text-[#737373] dark:text-[#7A7A7A] font-semibold">Ajuste de precio</p>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div>
               <label className="label">Índice</label>
               <select className="input" value={form.indice_ajuste} onChange={set('indice_ajuste')}>
@@ -458,7 +458,7 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Comisión %</label>
               <input className="input" type="number" step="0.1" value={form.comision_porc || ''} onChange={set('comision_porc')} />
@@ -546,7 +546,7 @@ function ModalQuickPropiedad({ onClose, onSaved }) {
             <label className="label">Dirección *</label>
             <input className="input" required value={form.direccion} onChange={set('direccion')} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Tipo</label>
               <select className="input" value={form.tipo} onChange={set('tipo')}>
@@ -559,7 +559,7 @@ function ModalQuickPropiedad({ onClose, onSaved }) {
               <input className="input" value={form.ciudad} onChange={set('ciudad')} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Alquiler $</label>
               <input className="input" type="number" value={form.precio_alquiler} onChange={set('precio_alquiler')} />
@@ -606,7 +606,7 @@ function ModalQuickCliente({ rol, onClose, onSaved }) {
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
         <form onSubmit={submit} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Nombre *</label>
               <input className="input" required value={form.nombre} onChange={set('nombre')} />
@@ -616,7 +616,7 @@ function ModalQuickCliente({ rol, onClose, onSaved }) {
               <input className="input" value={form.apellido} onChange={set('apellido')} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">DNI / CUIT</label>
               <input className="input" value={form.documento} onChange={set('documento')} />

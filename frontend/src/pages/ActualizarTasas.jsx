@@ -116,9 +116,9 @@ export default function ActualizarTasas() {
       <div className="max-w-7xl mx-auto animate-fade-in">
         <header className="mb-8">
           <div className="hero-eyebrow">Operaciones mensuales</div>
-          <div className="flex items-end justify-between flex-wrap gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3 flex items-center gap-3">
+              <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3 flex items-center gap-3">
                 <Landmark className="text-[#B8893A]" /> Tasas municipales.
               </h1>
               <p className="hero-sub">

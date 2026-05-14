@@ -15,10 +15,10 @@ export default function DashboardVentas() {
       <div className="p-6 space-y-6">
         <div>
           <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Ventas</p>
-          <h1 className="hero-title text-5xl md:text-6xl mb-3">Dashboard Ventas</h1>
+          <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Dashboard Ventas</h1>
         </div>
 
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
             { label: 'En venta', value: data?.total_en_venta ?? '—', icon: Building2 },
             { label: 'Disponibles', value: data?.disponibles ?? '—', icon: TrendingUp, color: 'text-green-600 dark:text-green-400' },
@@ -38,7 +38,7 @@ export default function DashboardVentas() {
         {data?.propiedades_destacadas?.length > 0 && (
           <div className="card p-5">
             <p className="text-sm font-semibold mb-4">Propiedades disponibles</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {data.propiedades_destacadas.map(p => (
                 <div key={p.id} className="p-4 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
                   <div className="flex items-start justify-between">

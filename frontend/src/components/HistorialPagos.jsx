@@ -68,7 +68,7 @@ export default function HistorialPagos({ contrato, onClose }) {
 
         <div className="px-6 py-5 border-b border-[#E5E5E5] dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
           <div>
-            <h2 className="hero-title text-2xl mb-0.5">Historial de pagos.</h2>
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5">Historial de pagos.</h2>
             <p className="text-[12px] text-[#737373] dark:text-[#7A7A7A]">
               {contrato.codigo || `Contrato #${contrato.id}`} · sólo lectura
             </p>
@@ -86,7 +86,7 @@ export default function HistorialPagos({ contrato, onClose }) {
           </div>
         </div>
 
-        <div className="px-6 py-4 grid grid-cols-3 gap-3 shrink-0 border-b border-[#E5E5E5] dark:border-[#2A2A2A]">
+        <div className="px-6 py-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 shrink-0 border-b border-[#E5E5E5] dark:border-[#2A2A2A]">
           <SumCard label="Total facturado" value={totales.total} />
           <SumCard label="Cobrado"         value={totales.pagado}    color="success" />
           <SumCard label="Pendiente"       value={totales.pendiente} color="warn" />

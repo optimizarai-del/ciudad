@@ -284,7 +284,7 @@ export default function Agente() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Agente IA</p>
-            <h1 className="hero-title text-5xl md:text-6xl mb-3">Leads & Conversaciones</h1>
+            <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Leads & Conversaciones</h1>
           </div>
           <button onClick={cargar} className="btn-ghost p-2"><RefreshCw size={16} /></button>
         </div>

@@ -43,7 +43,7 @@ export default function Register() {
           <h2 className="hero-title text-3xl mb-7">Registro</h2>
 
           <form onSubmit={handle} className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="label">Nombre</label>
                 <input className="input" placeholder="María" value={form.nombre} onChange={set('nombre')} required />

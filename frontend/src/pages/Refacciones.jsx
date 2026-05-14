@@ -87,9 +87,9 @@ export default function Refacciones() {
       <div className="max-w-7xl mx-auto animate-fade-in">
         <header className="mb-8">
           <div className="hero-eyebrow">Mantenimiento</div>
-          <div className="flex items-end justify-between flex-wrap gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3 flex items-center gap-3">
+              <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3 flex items-center gap-3">
                 <Wrench className="text-[#B8893A]" /> Refacciones.
               </h1>
               <p className="hero-sub">
@@ -316,7 +316,7 @@ function Modal({ initial, propiedades, contratos, onClose, onSaved }) {
       <div className="card p-8 w-full max-w-xl shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">{initial ? 'Editar refacción' : 'Nueva refacción'}</h2>
+          <h2 className="hero-title text-xl sm:text-2xl">{initial ? 'Editar refacción' : 'Nueva refacción'}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
@@ -346,7 +346,7 @@ function Modal({ initial, propiedades, contratos, onClose, onSaved }) {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Fecha</label>
               <input className="input" type="date" value={form.fecha || ''} onChange={set('fecha')} />
@@ -363,7 +363,7 @@ function Modal({ initial, propiedades, contratos, onClose, onSaved }) {
               placeholder="ej. Reparación de termotanque" required />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">¿Quién paga? *</label>
               <select className="input" value={form.pagador} onChange={set('pagador')}>

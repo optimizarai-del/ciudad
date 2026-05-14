@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogOut, Search, Bell, Sun, Moon } from 'lucide-react'
+import { LogOut, Search, Bell, Sun, Moon, Menu, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import Logo from './Logo'
 import NotificacionesPanel from './NotificacionesPanel'
 import api from '../utils/api'
 
-export default function HUD() {
+export default function HUD({ onToggleSidebar, drawerOpen }) {
   const { user, logout } = useAuth()
   const { isDark, toggle } = useTheme()
   const nav = useNavigate()
@@ -33,13 +33,25 @@ export default function HUD() {
 
   return (
     <header className="sticky top-0 z-40 glass border-b border-[#E5E5E5] dark:border-[#2A2A2A]">
-      <div className="px-6 h-12 flex items-center gap-6">
-        <button onClick={() => nav('/dashboard')} className="flex items-center hover:opacity-60 transition">
+      <div className="px-3 sm:px-4 lg:px-6 h-12 flex items-center gap-2 sm:gap-4 lg:gap-6">
+        {/* Hamburger sólo mobile/tablet */}
+        {onToggleSidebar && (
+          <button
+            onClick={onToggleSidebar}
+            className="lg:hidden p-2 -ml-1 rounded-lg text-[#737373] dark:text-[#9A9A9A] hover:bg-[#F0F0F0] dark:hover:bg-[#1E1E1E] transition"
+            title="Menú"
+          >
+            {drawerOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
+        )}
+
+        <button onClick={() => nav('/dashboard')} className="flex items-center hover:opacity-60 transition shrink-0">
           <Logo size="sm" />
         </button>
 
+        {/* Stats sólo desde lg (1024px+) — en tablet ocupan demasiado */}
         {stats && (
-          <div className="hidden md:flex items-center gap-5 ml-2">
+          <div className="hidden lg:flex items-center gap-5 ml-2">
             <Stat label="Propiedades" value={stats.propiedades_total} />
             <Stat label="Disponibles" value={stats.propiedades_disponibles} />
             <Stat label="Contratos" value={stats.contratos_vigentes} />
@@ -47,8 +59,11 @@ export default function HUD() {
           </div>
         )}
 
-        <div className="ml-auto flex items-center gap-1">
-          <IconBtn><Search size={15} /></IconBtn>
+        <div className="ml-auto flex items-center gap-0.5 sm:gap-1">
+          {/* Buscar sólo en sm+ */}
+          <div className="hidden sm:block">
+            <IconBtn><Search size={15} /></IconBtn>
+          </div>
 
           {/* Bell con badge + panel dropdown */}
           <div className="relative" ref={bellRef}>
@@ -77,12 +92,12 @@ export default function HUD() {
             }
           </IconBtn>
 
-          <div className="w-px h-4 bg-[#E5E5E5] dark:bg-[#2A2A2A] mx-2" />
-          <button className="flex items-center gap-2 pl-1 pr-3 py-1 rounded-full hover:bg-[#F0F0F0] dark:hover:bg-[#1E1E1E] transition">
+          <div className="w-px h-4 bg-[#E5E5E5] dark:bg-[#2A2A2A] mx-1 sm:mx-2" />
+          <button className="flex items-center gap-2 pl-1 pr-2 sm:pr-3 py-1 rounded-full hover:bg-[#F0F0F0] dark:hover:bg-[#1E1E1E] transition">
             <div className="w-7 h-7 rounded-full bg-[#0A0A0A] dark:bg-white text-white dark:text-[#0A0A0A] grid place-items-center text-[11px] font-semibold select-none">
               {user?.nombre?.[0]?.toUpperCase()}
             </div>
-            <span className="text-[13px] font-medium hidden md:inline tracking-tight text-[#0A0A0A] dark:text-[#F5F5F5]">
+            <span className="text-[13px] font-medium hidden md:inline tracking-tight text-[#0A0A0A] dark:text-[#F5F5F5] max-w-[120px] truncate">
               {user?.nombre}
             </span>
           </button>

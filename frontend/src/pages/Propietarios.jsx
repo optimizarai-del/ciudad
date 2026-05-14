@@ -80,9 +80,9 @@ export default function Propietarios() {
       <div className="max-w-6xl mx-auto animate-fade-in">
         <header className="mb-8">
           <div className="hero-eyebrow">Cartera</div>
-          <div className="flex items-end justify-between flex-wrap gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Propietarios</h1>
+              <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Propietarios</h1>
               <p className="hero-sub">Listado de dueños y sus propiedades en cartera.</p>
             </div>
             <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
@@ -210,11 +210,11 @@ function Modal({ initial, onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto" onClick={onClose}>
       <div className="card p-8 w-full max-w-xl shadow-lift animate-scale-in my-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">{initial ? 'Editar propietario' : 'Nuevo propietario'}</h2>
+          <h2 className="hero-title text-xl sm:text-2xl">{initial ? 'Editar propietario' : 'Nuevo propietario'}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
         <form onSubmit={submit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Nombre *</label>
               <input className="input" required value={form.nombre || ''} onChange={set('nombre')} />
@@ -224,7 +224,7 @@ function Modal({ initial, onClose, onSaved }) {
               <input className="input" value={form.apellido || ''} onChange={set('apellido')} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Razón social (si aplica)</label>
               <input className="input" value={form.razon_social || ''} onChange={set('razon_social')} />
@@ -234,7 +234,7 @@ function Modal({ initial, onClose, onSaved }) {
               <input className="input" value={form.documento || ''} onChange={set('documento')} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Email</label>
               <input type="email" className="input" value={form.email || ''} onChange={set('email')} />

@@ -64,7 +64,7 @@ export default function TokkoSync({ onClose, onSynced }) {
         {/* Header */}
         <div className="px-6 py-5 border-b border-[#E5E5E5] dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
           <div>
-            <h2 className="hero-title text-2xl mb-0.5">Sync Tokko Broker.</h2>
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5">Sync Tokko Broker.</h2>
             <p className="text-[12px] text-[#737373] dark:text-[#7A7A7A]">
               Importar y revisar propiedades sincronizadas desde Tokko
             </p>

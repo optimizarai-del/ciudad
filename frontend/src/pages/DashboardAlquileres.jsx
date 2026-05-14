@@ -63,7 +63,7 @@ export default function DashboardAlquileres() {
         {/* Header */}
         <div>
           <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Alquileres</p>
-          <h1 className="hero-title text-5xl md:text-6xl mb-3 capitalize">{mesLabel}</h1>
+          <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3 capitalize">{mesLabel}</h1>
         </div>
 
         {/* Alertas críticas */}
@@ -86,7 +86,7 @@ export default function DashboardAlquileres() {
         )}
 
         {/* Métricas principales */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <MetricCard label="Contratos activos" value={stats?.contratos_vigentes ?? '—'} icon={FileText} />
           <MetricCard
             label="Propiedades disponibles"

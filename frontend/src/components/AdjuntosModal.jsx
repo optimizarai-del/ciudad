@@ -106,7 +106,7 @@ export default function AdjuntosModal({ propiedad, onClose }) {
 
         <div className="px-6 py-5 border-b border-border dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
           <div>
-            <h2 className="hero-title text-2xl mb-0.5">Adjuntos.</h2>
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5">Adjuntos.</h2>
             <p className="text-[12px] text-muted dark:text-gray-500">{propiedad.direccion}</p>
           </div>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>

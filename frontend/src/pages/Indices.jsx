@@ -26,9 +26,9 @@ export default function Indices() {
       <div className="max-w-5xl mx-auto animate-fade-in">
         <header className="mb-10">
           <div className="hero-eyebrow">Datos económicos</div>
-          <div className="flex items-end justify-between flex-wrap gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Índices</h1>
+              <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Índices</h1>
               <p className="hero-sub">IPC, ICL, UVA y tipo de cambio en tiempo real.</p>
             </div>
             <div className="flex items-center gap-3">
@@ -214,7 +214,7 @@ function DolarCard({ titulo, dato, blue }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <p className="stat-label mb-1">Compra</p>
           <p className={`text-2xl font-semibold tracking-tight ${accentClass}`}>

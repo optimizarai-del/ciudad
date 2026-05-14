@@ -77,7 +77,7 @@ export default function ImportarContratoPDF({ onClose, onSaved }) {
         {/* Header */}
         <div className="px-6 py-5 border-b border-border dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
           <div>
-            <h2 className="hero-title text-2xl mb-0.5 flex items-center gap-2">
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5 flex items-center gap-2">
               <Sparkles size={20} className="text-[#B8893A]" />
               Importar contrato desde PDF
             </h2>
@@ -214,7 +214,7 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
 
       {/* Propietario */}
       <Seccion titulo="Propietario">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Nombre" value={datos.propietario?.nombre} onChange={v => setNested('propietario.nombre', v)} />
           <Field label="Apellido" value={datos.propietario?.apellido} onChange={v => setNested('propietario.apellido', v)} />
           <Field label="Razón social" value={datos.propietario?.razon_social} onChange={v => setNested('propietario.razon_social', v)} />
@@ -226,7 +226,7 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
 
       {/* Inquilino */}
       <Seccion titulo="Inquilino / Comprador">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Nombre" value={datos.inquilino?.nombre} onChange={v => setNested('inquilino.nombre', v)} />
           <Field label="Apellido" value={datos.inquilino?.apellido} onChange={v => setNested('inquilino.apellido', v)} />
           <Field label="Razón social" value={datos.inquilino?.razon_social} onChange={v => setNested('inquilino.razon_social', v)} />
@@ -238,7 +238,7 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
 
       {/* Propiedad */}
       <Seccion titulo="Propiedad">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="col-span-2">
             <Field label="Dirección *" value={datos.propiedad?.direccion} onChange={v => setNested('propiedad.direccion', v)} />
           </div>
@@ -260,7 +260,7 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
 
       {/* Contrato */}
       <Seccion titulo="Contrato">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label">Tipo</label>
             <select className="input" value={datos.tipo || 'alquiler_vivienda'} onChange={e => setNested('tipo', e.target.value)}>
@@ -337,7 +337,7 @@ function DoneStep({ resumen, onClose }) {
       <div className="w-14 h-14 rounded-full bg-success/10 grid place-items-center mx-auto mb-3">
         <CheckCircle2 size={28} className="text-success" />
       </div>
-      <h3 className="hero-title text-2xl mb-1">Contrato importado</h3>
+      <h3 className="hero-title text-xl sm:text-2xl mb-1">Contrato importado</h3>
       <p className="text-[12px] text-muted mb-5">
         Código <span className="font-mono">{resumen.contrato?.codigo}</span>
       </p>

@@ -99,9 +99,9 @@ export default function Clientes() {
       <div className="max-w-6xl mx-auto animate-fade-in">
         <header className="mb-10">
           <div className="hero-eyebrow">Base de contactos</div>
-          <div className="flex items-end justify-between flex-wrap gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Clientes</h1>
+              <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Clientes</h1>
               <p className="hero-sub">Propietarios, inquilinos, compradores y vendedores.</p>
             </div>
             <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
@@ -254,7 +254,7 @@ function ModalHistorial({ cliente, onClose }) {
         onClick={e => e.stopPropagation()}>
         <div className="px-6 py-5 border-b border-border dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
           <div>
-            <h2 className="hero-title text-2xl mb-0.5">Historial</h2>
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5">Historial</h2>
             <p className="text-[12px] text-muted">{cliente.nombre} {cliente.apellido}</p>
           </div>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
@@ -362,12 +362,12 @@ function Modal({ initial, onClose, onSaved }) {
       <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">{initial ? 'Editar cliente' : 'Nuevo cliente'}</h2>
+          <h2 className="hero-title text-xl sm:text-2xl">{initial ? 'Editar cliente' : 'Nuevo cliente'}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
         <form onSubmit={submit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Nombre *</label>
               <input className="input" value={form.nombre} onChange={set('nombre')} required />
@@ -381,7 +381,7 @@ function Modal({ initial, onClose, onSaved }) {
             <label className="label">Razón social (empresa)</label>
             <input className="input" value={form.razon_social || ''} onChange={set('razon_social')} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">DNI / CUIT</label>
               <input className="input" value={form.documento || ''} onChange={set('documento')} />

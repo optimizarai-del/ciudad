@@ -131,9 +131,9 @@ export default function Propiedades() {
       <div className="max-w-7xl mx-auto animate-fade-in">
         <header className="mb-10">
           <div className="hero-eyebrow">Cartera de alquileres</div>
-          <div className="flex items-end justify-between flex-wrap gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Propiedades</h1>
+              <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Propiedades</h1>
               <p className="hero-sub">Inmuebles en alquiler — gestión, propietarios y disponibilidad.</p>
             </div>
             <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
@@ -357,7 +357,7 @@ function ModalTasaMSRCache({ propiedad, onClose, onRefresh }) {
         onClick={e => e.stopPropagation()}>
         <div className="px-6 py-5 border-b border-border dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
           <div>
-            <h2 className="hero-title text-2xl mb-0.5">Tasa MSR — Cache</h2>
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5">Tasa MSR — Cache</h2>
             <p className="text-[12px] text-muted dark:text-gray-500">
               {propiedad.direccion}
               {data?.detalle?.consultado_at && (
@@ -375,7 +375,7 @@ function ModalTasaMSRCache({ propiedad, onClose, onRefresh }) {
             <p className="text-center text-muted py-8 text-[13px]">No hay consulta previa.</p>
           ) : (
             <>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div className="card p-4">
                   <p className="stat-label">Cuotas</p>
                   <p className="stat-value text-lg mt-1">{data.detalle.cantidad}</p>
@@ -505,12 +505,12 @@ function Modal({ initial, clientes, onClose, onSaved }) {
       <div className="card p-8 w-full max-w-2xl shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">{initial ? 'Editar propiedad' : 'Nueva propiedad'}</h2>
+          <h2 className="hero-title text-xl sm:text-2xl">{initial ? 'Editar propiedad' : 'Nueva propiedad'}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
         <form onSubmit={submit} className="space-y-4" noValidate>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label" htmlFor="prop-tipo">Tipo *</label>
               <select id="prop-tipo" name="tipo" className="input" value={form.tipo} onChange={set('tipo')} required>
@@ -536,7 +536,7 @@ function Modal({ initial, clientes, onClose, onSaved }) {
             {errors.direccion && <p id="prop-direccion-err" className={errClass}>{errors.direccion}</p>}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label" htmlFor="prop-ciudad">Ciudad</label>
               <input id="prop-ciudad" name="ciudad" className="input" placeholder="CABA" value={form.ciudad || ''} onChange={set('ciudad')} />
@@ -547,7 +547,7 @@ function Modal({ initial, clientes, onClose, onSaved }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label" htmlFor="prop-estado">Estado</label>
               <select id="prop-estado" name="estado" className="input" value={form.estado} onChange={set('estado')}>
@@ -560,7 +560,7 @@ function Modal({ initial, clientes, onClose, onSaved }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label" htmlFor="prop-superficie">Superficie m²</label>
               <input id="prop-superficie" name="superficie_m2" className="input" type="number" value={form.superficie_m2 || ''} onChange={set('superficie_m2')} />
@@ -586,7 +586,7 @@ function Modal({ initial, clientes, onClose, onSaved }) {
           <div className="divider !my-1" />
           <p className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Costos mensuales</p>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div>
               <label className="label" htmlFor="prop-alquiler-base">Alquiler base $ *</label>
               <input id="prop-alquiler-base" name="precio_alquiler"
@@ -686,12 +686,12 @@ function ModalNuevoPropietario({ onClose, onSaved }) {
       <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">Nuevo propietario</h2>
+          <h2 className="hero-title text-xl sm:text-2xl">Nuevo propietario</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
         <form onSubmit={submit} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Nombre *</label>
               <input className="input" required value={form.nombre} onChange={set('nombre')} />
@@ -705,7 +705,7 @@ function ModalNuevoPropietario({ onClose, onSaved }) {
             <label className="label">Razón social (opcional)</label>
             <input className="input" value={form.razon_social} onChange={set('razon_social')} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">DNI / CUIT</label>
               <input className="input" value={form.documento} onChange={set('documento')} />

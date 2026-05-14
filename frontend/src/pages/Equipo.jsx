@@ -61,9 +61,9 @@ export default function Equipo() {
 
         <header className="mb-10">
           <div className="hero-eyebrow">Administración</div>
-          <div className="flex items-end justify-between flex-wrap gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
             <div>
-              <h1 className="hero-title text-5xl md:text-6xl mb-3">Equipo</h1>
+              <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Equipo</h1>
               <p className="hero-sub">Usuarios del sistema y sus permisos.</p>
             </div>
             <button className="btn-primary" onClick={() => setCreating(true)}>
@@ -298,7 +298,7 @@ function ModalNuevoUsuario({ onClose, onSaved }) {
       <div className="card p-8 w-full max-w-md shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-2xl">Nuevo usuario</h2>
+          <h2 className="hero-title text-xl sm:text-2xl">Nuevo usuario</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
@@ -308,7 +308,7 @@ function ModalNuevoUsuario({ onClose, onSaved }) {
             <input className="input" required autoFocus
               value={form.nombre} onChange={set('nombre')} placeholder="Juan Pérez" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Email *</label>
               <input className="input" type="email" required

@@ -100,7 +100,7 @@ export default function ModalTasaMSR({ propiedad, onClose, onActualizado }) {
         {/* Header */}
         <div className="px-6 py-5 border-b border-border dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
           <div>
-            <h2 className="hero-title text-2xl mb-0.5 flex items-center gap-2">
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5 flex items-center gap-2">
               <Building2 size={20} /> Tasa Municipal.
             </h2>
             <p className="text-[12px] text-muted dark:text-gray-500">

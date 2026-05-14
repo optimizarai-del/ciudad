@@ -35,7 +35,7 @@ export default function Dashboard() {
         {/* Hero */}
         <header className="mb-12">
           <div className="hero-eyebrow">Panel principal</div>
-          <h1 className="hero-title text-5xl md:text-6xl mb-3">
+          <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">
             {saludo}, {user?.nombre?.split(' ')[0]}.
           </h1>
           <p className="hero-sub">Resumen del día en un solo lugar.</p>

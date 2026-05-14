@@ -57,7 +57,7 @@ export default function PropiedadesVenta() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Ventas</p>
-            <h1 className="hero-title text-5xl md:text-6xl mb-3">Propiedades en Venta</h1>
+            <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Propiedades en Venta</h1>
             <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
               {filtradas.length} propiedades · <span className="text-[#B8893A]">{totalTokko} sincronizadas con Tokko</span>
             </p>

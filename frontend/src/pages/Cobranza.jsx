@@ -70,7 +70,7 @@ export default function Cobranza() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Alquileres</p>
-            <h1 className="hero-title text-5xl md:text-6xl mb-3">Cobranza</h1>
+            <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Cobranza</h1>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setMes(prevMes(mes))} className="btn-ghost p-2"><ChevronLeft size={16} /></button>
@@ -279,7 +279,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
         onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h2 className="hero-title text-2xl mb-0.5">Registrar pago</h2>
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5">Registrar pago</h2>
             <p className="text-[12px] text-[#737373]">{item.propiedad} · {item.contrato_codigo}</p>
             <p className="text-[12px] text-[#737373]">Inquilino: {item.inquilino}</p>
           </div>
@@ -287,7 +287,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
         </div>
 
         <form onSubmit={submit} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Período</label>
               <input className="input bg-neutral-50 dark:bg-[#1A1A1A]" value={mes} disabled />
@@ -298,7 +298,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Alquiler $</label>
               <input className="input" type="number" value={form.monto_alquiler} onChange={set('monto_alquiler')} />
@@ -423,7 +423,7 @@ function ResultadoModal({ data, onClose }) {
           <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 grid place-items-center mx-auto mb-3">
             <CheckCircle size={24} className="text-green-600 dark:text-green-400" />
           </div>
-          <h3 className="hero-title text-2xl mb-0.5">Pago registrado</h3>
+          <h3 className="hero-title text-xl sm:text-2xl mb-0.5">Pago registrado</h3>
           <p className="text-[12px] text-muted">
             Período {data.periodo} · {fmtMoney(data.monto_total)}
           </p>
