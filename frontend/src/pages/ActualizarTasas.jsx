@@ -102,7 +102,14 @@ export default function ActualizarTasas() {
     return new Date(s).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })
   }
 
-  const cambiosCount = Object.keys(draft).length
+  // Solo cuentan los drafts que realmente difieren del valor actual de
+  // la propiedad. Esto evita marcar como "cambio" un input que quedó con
+  // el mismo número (ej. después de un undo manual).
+  const cambiosCount = Object.entries(draft).filter(([id, val]) => {
+    const prop = props.find(p => p.id === Number(id))
+    const actual = prop?.tasa_municipal || 0
+    return Number(val) !== actual
+  }).length
 
   return (
     <Layout>
@@ -240,9 +247,15 @@ export default function ActualizarTasas() {
                 <tbody className="divide-y divide-border dark:divide-[#2A2A2A]">
                   {filtradas.map(p => {
                     const actual = p.tasa_municipal || 0
+                    // Mostramos el valor vigente directamente en el input
+                    // para que se pueda editar incluso después de aplicar un
+                    // % bulk y guardar. Antes el input quedaba vacío y obligaba
+                    // a re-tipear el monto completo para hacer correcciones.
+                    const valorInput = draft[p.id] !== undefined ? draft[p.id] : (actual || '')
                     const nuevo = draft[p.id] !== undefined ? Number(draft[p.id]) : null
                     const diff = nuevo !== null && actual > 0 ? ((nuevo - actual) / actual) * 100 : null
-                    const cambio = draft[p.id] !== undefined
+                    // Solo marca "cambio" si el draft difiere del valor vigente.
+                    const cambio = draft[p.id] !== undefined && Number(draft[p.id]) !== actual
                     return (
                       <tr key={p.id} className={`hover:bg-neutral-50 dark:hover:bg-[#1A1A1A] transition ${cambio ? 'bg-[#B8893A]/5' : ''}`}>
                         <td className="td">
@@ -270,9 +283,9 @@ export default function ActualizarTasas() {
                         <td className="td text-right">
                           <input
                             type="number"
-                            className="input !py-1.5 !w-32 text-right tabular-nums text-[13px]"
+                            className={`input !py-1.5 !w-32 text-right tabular-nums text-[13px] ${cambio ? '!border-[#B8893A] !bg-[#B8893A]/5' : ''}`}
                             placeholder={String(Math.round(actual))}
-                            value={draft[p.id] ?? ''}
+                            value={valorInput}
                             onChange={e => setDraftValue(p.id, e.target.value)}
                           />
                         </td>

@@ -70,6 +70,26 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
         tasas_sug = float((prop.tasa_municipal if prop else 0) or 0) + float((prop.impuesto_inmobiliario if prop else 0) or 0)
         expensas_sug = float((prop.expensas if prop else 0) or 0)
 
+        # Refacciones pendientes a cargo del inquilino: se descuentan
+        # automáticamente del próximo cobro. Mandamos la lista para que el
+        # frontend muestre el detalle y precargue el descuento.
+        refs_pend = (
+            db.query(models.Refaccion)
+            .filter(
+                models.Refaccion.contrato_id == c.id,
+                models.Refaccion.pagador == models.RefaccionPagador.inquilino,
+                models.Refaccion.estado == models.RefaccionEstado.pendiente,
+            )
+            .order_by(models.Refaccion.fecha.asc())
+            .all()
+        )
+        refs_pend_data = [
+            {"id": r.id, "fecha": r.fecha.isoformat() if r.fecha else None,
+             "descripcion": r.descripcion, "monto": r.monto}
+            for r in refs_pend
+        ]
+        refs_total = sum((r.monto or 0) for r in refs_pend)
+
         # Esperado total: si no hay pago, calculamos por contrato + costos asociados
         if pago:
             estado = pago.estado.value if hasattr(pago.estado, "value") else pago.estado
@@ -101,6 +121,8 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
             "monto_alquiler_sug": round(alquiler_sug, 2),
             "monto_expensas_sug": round(expensas_sug, 2),
             "monto_tasas_sug": round(tasas_sug, 2),
+            "refacciones_pendientes": refs_pend_data,
+            "refacciones_descuento_sug": round(refs_total, 2),
             "fecha_vencimiento": fecha_venc,
             "fecha_pago": fecha_pago,
             "estado": estado,
@@ -192,6 +214,8 @@ class RegistrarPagoIn(BaseModel):
     monto_impuestos: float = 0
     monto_municipal: float = 0
     monto_otros: float = 0
+    monto_descuento_refacciones: float = 0     # se resta del total
+    refacciones_aplicadas: list[int] = []       # IDs a marcar como aplicadas
     monto_total: Optional[float] = None
     notas: Optional[str] = None
 
@@ -253,6 +277,22 @@ def registrar_pago(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    try:
+        return _registrar_pago_impl(contrato_id, data, db, user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"[cobranza.registrar_pago] {type(e).__name__}: {e}")
+        raise HTTPException(400, f"No se pudo registrar el pago: {type(e).__name__}: {str(e)[:300]}")
+
+
+def _registrar_pago_impl(
+    contrato_id: int,
+    data: RegistrarPagoIn,
+    db: Session,
+    user,
+):
     contrato = db.query(models.Contrato).filter_by(id=contrato_id).first()
     if not contrato:
         raise HTTPException(404, "Contrato no encontrado")
@@ -267,6 +307,7 @@ def registrar_pago(
     # Monto total auto si vino vacío.
     # Tasas municipales agrupa lo que históricamente se separaba en impuestos + municipal.
     tasas_municipales = float(data.monto_impuestos or 0) + float(data.monto_municipal or 0)
+    descuento_refs = float(data.monto_descuento_refacciones or 0)
     items = [
         ("Alquiler", data.monto_alquiler),
         ("Expensas", data.monto_expensas),
@@ -274,7 +315,12 @@ def registrar_pago(
         ("Otros conceptos", data.monto_otros),
     ]
     items_no_cero = [(l, v) for l, v in items if v and v > 0]
-    monto_total = data.monto_total if data.monto_total is not None else sum(v for _, v in items_no_cero)
+    if descuento_refs > 0:
+        items_no_cero.append(("Descuento refacciones", -descuento_refs))
+    monto_total = (
+        data.monto_total if data.monto_total is not None
+        else sum(v for _, v in items_no_cero)
+    )
 
     # Crear o actualizar el pago
     pago = (
@@ -295,6 +341,26 @@ def registrar_pago(
     pago.estado = models.PagoEstado.pagado
     pago.notas = data.notas
     db.flush()
+
+    # Marcar las refacciones del inquilino como aplicadas a este pago.
+    # Validamos que pertenezcan al contrato y estén pendientes para evitar
+    # vincular cualquier ID arbitrario.
+    refs_aplicadas_count = 0
+    if data.refacciones_aplicadas:
+        refs = (
+            db.query(models.Refaccion)
+            .filter(
+                models.Refaccion.id.in_(data.refacciones_aplicadas),
+                models.Refaccion.contrato_id == contrato.id,
+                models.Refaccion.estado == models.RefaccionEstado.pendiente,
+            )
+            .all()
+        )
+        for r in refs:
+            r.estado = models.RefaccionEstado.aplicada
+            r.pago_id = pago.id
+            refs_aplicadas_count += 1
+        db.flush()
 
     # Comisión inmobiliaria: se calcula SOLO sobre el alquiler, no sobre los
     # gastos pasantes (expensas, tasas, otros). El propietario percibe
@@ -397,6 +463,8 @@ def registrar_pago(
         "comision": comision,
         "neto_propietario": neto,
         "smtp_configurado": smtp_configurado(),
+        "refacciones_aplicadas": refs_aplicadas_count,
+        "descuento_refacciones": descuento_refs,
         "comprobantes": [
             {
                 "id": comp_inq.id,

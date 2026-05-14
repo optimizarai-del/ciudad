@@ -143,3 +143,30 @@ class CalculoOut(BaseModel):
     tasa_municipal: float
     total_mensual: float
     detalle: dict
+
+
+# ---------- Refacciones ----------
+class RefaccionBase(BaseModel):
+    propiedad_id: int
+    contrato_id: Optional[int] = None
+    fecha: Optional[date] = None
+    descripcion: str
+    monto: float
+    pagador: Optional[str] = "inquilino"   # inquilino | propietario
+    estado: Optional[str] = "pendiente"    # pendiente | aplicada | cancelada
+    notas: Optional[str] = None
+
+
+class RefaccionCreate(RefaccionBase):
+    pass
+
+
+class RefaccionOut(RefaccionBase):
+    id: int
+    pago_id: Optional[int] = None
+    propiedad_direccion: Optional[str] = None
+    contrato_codigo: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

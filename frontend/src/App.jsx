@@ -23,6 +23,7 @@ import Propietarios       from './pages/Propietarios'
 import Liquidaciones      from './pages/Liquidaciones'
 import Recordatorios      from './pages/Recordatorios'
 import ActualizarTasas    from './pages/ActualizarTasas'
+import Refacciones        from './pages/Refacciones'
 
 export default function App() {
   return (
@@ -64,6 +65,9 @@ export default function App() {
         } />
         <Route path="/alquileres/tasas" element={
           <ProtectedRoute requireAlquileres><ActualizarTasas /></ProtectedRoute>
+        } />
+        <Route path="/alquileres/refacciones" element={
+          <ProtectedRoute requireAlquileres><Refacciones /></ProtectedRoute>
         } />
         <Route path="/recordatorios" element={
           <ProtectedRoute><Recordatorios /></ProtectedRoute>

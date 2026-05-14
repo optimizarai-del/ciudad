@@ -24,9 +24,47 @@ def listar(db: Session = Depends(get_db), user=Depends(get_current_user)):
 
 @router.post("/", response_model=schemas.ContratoOut)
 def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    obj = models.Contrato(**data.model_dump())
-    db.add(obj); db.commit(); db.refresh(obj)
-    return obj
+    # Mensajes de error claros para los validaciones más comunes en vez de
+    # un 500 genérico que aparezca como toast rojo sin información.
+    payload = data.model_dump()
+
+    # Validar propiedad
+    if not payload.get("propiedad_id"):
+        raise HTTPException(400, "Falta seleccionar una propiedad para el contrato.")
+    prop = db.query(models.Propiedad).filter_by(id=payload["propiedad_id"]).first()
+    if not prop:
+        raise HTTPException(404, f"La propiedad #{payload['propiedad_id']} no existe.")
+
+    # Validar inquilino si se mandó
+    if payload.get("inquilino_id"):
+        cli = db.query(models.Cliente).filter_by(id=payload["inquilino_id"]).first()
+        if not cli:
+            raise HTTPException(404, f"El inquilino #{payload['inquilino_id']} no existe.")
+
+    # Validar enums explícitamente — en Postgres con SQLEnum un valor inválido
+    # tira un IntegrityError críptico al hacer commit.
+    enum_checks = {
+        "tipo": (models.ContratoTipo, payload.get("tipo")),
+        "estado": (models.ContratoEstado, payload.get("estado") or "borrador"),
+        "indice_ajuste": (models.IndiceAjuste, payload.get("indice_ajuste") or "ipc"),
+    }
+    for campo, (cls, val) in enum_checks.items():
+        if val is None:
+            continue
+        try:
+            cls(val)
+        except ValueError:
+            opciones = ", ".join(e.value for e in cls)
+            raise HTTPException(400, f"Valor inválido para {campo}: '{val}'. Opciones: {opciones}")
+
+    try:
+        obj = models.Contrato(**payload)
+        db.add(obj); db.commit(); db.refresh(obj)
+        return obj
+    except Exception as e:
+        db.rollback()
+        print(f"[contratos.crear] {type(e).__name__}: {e}")
+        raise HTTPException(400, f"No se pudo guardar el contrato: {type(e).__name__}: {str(e)[:300]}")
 
 
 @router.get("/{id}", response_model=schemas.ContratoOut)

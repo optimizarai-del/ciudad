@@ -311,6 +311,53 @@ class PropiedadAdjunto(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class RefaccionPagador(str, Enum):
+    """Quién pone la plata de la refacción.
+
+    - inquilino: el inquilino paga (típicamente lo factura él y queremos
+      descontarlo del próximo alquiler).
+    - propietario: el propietario paga; se descuenta de la liquidación que
+      le mandamos al propietario, no del cobro al inquilino.
+    """
+    inquilino = "inquilino"
+    propietario = "propietario"
+
+
+class RefaccionEstado(str, Enum):
+    pendiente = "pendiente"      # cargada, todavía no descontada
+    aplicada = "aplicada"        # ya se descontó de un pago
+    cancelada = "cancelada"      # se anuló (no aplica)
+
+
+class Refaccion(Base):
+    """Refacción/arreglo hecho en una propiedad.
+
+    Si la paga el inquilino, queda con estado=pendiente y al registrar el
+    próximo pago del alquiler se descuenta automáticamente (monto pasa al
+    campo `monto_otros` del pago con signo negativo o se resta del total).
+    Si la paga el propietario, se incluye como gasto en la liquidación
+    mensual que se le manda.
+    """
+    __tablename__ = "refacciones"
+    id = Column(Integer, primary_key=True)
+    propiedad_id = Column(Integer, ForeignKey("propiedades.id"), nullable=False, index=True)
+    propiedad = relationship("Propiedad")
+    contrato_id = Column(Integer, ForeignKey("contratos.id"), nullable=True, index=True)
+    contrato = relationship("Contrato")
+
+    fecha = Column(Date, default=date.today, nullable=False)
+    descripcion = Column(String, nullable=False)
+    monto = Column(Float, default=0, nullable=False)
+    pagador = Column(SQLEnum(RefaccionPagador), default=RefaccionPagador.inquilino, nullable=False)
+    estado = Column(SQLEnum(RefaccionEstado), default=RefaccionEstado.pendiente, nullable=False)
+    # Si fue descontada en un pago concreto, queda apuntando a ese pago
+    pago_id = Column(Integer, ForeignKey("pagos.id"), nullable=True, index=True)
+    pago = relationship("Pago")
+
+    notas = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ComprobanteTipo(str, Enum):
     inquilino = "inquilino"
     propietario = "propietario"

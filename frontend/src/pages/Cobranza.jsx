@@ -4,7 +4,7 @@ import SearchBar, { match } from '../components/SearchBar'
 import api from '../utils/api'
 import {
   CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight,
-  Phone, Mail, X, FileText, Download, Send, AlertTriangle,
+  Phone, Mail, X, FileText, Download, Send, AlertTriangle, Wrench,
 } from 'lucide-react'
 
 const ESTADO_CONFIG = {
@@ -205,6 +205,23 @@ function Stat({ label, value, color = '' }) {
 }
 
 function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
+  // Refacciones pendientes del inquilino para este contrato. Por defecto
+  // las pre-seleccionamos todas para que el descuento aparezca calculado.
+  const refsPend = item.refacciones_pendientes || []
+  const [refsSelected, setRefsSelected] = useState(
+    () => new Set(refsPend.map(r => r.id))
+  )
+  const toggleRef = (id) => {
+    setRefsSelected(prev => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+  const descuentoRefs = refsPend
+    .filter(r => refsSelected.has(r.id))
+    .reduce((s, r) => s + (Number(r.monto) || 0), 0)
+
   // Precarga: si el backend mandó componentes sugeridos (alquiler vigente
   // del contrato + expensas y tasa municipal vigentes de la propiedad), los
   // usamos. Fallback al monto_total para no romper compatibilidad.
@@ -220,8 +237,9 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
   const [err, setErr] = useState('')
 
   const set = k => e => setForm({ ...form, [k]: e.target.value })
-  const total = ['monto_alquiler','monto_expensas','monto_tasas_municipales','monto_otros']
+  const subtotal = ['monto_alquiler','monto_expensas','monto_tasas_municipales','monto_otros']
     .reduce((s, k) => s + (Number(form[k]) || 0), 0)
+  const total = subtotal - descuentoRefs
   // La comisión se calcula sólo sobre el alquiler. Los gastos pasantes
   // (expensas, tasas, otros) se cobran al inquilino y se derivan a quien
   // corresponda — no integran el neto al propietario.
@@ -242,6 +260,8 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
         monto_municipal: Number(form.monto_tasas_municipales) || 0,
         monto_impuestos: 0,
         monto_otros: Number(form.monto_otros) || 0,
+        monto_descuento_refacciones: descuentoRefs,
+        refacciones_aplicadas: Array.from(refsSelected),
         monto_total: total,
         notas: form.notas || null,
       }
@@ -305,8 +325,49 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
             <textarea rows={2} className="input resize-none" value={form.notas} onChange={set('notas')} />
           </div>
 
+          {/* Refacciones pendientes a descontar */}
+          {refsPend.length > 0 && (
+            <div className="rounded-2xl border border-[#B8893A]/30 bg-[#B8893A]/5 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Wrench size={13} className="text-[#B8893A]" />
+                <p className="text-[12px] font-semibold">
+                  Refacciones a descontar <span className="text-muted font-normal">({refsPend.length} pendientes)</span>
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                {refsPend.map(r => (
+                  <label key={r.id}
+                    className="flex items-center gap-2 text-[12px] cursor-pointer hover:bg-white/40 dark:hover:bg-black/20 rounded-lg px-2 py-1">
+                    <input type="checkbox"
+                      checked={refsSelected.has(r.id)}
+                      onChange={() => toggleRef(r.id)}
+                      className="accent-[#B8893A]" />
+                    <span className="flex-1 truncate">
+                      {r.descripcion}
+                      <span className="text-muted ml-1">
+                        · {r.fecha ? new Date(r.fecha).toLocaleDateString('es-AR') : ''}
+                      </span>
+                    </span>
+                    <span className="font-semibold tabular-nums">− {fmtMoney(r.monto)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Resumen */}
           <div className="rounded-2xl bg-[#F5F5F5] dark:bg-[#1A1A1A] p-4 space-y-1.5 text-[13px]">
+            {descuentoRefs > 0 && (
+              <>
+                <div className="flex justify-between text-muted">
+                  <span>Subtotal</span><span>{fmtMoney(subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-[#B8893A]">
+                  <span>Descuento refacciones</span><span>− {fmtMoney(descuentoRefs)}</span>
+                </div>
+                <div className="border-t border-border my-1.5" />
+              </>
+            )}
             <div className="flex justify-between"><span className="text-muted">Total cobrado al inquilino</span><span className="font-semibold">{fmtMoney(total)}</span></div>
             <div className="flex justify-between"><span className="text-muted">Alquiler base</span><span>{fmtMoney(alquiler)}</span></div>
             <div className="flex justify-between"><span className="text-muted">Comisión ({item.comision_porc || 0}% s/ alquiler)</span><span>− {fmtMoney(comision)}</span></div>

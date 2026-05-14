@@ -89,6 +89,16 @@ def limpiar(db: Session = Depends(get_db), user=Depends(get_current_user)):
             models.AjusteContrato.contrato_id.in_(contrato_ids)
         ).delete(synchronize_session=False)
 
+    # Refacciones del fixture — las identificamos por el contrato_id
+    # (todas las que apuntan a contratos demo) o por la propiedad_id.
+    refacciones_borradas = 0
+    if contrato_ids:
+        refacciones_borradas = (
+            db.query(models.Refaccion)
+            .filter(models.Refaccion.contrato_id.in_(contrato_ids))
+            .delete(synchronize_session=False)
+        )
+
     contratos_borrados = _q_contratos_demo(db).delete(synchronize_session=False)
 
     # Adjuntos de propiedades demo (legacy; los nuevos viven en Storage y
@@ -412,6 +422,64 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
             notas=f"{FIXTURE_TAG} En mora",
         ))
 
+    # ─── REFACCIONES ───────────────────────────────────────────────────────
+    # Mezcla realista: algunas que paga el inquilino (se descontarán del próximo
+    # cobro) y otras que paga el propietario (van a liquidación).
+    refacciones = [
+        models.Refaccion(
+            propiedad_id=pr_depto.id,
+            contrato_id=c_martina.id,
+            fecha=hoy - timedelta(days=10),
+            descripcion="Reparación termotanque",
+            monto=85_000,
+            pagador=models.RefaccionPagador.inquilino,
+            estado=models.RefaccionEstado.pendiente,
+            notas=f"{FIXTURE_TAG} El inquilino llamó al técnico y pagó cash. Se descuenta del próximo alquiler.",
+        ),
+        models.Refaccion(
+            propiedad_id=pr_depto.id,
+            contrato_id=c_martina.id,
+            fecha=hoy - timedelta(days=22),
+            descripcion="Cambio de cerradura puerta principal",
+            monto=42_000,
+            pagador=models.RefaccionPagador.inquilino,
+            estado=models.RefaccionEstado.pendiente,
+            notas=f"{FIXTURE_TAG} Cerrajero llamado por urgencia.",
+        ),
+        models.Refaccion(
+            propiedad_id=pr_local.id,
+            contrato_id=c_estudio.id,
+            fecha=hoy - timedelta(days=15),
+            descripcion="Pintura completa fachada",
+            monto=320_000,
+            pagador=models.RefaccionPagador.propietario,
+            estado=models.RefaccionEstado.pendiente,
+            notas=f"{FIXTURE_TAG} Acordado con el propietario — sale de la liquidación.",
+        ),
+        models.Refaccion(
+            propiedad_id=pr_casa.id,
+            contrato_id=None,
+            fecha=hoy - timedelta(days=45),
+            descripcion="Reparación cañería baño principal",
+            monto=180_000,
+            pagador=models.RefaccionPagador.propietario,
+            estado=models.RefaccionEstado.aplicada,
+            notas=f"{FIXTURE_TAG} Ya facturado en liquidación de marzo.",
+        ),
+        models.Refaccion(
+            propiedad_id=pr_oficina.id,
+            contrato_id=None,
+            fecha=hoy - timedelta(days=5),
+            descripcion="Reparación aire acondicionado",
+            monto=65_000,
+            pagador=models.RefaccionPagador.propietario,
+            estado=models.RefaccionEstado.pendiente,
+            notas=f"{FIXTURE_TAG} Pre-firma, lo descuenta del depósito.",
+        ),
+    ]
+    for r in refacciones:
+        db.add(r)
+
     db.commit()
 
     return {
@@ -422,6 +490,7 @@ def cargar(db: Session = Depends(get_db), user=Depends(get_current_user)):
             "propiedades": len(propiedades),
             "contratos": len(contratos),
             "pagos": 6 + 10 + 3,
+            "refacciones": len(refacciones),
         },
         "tag": FIXTURE_TAG,
         "como_limpiar": "DELETE /api/admin/demo/limpiar",
