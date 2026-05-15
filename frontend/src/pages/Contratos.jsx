@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, DollarSign, FileType2, Upload, FileCheck2, Sparkles } from 'lucide-react'
+import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, DollarSign, FileType2, Upload, FileCheck2, Sparkles, Eye, Archive, ArchiveRestore } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import HistorialPagos from '../components/HistorialPagos'
 import SearchBar, { match } from '../components/SearchBar'
@@ -100,13 +100,15 @@ export default function Contratos() {
   const [editing, setEditing]   = useState(null)
   const [historialContrato, setHistorialContrato] = useState(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [incluirArchivados, setIncluirArchivados] = useState(false)
 
   const load = () => {
-    api.get('/api/contratos').then(r => setList(r.data))
+    const url = `/api/contratos${incluirArchivados ? '?incluir_archivados=true' : ''}`
+    api.get(url).then(r => setList(r.data))
     api.get('/api/propiedades').then(r => setProp(r.data))
     api.get('/api/clientes').then(r => setClientes(r.data))
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [incluirArchivados])
 
   // "Por vencer": contrato vigente cuyo fecha_fin cae dentro de los próximos
   // 60 días (incluye los ya vencidos en los últimos 0 días si estado sigue
@@ -170,6 +172,45 @@ export default function Contratos() {
     return c ? `${c.nombre} ${c.apellido || ''}`.trim() : null
   }
 
+  // Devuelve el nombre del propietario principal de la propiedad del contrato
+  const propietarioName = (contrato) => {
+    const prop = propiedades.find(p => p.id === contrato.propiedad_id)
+    if (!prop) return null
+    // M2M nueva
+    if (prop.propietarios_lista?.length > 0) {
+      const ppal = prop.propietarios_lista.find(p => p.es_principal) || prop.propietarios_lista[0]
+      const extras = prop.propietarios_lista.length - 1
+      return extras > 0
+        ? `${ppal.nombre} + ${extras}`
+        : ppal.nombre
+    }
+    // Legacy
+    return prop.propietario_nombre || null
+  }
+
+  // Ver el PDF del contrato en nueva pestaña (sin descargar)
+  const verPDF = async (c) => {
+    try {
+      const r = await api.get(`/api/contratos/${c.id}/pdf`, { responseType: 'blob' })
+      const url = URL.createObjectURL(new Blob([r.data], { type: 'application/pdf' }))
+      window.open(url, '_blank', 'noopener,noreferrer')
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch (e) {
+      alert(e.response?.data?.detail || 'No se pudo abrir el PDF.')
+    }
+  }
+
+  const archivar = async (c) => {
+    const accion = c.archivado ? 'desarchivar' : 'archivar'
+    if (!confirm(`¿${accion[0].toUpperCase() + accion.slice(1)} este contrato?`)) return
+    try {
+      await api.post(`/api/contratos/${c.id}/${accion}`)
+      load()
+    } catch (e) {
+      alert(e.response?.data?.detail || 'No se pudo realizar la acción.')
+    }
+  }
+
   return (
     <Layout>
       <div className="max-w-6xl mx-auto animate-fade-in">
@@ -205,6 +246,15 @@ export default function Contratos() {
             <FilterPill key={e} active={filtro === e} onClick={() => setFiltro(e)}
               label={`${e} (${list.filter(c => c.estado === e).length})`} />
           ))}
+          <label className="ml-2 flex items-center gap-1.5 text-[11px] text-muted cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={incluirArchivados}
+              onChange={e => setIncluirArchivados(e.target.checked)}
+              className="accent-[#B8893A]"
+            />
+            Incluir archivados
+          </label>
         </div>
 
         {filtered.length === 0 ? (
@@ -218,18 +268,26 @@ export default function Contratos() {
         ) : (
           <div className="grid md:grid-cols-2 gap-4">
             {filtered.map(c => (
-              <div key={c.id} className="card p-6 card-hover">
+              <div key={c.id} className={`card p-6 card-hover ${c.archivado ? 'opacity-60' : ''}`}>
                 <div className="flex items-start justify-between gap-3 mb-4">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="w-10 h-10 rounded-2xl bg-[#F0F0F0] dark:bg-[#1E1E1E] grid place-items-center shrink-0">
                       <FileText size={16} className="text-[#737373] dark:text-[#9A9A9A]" />
                     </div>
-                    <div>
-                      <p className="font-semibold text-[14px] tracking-tight">{c.codigo || `Contrato #${c.id}`}</p>
-                      <p className="text-[11px] text-[#737373] dark:text-[#7A7A7A]">{TIPO_LABEL[c.tipo] || c.tipo}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-[14px] tracking-tight truncate">
+                        {propietarioName(c) || c.codigo || `Contrato #${c.id}`}
+                      </p>
+                      <p className="text-[11px] text-[#737373] dark:text-[#7A7A7A]">
+                        {TIPO_LABEL[c.tipo] || c.tipo}
+                        {c.codigo && <span className="text-muted/60 ml-1.5">· {c.codigo}</span>}
+                      </p>
                     </div>
                   </div>
-                  <span className={ESTADO_CHIP[c.estado] || 'chip-muted'}>{c.estado}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {c.archivado && <span className="chip-muted">archivado</span>}
+                    <span className={ESTADO_CHIP[c.estado] || 'chip-muted'}>{c.estado}</span>
+                  </div>
                 </div>
 
                 <div className="space-y-2 text-[13px]">
@@ -261,6 +319,10 @@ export default function Contratos() {
                     onClick={() => setHistorialContrato(c)}>
                     <DollarSign size={12} /> Pagos
                   </button>
+                  <button className="btn-ghost py-2 px-3 text-[12px]" title="Ver PDF del contrato"
+                    onClick={() => verPDF(c)}>
+                    <Eye size={12} />
+                  </button>
                   <button className="btn-ghost py-2 px-3 text-[12px]" title="Editar"
                     onClick={() => { setEditing(c); setOpen(true) }}>
                     <Pencil size={12} />
@@ -279,6 +341,11 @@ export default function Contratos() {
                       accept=".docx,.doc,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
                       onChange={e => { subirArchivo(c, e.target.files?.[0]); e.target.value = '' }} />
                   </label>
+                  <button className="btn-ghost py-2 px-3 text-[12px]"
+                    title={c.archivado ? 'Desarchivar' : 'Archivar'}
+                    onClick={() => archivar(c)}>
+                    {c.archivado ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+                  </button>
                   <button className="btn-danger py-2 px-3" onClick={() => del(c.id)}>
                     <Trash2 size={12} />
                   </button>

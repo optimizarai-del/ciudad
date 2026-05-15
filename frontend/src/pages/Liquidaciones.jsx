@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import {
   Receipt, CheckCircle2, Clock, RefreshCw, Search, X, AlertCircle,
-  RotateCcw, ChevronDown, ChevronRight,
+  RotateCcw, ChevronDown, ChevronRight, ListChecks,
 } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import api from '../utils/api'
@@ -311,8 +311,25 @@ function GrupoPropietario({ grupo, expandido, onToggle, onMarcar, onRevertir }) 
 
 
 function ItemLiquidacion({ item, onMarcar, onRevertir }) {
+  const [verDesglose, setVerDesglose] = useState(false)
+  // Parsear el JSON granular si existe en el pago
+  let conceptos = []
+  if (item.detalle_conceptos) {
+    try { conceptos = JSON.parse(item.detalle_conceptos) } catch {}
+  }
+  const conceptosInquilino = conceptos.filter(c => c.paga === 'inquilino')
+  const conceptosPropietario = conceptos.filter(c => c.paga === 'propietario')
+
   return (
-    <div className="px-4 py-3 flex items-center gap-3 hover:bg-neutral-50/50 dark:hover:bg-[#141414] transition">
+    <div>
+      <div className="px-4 py-3 flex items-center gap-3 hover:bg-neutral-50/50 dark:hover:bg-[#141414] transition">
+      <button
+        onClick={() => setVerDesglose(v => !v)}
+        className="shrink-0 p-1 text-muted hover:text-primary dark:hover:text-white rounded"
+        title="Ver desglose"
+      >
+        {verDesglose ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+      </button>
       <div className="flex-1 min-w-0">
         <p className="font-medium text-[13px] truncate">
           {item.propiedad_direccion || `Propiedad #${item.propiedad_id}`}
@@ -364,6 +381,81 @@ function ItemLiquidacion({ item, onMarcar, onRevertir }) {
           </button>
         )}
       </div>
+      </div>
+
+      {/* Desglose desplegable: cómo se calculó el neto */}
+      {verDesglose && (
+        <div className="px-4 pb-4 -mt-1 bg-neutral-50/50 dark:bg-[#141414]">
+          <div className="rounded-xl p-4 border border-border dark:border-[#2A2A2A] bg-white dark:bg-[#0F0F0F]">
+            <p className="text-[10px] uppercase tracking-widest font-semibold text-muted mb-3 flex items-center gap-1.5">
+              <ListChecks size={11} /> Cálculo del neto al propietario
+            </p>
+            <div className="space-y-1.5 text-[12px]">
+              <div className="flex justify-between">
+                <span className="text-muted">Alquiler base</span>
+                <span className="tabular-nums">{fmt(item.monto_alquiler)}</span>
+              </div>
+              <div className="flex justify-between text-warn">
+                <span>Comisión inmobiliaria ({item.comision_porc}% s/alquiler)</span>
+                <span className="tabular-nums">− {fmt((item.monto_alquiler || 0) * (item.comision_porc || 0) / 100)}</span>
+              </div>
+              <div className="border-t border-border my-1.5 pt-1.5 flex justify-between font-semibold">
+                <span>Neto al propietario</span>
+                <span className="text-success tabular-nums">{fmt(item.neto_a_pagar)}</span>
+              </div>
+              {item.mi_porcentaje != null && item.mi_porcentaje < 100 && (
+                <div className="border-t border-border my-1.5 pt-1.5 flex justify-between font-semibold">
+                  <span>Su parte ({item.mi_porcentaje}%)</span>
+                  <span className="text-[#B8893A] tabular-nums">{fmt(item.mi_parte)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Conceptos cobrados al inquilino (pasantes - no afectan neto) */}
+            {conceptosInquilino.length > 0 && (
+              <>
+                <p className="text-[10px] uppercase tracking-widest font-semibold text-muted mt-4 mb-2">
+                  Conceptos pasantes (cobrados al inquilino)
+                </p>
+                <div className="space-y-1 text-[11px] text-muted">
+                  {conceptosInquilino.map((c, i) => (
+                    <div key={i} className="flex justify-between">
+                      <span>{c.label}</span>
+                      <span className="tabular-nums">{fmt(c.monto)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-muted/60 italic mt-1">
+                  Se derivan a quien corresponda (consorcio, municipio, etc.) — no integran el neto.
+                </p>
+              </>
+            )}
+
+            {/* Conceptos a cargo del propietario */}
+            {conceptosPropietario.length > 0 && (
+              <>
+                <p className="text-[10px] uppercase tracking-widest font-semibold text-[#B8893A] mt-4 mb-2">
+                  A cargo del propietario
+                </p>
+                <div className="space-y-1 text-[11px]">
+                  {conceptosPropietario.map((c, i) => (
+                    <div key={i} className="flex justify-between text-[#B8893A]">
+                      <span>{c.label}</span>
+                      <span className="tabular-nums">{fmt(c.monto)}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {item.liquidado && item.notas_liquidacion && (
+              <p className="text-[10px] text-muted italic mt-3 pt-3 border-t border-border">
+                <strong>Notas de la entrega:</strong> {item.notas_liquidacion}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

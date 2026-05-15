@@ -231,6 +231,11 @@ class Contrato(Base):
 
     notas = Column(Text)
     is_demo = Column(Boolean, default=False, nullable=False, index=True)
+    # Archivado: el operador puede "guardar bajo llave" un contrato que ya no
+    # está en uso pero no quiere eliminar. No aparece en los listados por
+    # default; se puede ver desde el toggle "Incluir archivados".
+    archivado = Column(Boolean, default=False, nullable=False, index=True)
+    fecha_archivado = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Archivo del contrato firmado / actualizado manualmente (subido por el

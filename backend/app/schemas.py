@@ -132,6 +132,8 @@ class ContratoOut(ContratoBase):
     id: int
     archivo_nombre: Optional[str] = None
     archivo_subido_at: Optional[datetime] = None
+    archivado: Optional[bool] = False
+    fecha_archivado: Optional[datetime] = None
 
     class Config:
         from_attributes = True

@@ -150,6 +150,10 @@ def _serializar_pago(pago: models.Pago) -> dict:
         "fecha_pago_inquilino": pago.fecha_pago.isoformat() if pago.fecha_pago else None,
         "monto_total_cobrado": pago.monto_total or 0,
         "monto_alquiler": pago.monto_alquiler or 0,
+        "monto_expensas": pago.monto_expensas or 0,
+        "monto_municipal": pago.monto_municipal or 0,
+        "monto_otros": pago.monto_otros or 0,
+        "detalle_conceptos": pago.detalle_conceptos,
         "comision_porc": float(contrato.comision_porc or 0) if contrato else 0.0,
         "neto_a_pagar": neto,
         # estado de liquidación

@@ -313,6 +313,35 @@ def _limpiar_codigos_contrato_vacios():
 
 
 @app.on_event("startup")
+def _migrar_contrato_archivado():
+    """Agrega columnas archivado + fecha_archivado a contratos. Idempotente."""
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+    db = SessionLocal()
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns("contratos", schema=schema)}
+        if "archivado" not in cols:
+            db.execute(text(
+                f"ALTER TABLE {qual}contratos ADD COLUMN archivado BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            db.execute(text(
+                f"ALTER TABLE {qual}contratos ADD COLUMN fecha_archivado TIMESTAMP"
+            ))
+            db.execute(text(
+                f"CREATE INDEX IF NOT EXISTS ix_contratos_archivado ON {qual}contratos(archivado)"
+            ))
+            db.commit()
+            print("[migrar] contratos.archivado + fecha_archivado agregadas")
+    except Exception as e:
+        db.rollback()
+        print(f"[migrar] contratos.archivado: {e}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _migrar_detalle_conceptos():
     """Agrega columna `detalle_conceptos` (TEXT/JSON) a `pagos`. Idempotente."""
     from sqlalchemy import text, inspect

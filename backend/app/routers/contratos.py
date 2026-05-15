@@ -47,8 +47,30 @@ def _generar_codigo(db: Session, is_demo: bool) -> str:
 
 
 @router.get("/", response_model=List[schemas.ContratoOut])
-def listar(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    return _scope(db, user).order_by(models.Contrato.id.desc()).all()
+def listar(
+    incluir_archivados: bool = False,
+    propietario_id: int | None = None,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    q = _scope(db, user)
+    if not incluir_archivados:
+        q = q.filter(models.Contrato.archivado.is_(False))
+    if propietario_id:
+        # Contratos donde la propiedad pertenece al propietario (legacy o M2M)
+        prop_ids = {
+            p.id for p in db.query(models.Propiedad).filter_by(propietario_id=propietario_id).all()
+        }
+        m2m_ids = {
+            row.propiedad_id for row in
+            db.query(models.PropiedadPropietario).filter_by(cliente_id=propietario_id).all()
+        }
+        prop_ids |= m2m_ids
+        if prop_ids:
+            q = q.filter(models.Contrato.propiedad_id.in_(prop_ids))
+        else:
+            return []
+    return q.order_by(models.Contrato.id.desc()).all()
 
 
 @router.post("/", response_model=schemas.ContratoOut)
@@ -138,6 +160,33 @@ def eliminar(id: int, db: Session = Depends(get_db), user=Depends(get_current_us
     if not obj: raise HTTPException(404, "No encontrado")
     db.delete(obj); db.commit()
     return {"ok": True}
+
+
+@router.post("/{id}/archivar", response_model=schemas.ContratoOut)
+def archivar(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Marca el contrato como archivado. Deja de aparecer en listados
+    activos pero queda accesible con ?incluir_archivados=true."""
+    obj = _scope(db, user).filter_by(id=id).first()
+    if not obj:
+        raise HTTPException(404, "Contrato no encontrado")
+    if obj.archivado:
+        raise HTTPException(409, "Este contrato ya estaba archivado.")
+    obj.archivado = True
+    obj.fecha_archivado = datetime.utcnow()
+    db.commit(); db.refresh(obj)
+    return obj
+
+
+@router.post("/{id}/desarchivar", response_model=schemas.ContratoOut)
+def desarchivar(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Saca el contrato del archivo."""
+    obj = _scope(db, user).filter_by(id=id).first()
+    if not obj:
+        raise HTTPException(404, "Contrato no encontrado")
+    obj.archivado = False
+    obj.fecha_archivado = None
+    db.commit(); db.refresh(obj)
+    return obj
 
 
 def _cliente_dict(c: models.Cliente | None) -> dict:

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, KeyRound, Mail, Phone, Building2, Search, X, Pencil, Trash2 } from 'lucide-react'
+import { Plus, KeyRound, Mail, Phone, Building2, Search, X, Pencil, Trash2, FileText, Archive, ArchiveRestore, Calendar, Eye } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import { match } from '../components/SearchBar'
 import api from '../utils/api'
@@ -15,6 +15,7 @@ export default function Propietarios() {
   const [busqueda, setBusqueda]   = useState('')
   const [open, setOpen]           = useState(false)
   const [editing, setEditing]     = useState(null)
+  const [verContratos, setVerContratos] = useState(null)   // propietario al que abrir el historial
 
   const load = () => {
     api.get('/api/clientes').then(r => setClientes(r.data))
@@ -132,6 +133,11 @@ export default function Propietarios() {
                     </div>
                     <div className="flex gap-1 shrink-0">
                       <button className="btn-ghost p-1.5"
+                        title="Ver historial de contratos"
+                        onClick={() => setVerContratos(p)}>
+                        <FileText size={12} />
+                      </button>
+                      <button className="btn-ghost p-1.5"
                         title="Editar"
                         onClick={() => { setEditing(p); setOpen(true) }}>
                         <Pencil size={12} />
@@ -184,6 +190,12 @@ export default function Propietarios() {
       </div>
 
       {open && <Modal initial={editing} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); load() }} />}
+      {verContratos && (
+        <ModalContratosPropietario
+          propietario={verContratos}
+          onClose={() => setVerContratos(null)}
+        />
+      )}
     </Layout>
   )
 }
@@ -254,6 +266,151 @@ function Modal({ initial, onClose, onSaved }) {
             <button className="btn-primary flex-1" disabled={loading}>{loading ? 'Guardando…' : (initial ? 'Guardar' : 'Crear')}</button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+
+/**
+ * Historial de contratos de un propietario. Incluye archivados con toggle
+ * para los más viejos. Permite archivar/desarchivar y ver el PDF.
+ */
+function ModalContratosPropietario({ propietario, onClose }) {
+  const [contratos, setContratos] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [incluirArchivados, setIncluirArchivados] = useState(true)
+
+  const cargar = () => {
+    setLoading(true); setErr('')
+    api.get(`/api/contratos?propietario_id=${propietario.id}&incluir_archivados=${incluirArchivados}`)
+      .then(r => setContratos(r.data || []))
+      .catch(e => setErr(e.response?.data?.detail || 'No se pudieron cargar los contratos.'))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { cargar() }, [incluirArchivados])
+
+  const verPDF = async (c) => {
+    try {
+      const r = await api.get(`/api/contratos/${c.id}/pdf`, { responseType: 'blob' })
+      const url = URL.createObjectURL(new Blob([r.data], { type: 'application/pdf' }))
+      window.open(url, '_blank', 'noopener,noreferrer')
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch (e) {
+      alert(e.response?.data?.detail || 'No se pudo abrir el PDF.')
+    }
+  }
+
+  const archivar = async (c) => {
+    try {
+      await api.post(`/api/contratos/${c.id}/${c.archivado ? 'desarchivar' : 'archivar'}`)
+      cargar()
+    } catch (e) {
+      alert(e.response?.data?.detail || 'No se pudo realizar la acción.')
+    }
+  }
+
+  const fmtFecha = s => s ? new Date(s).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+  const nombre = propietario.razon_social || `${propietario.nombre} ${propietario.apellido || ''}`.trim()
+
+  const activos = contratos.filter(c => !c.archivado)
+  const archivados = contratos.filter(c => c.archivado)
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto"
+      onClick={onClose}>
+      <div className="card w-full max-w-3xl shadow-lift animate-scale-in flex flex-col max-h-[90vh] my-6"
+        onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-border dark:border-[#2A2A2A] flex items-start justify-between shrink-0">
+          <div className="min-w-0">
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5 truncate">Historial de contratos</h2>
+            <p className="text-[12px] text-muted truncate">{nombre}</p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-2 shrink-0"><X size={16} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3">
+          {loading ? (
+            <p className="text-center text-muted py-8 text-[13px]">Cargando…</p>
+          ) : err ? (
+            <div className="rounded-xl p-3 bg-danger/5 border border-danger/20 text-[12px] text-danger">{err}</div>
+          ) : contratos.length === 0 ? (
+            <p className="text-center text-muted py-8 text-[13px]">
+              Este propietario aún no tiene contratos cargados.
+            </p>
+          ) : (
+            <>
+              {activos.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted font-semibold mb-2">
+                    Activos ({activos.length})
+                  </p>
+                  <div className="space-y-2">
+                    {activos.map(c => (
+                      <ContratoCard key={c.id} contrato={c} onVerPDF={verPDF} onArchivar={archivar} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {archivados.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted font-semibold mb-2 mt-4">
+                    Archivados ({archivados.length})
+                  </p>
+                  <div className="space-y-2">
+                    {archivados.map(c => (
+                      <ContratoCard key={c.id} contrato={c} onVerPDF={verPDF} onArchivar={archivar} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+function ContratoCard({ contrato, onVerPDF, onArchivar }) {
+  const fmtFecha = s => s ? new Date(s).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+  const ESTADO_CHIP = {
+    vigente: 'chip-dark', borrador: 'chip-gray', vencido: 'chip-warn',
+    rescindido: 'chip-danger', reservado: 'chip-muted',
+  }
+  return (
+    <div className={`card p-3 ${contrato.archivado ? 'opacity-60' : ''}`}>
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-xl bg-neutral-100 dark:bg-[#1E1E1E] grid place-items-center shrink-0">
+          <FileText size={14} className="text-muted" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-[13px] font-semibold">{contrato.codigo || `Contrato #${contrato.id}`}</p>
+            <span className={ESTADO_CHIP[contrato.estado] || 'chip-muted'}>{contrato.estado}</span>
+            {contrato.archivado && <span className="chip-muted">archivado</span>}
+          </div>
+          <p className="text-[11px] text-muted mt-0.5 flex items-center gap-1.5">
+            <Calendar size={10} />
+            {fmtFecha(contrato.fecha_inicio)} → {fmtFecha(contrato.fecha_fin)}
+            {contrato.monto_inicial > 0 && (
+              <span className="ml-2">$ {Number(contrato.monto_inicial).toLocaleString('es-AR')}/mes</span>
+            )}
+          </p>
+        </div>
+        <div className="flex gap-1 shrink-0">
+          <button className="btn-ghost p-1.5" title="Ver PDF" onClick={() => onVerPDF(contrato)}>
+            <Eye size={12} />
+          </button>
+          <button className="btn-ghost p-1.5"
+            title={contrato.archivado ? 'Desarchivar' : 'Archivar'}
+            onClick={() => onArchivar(contrato)}>
+            {contrato.archivado ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+          </button>
+        </div>
       </div>
     </div>
   )
