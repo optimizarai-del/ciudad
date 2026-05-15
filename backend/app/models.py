@@ -273,6 +273,11 @@ class Pago(Base):
     monto_total = Column(Float, default=0)
     estado = Column(SQLEnum(PagoEstado), default=PagoEstado.pendiente)
     notas = Column(Text)
+    # JSON con detalle granular: [{"label": "Luz", "monto": 15000, "paga": "inquilino"|"propietario"}, ...]
+    # Permite registrar cada concepto (expensas, tasa, luz, gas, etc.) y quién
+    # lo paga. El total cobrado al inquilino solo suma los que `paga = "inquilino"`.
+    # Los que paga el propietario quedan como informativo en el comprobante.
+    detalle_conceptos = Column(Text)   # JSON serializado
     # Liquidación al propietario: cuando el inquilino paga, el propietario
     # todavía no cobró su parte. Cuando viene a buscar el dinero, la
     # inmobiliaria marca el pago como "liquidado" y se registra cuándo y

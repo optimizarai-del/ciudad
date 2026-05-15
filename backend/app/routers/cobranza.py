@@ -211,10 +211,17 @@ class RegistrarPagoIn(BaseModel):
     periodo: Optional[str] = None             # YYYY-MM
     fecha_pago: Optional[date] = None
     monto_alquiler: float = 0
+    # Legacy: si vienen estos campos individuales se asume `paga=inquilino`.
+    # El frontend nuevo manda `conceptos` (lista granular).
     monto_expensas: float = 0
     monto_impuestos: float = 0
     monto_municipal: float = 0
     monto_otros: float = 0
+    # NUEVO: lista de conceptos extra con quién paga cada uno.
+    # [{"label": "Luz", "monto": 15000, "paga": "inquilino"|"propietario"}, ...]
+    # Si paga el inquilino, suma al total cobrado. Si paga el propietario,
+    # queda informativo en el comprobante pero no se cobra.
+    conceptos: list[dict] = []
     monto_descuento_refacciones: float = 0     # se resta del total
     refacciones_aplicadas: list[int] = []       # IDs a marcar como aplicadas
     monto_total: Optional[float] = None
@@ -305,23 +312,48 @@ def _registrar_pago_impl(
     fecha_pago = data.fecha_pago or date.today()
     periodo = data.periodo or f"{fecha_pago.year}-{fecha_pago.month:02d}"
 
-    # Monto total auto si vino vacío.
-    # Tasas municipales agrupa lo que históricamente se separaba en impuestos + municipal.
-    tasas_municipales = float(data.monto_impuestos or 0) + float(data.monto_municipal or 0)
+    # Conceptos granulares. Si el frontend manda `conceptos`, eso es la fuente
+    # de verdad. Si no, reconstruimos desde los campos legacy (que asumen que
+    # todo paga el inquilino).
     descuento_refs = float(data.monto_descuento_refacciones or 0)
-    items = [
-        ("Alquiler", data.monto_alquiler),
-        ("Expensas", data.monto_expensas),
-        ("Tasas municipales", tasas_municipales),
-        ("Otros conceptos", data.monto_otros),
-    ]
-    items_no_cero = [(l, v) for l, v in items if v and v > 0]
+    tasas_municipales = float(data.monto_impuestos or 0) + float(data.monto_municipal or 0)
+    conceptos_list = []
+    if data.conceptos:
+        for c in data.conceptos:
+            label = (c.get("label") or "").strip()
+            try: monto = float(c.get("monto") or 0)
+            except Exception: monto = 0
+            paga = c.get("paga") or "inquilino"
+            if paga not in ("inquilino", "propietario"):
+                paga = "inquilino"
+            if label and monto != 0:
+                conceptos_list.append({"label": label, "monto": monto, "paga": paga})
+    else:
+        # Reconstruir desde legacy (todo paga el inquilino)
+        if data.monto_expensas:
+            conceptos_list.append({"label": "Expensas", "monto": float(data.monto_expensas), "paga": "inquilino"})
+        if tasas_municipales:
+            conceptos_list.append({"label": "Tasas municipales", "monto": tasas_municipales, "paga": "inquilino"})
+        if data.monto_otros:
+            conceptos_list.append({"label": "Otros conceptos", "monto": float(data.monto_otros), "paga": "inquilino"})
+
+    # Items para mostrar en el comprobante (incluye alquiler + cosas que paga el inquilino)
+    items_cobrar = [("Alquiler", float(data.monto_alquiler or 0))]
+    for c in conceptos_list:
+        if c["paga"] == "inquilino":
+            items_cobrar.append((c["label"], c["monto"]))
+    items_no_cero = [(l, v) for l, v in items_cobrar if v and v > 0]
     if descuento_refs > 0:
         items_no_cero.append(("Descuento refacciones", -descuento_refs))
     monto_total = (
         data.monto_total if data.monto_total is not None
         else sum(v for _, v in items_no_cero)
     )
+
+    # Conceptos informativos que paga el propietario (van al comprobante pero no se cobran)
+    items_propietario_paga = [
+        (c["label"], c["monto"]) for c in conceptos_list if c["paga"] == "propietario"
+    ]
 
     # Crear o actualizar el pago
     pago = (
@@ -334,13 +366,28 @@ def _registrar_pago_impl(
         db.add(pago)
     pago.fecha_pago = fecha_pago
     pago.monto_alquiler = data.monto_alquiler
-    pago.monto_expensas = data.monto_expensas
-    pago.monto_impuestos = data.monto_impuestos
-    pago.monto_municipal = data.monto_municipal
-    pago.monto_otros = data.monto_otros
+    # Sincronizar legacy desde conceptos (suma monto donde paga=inquilino)
+    sumas_inq = {"expensas": 0.0, "municipal": 0.0, "otros": 0.0}
+    for c in conceptos_list:
+        if c["paga"] != "inquilino":
+            continue
+        low = c["label"].lower()
+        if "expensa" in low:
+            sumas_inq["expensas"] += c["monto"]
+        elif "munic" in low or "tasa" in low or "abl" in low:
+            sumas_inq["municipal"] += c["monto"]
+        else:
+            sumas_inq["otros"] += c["monto"]
+    pago.monto_expensas = sumas_inq["expensas"]
+    pago.monto_impuestos = 0
+    pago.monto_municipal = sumas_inq["municipal"]
+    pago.monto_otros = sumas_inq["otros"]
     pago.monto_total = monto_total
     pago.estado = models.PagoEstado.pagado
     pago.notas = data.notas
+    # Guardar el JSON granular (incluye quién paga cada uno)
+    import json as _json
+    pago.detalle_conceptos = _json.dumps(conceptos_list, ensure_ascii=False)
     db.flush()
 
     # Marcar las refacciones del inquilino como aplicadas a este pago.
@@ -396,6 +443,8 @@ def _registrar_pago_impl(
             "telefono": inquilino.telefono if inquilino else None,
         },
         "items": items_no_cero or [("Pago del período", monto_total)],
+        # Conceptos a cargo del propietario — informativo en el comprobante
+        "items_propietario": items_propietario_paga,
         "total": monto_total,
     })
 
@@ -416,6 +465,8 @@ def _registrar_pago_impl(
         "inquilino": {"nombre_completo": nombre_inq},
         "items_cobrados": items_no_cero or [("Pago del período", monto_total)],
         "items_pasantes": items_pasantes,
+        # Conceptos que paga el propietario fuera de este pago (informativos)
+        "items_propietario": items_propietario_paga,
         "monto_alquiler": monto_alquiler,
         "monto_cobrado_total": monto_total,
         "comision_porc": comision_pct,

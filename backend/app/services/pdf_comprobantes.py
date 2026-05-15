@@ -124,6 +124,24 @@ def generar_pdf_comprobante_inquilino(ctx: dict) -> bytes:
             total_value=ctx.get("total"),
             acento_total=COLOR_NOCHE,
         ),
+    ]
+
+    # Si hay conceptos que paga el propietario, los listamos como informativos
+    items_propietario = ctx.get("items_propietario") or []
+    if items_propietario:
+        story += [
+            Spacer(1, 6 * mm),
+            Paragraph("A CARGO DEL PROPIETARIO (informativo)", sty["CiudadSection"]),
+            Paragraph(
+                "Los siguientes servicios y conceptos son responsabilidad del "
+                "propietario según las condiciones del contrato. No se incluyen "
+                "en el monto cobrado al inquilino:",
+                sty["CiudadClause"],
+            ),
+            _tabla_kv([(lbl, _money(monto)) for lbl, monto in items_propietario]),
+        ]
+
+    story += [
         Spacer(1, 10 * mm),
         Paragraph(
             "Por la presente se deja constancia de la recepción del pago detallado, "
@@ -241,6 +259,18 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
                 sty["CiudadClause"],
             ),
             _tabla_kv([(lbl, _money(monto)) for lbl, monto in items_pasantes]),
+        ]
+
+    # Conceptos que paga directamente el propietario (no se cobraron al inquilino)
+    items_propietario = ctx.get("items_propietario") or []
+    if items_propietario:
+        story += [
+            Spacer(1, 6 * mm),
+            Paragraph(
+                "A su cargo (no se cobraron al inquilino, los abona el propietario):",
+                sty["CiudadClause"],
+            ),
+            _tabla_kv([(lbl, _money(monto)) for lbl, monto in items_propietario]),
         ]
 
     story += [

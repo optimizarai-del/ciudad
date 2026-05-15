@@ -39,6 +39,9 @@ class PagoOut(BaseModel):
     monto_total: float
     estado: str
     notas: Optional[str]
+    # JSON con [{label, monto, paga}], null si el pago se hizo con la versión
+    # vieja del modal (sin desglose granular).
+    detalle_conceptos: Optional[str] = None
 
     class Config:
         from_attributes = True

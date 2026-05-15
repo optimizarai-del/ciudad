@@ -136,8 +136,45 @@ export default function HistorialPagos({ contrato, onClose }) {
                           {p.fecha_vencimiento && <span>Vence: {p.fecha_vencimiento}</span>}
                           {p.fecha_pago        && <span>Pagado: {p.fecha_pago}</span>}
                           {p.monto_alquiler > 0 && <span>Alquiler: ${Number(p.monto_alquiler).toLocaleString('es-AR')}</span>}
-                          {p.monto_expensas > 0 && <span>Expensas: ${Number(p.monto_expensas).toLocaleString('es-AR')}</span>}
                         </div>
+
+                        {/* Detalle granular de conceptos con quién paga cada uno */}
+                        {(() => {
+                          let conceptos = null
+                          if (p.detalle_conceptos) {
+                            try { conceptos = JSON.parse(p.detalle_conceptos) } catch {}
+                          }
+                          if (conceptos && conceptos.length > 0) {
+                            return (
+                              <div className="mt-1.5 space-y-0.5 text-[10px]">
+                                {conceptos.map((c, i) => (
+                                  <div key={i} className="flex items-center gap-2">
+                                    <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                                      c.paga === 'propietario' ? 'bg-[#B8893A]' : 'bg-success'
+                                    }`} />
+                                    <span className="text-muted">{c.label}:</span>
+                                    <span className="tabular-nums">${Number(c.monto).toLocaleString('es-AR')}</span>
+                                    <span className={`text-[9px] uppercase tracking-wider ${
+                                      c.paga === 'propietario'
+                                        ? 'text-[#B8893A]'
+                                        : 'text-muted'
+                                    }`}>
+                                      paga {c.paga}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                          }
+                          // Fallback al desglose legacy
+                          return (p.monto_expensas > 0 || p.monto_municipal > 0) ? (
+                            <div className="text-[10px] text-muted">
+                              {p.monto_expensas > 0 && `Expensas $${Number(p.monto_expensas).toLocaleString('es-AR')}`}
+                              {p.monto_expensas > 0 && p.monto_municipal > 0 && ' · '}
+                              {p.monto_municipal > 0 && `Tasas $${Number(p.monto_municipal).toLocaleString('es-AR')}`}
+                            </div>
+                          ) : null
+                        })()}
 
                         {comps.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mt-2">

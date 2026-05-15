@@ -313,6 +313,27 @@ def _limpiar_codigos_contrato_vacios():
 
 
 @app.on_event("startup")
+def _migrar_detalle_conceptos():
+    """Agrega columna `detalle_conceptos` (TEXT/JSON) a `pagos`. Idempotente."""
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+    db = SessionLocal()
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns("pagos", schema=schema)}
+        if "detalle_conceptos" not in cols:
+            db.execute(text(f"ALTER TABLE {qual}pagos ADD COLUMN detalle_conceptos TEXT"))
+            db.commit()
+            print("[migrar] pagos.detalle_conceptos agregada")
+    except Exception as e:
+        db.rollback()
+        print(f"[migrar] detalle_conceptos: {e}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _migrar_liquidacion_propietario():
     """Agrega columnas de liquidación al propietario sobre `pagos`. Idempotente."""
     from sqlalchemy import text, inspect

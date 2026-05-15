@@ -204,6 +204,110 @@ function Stat({ label, value, color = '' }) {
   )
 }
 
+/**
+ * Lista dinámica de conceptos del pago. Cada item:
+ *   { label: string, monto: number, paga: 'inquilino' | 'propietario' }
+ *
+ * El operador puede agregar expensas, tasas, servicios (luz, gas, internet),
+ * etc., y elegir quién los paga. Los que paga el inquilino se cobran junto
+ * con el alquiler; los que paga el propietario son informativos en el
+ * comprobante (no se cobran).
+ *
+ * Sugerencias rápidas como botones para agregar conceptos comunes en 1 click.
+ */
+function ConceptosEditables({ conceptos, onUpdate, onRemove, onAdd }) {
+  const SUGERENCIAS = [
+    'Luz', 'Gas', 'Agua', 'Internet', 'ABL', 'Seguro', 'Servicios varios',
+  ]
+  const yaUsados = new Set((conceptos || []).map(c => c.label?.toLowerCase()))
+  const disponibles = SUGERENCIAS.filter(s => !yaUsados.has(s.toLowerCase()))
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <label className="label !mb-0">
+          Conceptos adicionales
+          <span className="text-muted font-normal ml-2 text-[11px]">
+            ({(conceptos || []).length})
+          </span>
+        </label>
+      </div>
+
+      {/* Lista de conceptos */}
+      <div className="space-y-2">
+        {(conceptos || []).map((c, i) => (
+          <div key={i} className="flex items-center gap-2 p-2 rounded-xl bg-neutral-50 dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A]">
+            <input
+              type="text"
+              placeholder="Ej: Expensas"
+              className="input !py-1.5 !px-2 flex-1 min-w-[80px] text-[12px]"
+              value={c.label || ''}
+              onChange={e => onUpdate(i, 'label', e.target.value)}
+            />
+            <input
+              type="number"
+              placeholder="$"
+              className="input !py-1.5 !px-2 !w-24 text-right tabular-nums text-[12px]"
+              value={c.monto || ''}
+              onChange={e => onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))}
+            />
+            <select
+              className={`input !py-1.5 !px-2 !w-32 text-[12px] ${
+                c.paga === 'propietario' ? '!border-[#B8893A] !text-[#B8893A]' : ''
+              }`}
+              value={c.paga || 'inquilino'}
+              onChange={e => onUpdate(i, 'paga', e.target.value)}
+              title="¿Quién paga este concepto?"
+            >
+              <option value="inquilino">Paga inquilino</option>
+              <option value="propietario">Paga propietario</option>
+            </select>
+            <button type="button"
+              onClick={() => onRemove(i)}
+              className="p-1.5 text-muted hover:text-danger rounded-lg shrink-0"
+              title="Quitar">
+              <X size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Sugerencias rápidas */}
+      {disponibles.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <span className="text-[10px] text-muted uppercase tracking-widest mt-1.5 mr-1">
+            Agregar:
+          </span>
+          {disponibles.map(s => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onAdd({ label: s, monto: 0, paga: 'inquilino' })}
+              className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition"
+            >
+              + {s}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => onAdd()}
+            className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-dashed border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition"
+          >
+            + Otro…
+          </button>
+        </div>
+      )}
+
+      {(conceptos || []).length === 0 && (
+        <p className="text-[11px] text-muted mt-1">
+          Solo se cobrará el alquiler. Agregá expensas, tasas o servicios si corresponde.
+        </p>
+      )}
+    </div>
+  )
+}
+
+
 function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
   // Refacciones pendientes del inquilino para este contrato. Por defecto
   // las pre-seleccionamos todas para que el descuento aparezca calculado.
@@ -222,28 +326,55 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     .filter(r => refsSelected.has(r.id))
     .reduce((s, r) => s + (Number(r.monto) || 0), 0)
 
-  // Precarga: si el backend mandó componentes sugeridos (alquiler vigente
-  // del contrato + expensas y tasa municipal vigentes de la propiedad), los
-  // usamos. Fallback al monto_total para no romper compatibilidad.
+  // Precarga: los conceptos arrancan con valores sugeridos desde el contrato/
+  // propiedad. Cada concepto tiene su label, monto y quién paga (inquilino
+  // por default, se puede cambiar a propietario si el dueño lo banca aparte).
   const [form, setForm] = useState({
     monto_alquiler: item.monto_alquiler_sug ?? item.monto_total ?? 0,
-    monto_expensas: item.monto_expensas_sug ?? 0,
-    monto_tasas_municipales: item.monto_tasas_sug ?? 0,
-    monto_otros: 0,
+    conceptos: [
+      ...(item.monto_expensas_sug > 0
+        ? [{ label: 'Expensas', monto: item.monto_expensas_sug, paga: 'inquilino' }]
+        : []),
+      ...(item.monto_tasas_sug > 0
+        ? [{ label: 'Tasas municipales', monto: item.monto_tasas_sug, paga: 'inquilino' }]
+        : []),
+    ],
     fecha_pago: new Date().toISOString().slice(0, 10),
     notas: '',
   })
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
-  const set = k => e => setForm({ ...form, [k]: e.target.value })
-  const subtotal = ['monto_alquiler','monto_expensas','monto_tasas_municipales','monto_otros']
-    .reduce((s, k) => s + (Number(form[k]) || 0), 0)
-  const total = subtotal - descuentoRefs
-  // La comisión se calcula sólo sobre el alquiler. Los gastos pasantes
-  // (expensas, tasas, otros) se cobran al inquilino y se derivan a quien
-  // corresponda — no integran el neto al propietario.
+  const setAlquiler = (val) => setForm(f => ({ ...f, monto_alquiler: val }))
+  const setFecha = (val) => setForm(f => ({ ...f, fecha_pago: val }))
+  const setNotas = (val) => setForm(f => ({ ...f, notas: val }))
+
+  // Manejo de la lista dinámica de conceptos
+  const updateConcepto = (idx, campo, valor) => {
+    setForm(f => ({
+      ...f,
+      conceptos: f.conceptos.map((c, i) => i === idx ? { ...c, [campo]: valor } : c),
+    }))
+  }
+  const eliminarConcepto = (idx) => {
+    setForm(f => ({ ...f, conceptos: f.conceptos.filter((_, i) => i !== idx) }))
+  }
+  const agregarConcepto = (preset = null) => {
+    const nuevo = preset || { label: '', monto: 0, paga: 'inquilino' }
+    setForm(f => ({ ...f, conceptos: [...f.conceptos, nuevo] }))
+  }
+
+  // Cálculo: solo se cobra al inquilino lo que paga el inquilino + alquiler
+  const cobradoConceptosInq = (form.conceptos || [])
+    .filter(c => c.paga === 'inquilino')
+    .reduce((s, c) => s + (Number(c.monto) || 0), 0)
   const alquiler = Number(form.monto_alquiler) || 0
+  const subtotal = alquiler + cobradoConceptosInq
+  const total = subtotal - descuentoRefs
+  const cobradoPropietarioPaga = (form.conceptos || [])
+    .filter(c => c.paga === 'propietario')
+    .reduce((s, c) => s + (Number(c.monto) || 0), 0)
+  // La comisión se calcula sólo sobre el alquiler.
   const comision = (item.comision_porc || 0) * alquiler / 100
   const neto = alquiler - comision
 
@@ -255,11 +386,14 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
         periodo: mes,
         fecha_pago: form.fecha_pago || null,
         monto_alquiler: Number(form.monto_alquiler) || 0,
-        monto_expensas: Number(form.monto_expensas) || 0,
-        // El backend acepta los nombres legacy y los suma como tasas municipales
-        monto_municipal: Number(form.monto_tasas_municipales) || 0,
-        monto_impuestos: 0,
-        monto_otros: Number(form.monto_otros) || 0,
+        // Formato nuevo: lista granular con quién paga cada concepto
+        conceptos: (form.conceptos || [])
+          .filter(c => c.label?.trim() && Number(c.monto) > 0)
+          .map(c => ({
+            label: c.label.trim(),
+            monto: Number(c.monto),
+            paga: c.paga === 'propietario' ? 'propietario' : 'inquilino',
+          })),
         monto_descuento_refacciones: descuentoRefs,
         refacciones_aplicadas: Array.from(refsSelected),
         monto_total: total,
@@ -294,35 +428,32 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
             </div>
             <div>
               <label className="label">Fecha de pago</label>
-              <input className="input" type="date" value={form.fecha_pago} onChange={set('fecha_pago')} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label">Alquiler $</label>
-              <input className="input" type="number" value={form.monto_alquiler} onChange={set('monto_alquiler')} />
-            </div>
-            <div>
-              <label className="label">Expensas $</label>
-              <input className="input" type="number" value={form.monto_expensas} onChange={set('monto_expensas')} />
-            </div>
-            <div>
-              <label className="label">Tasas municipales $</label>
-              <input className="input" type="number"
-                value={form.monto_tasas_municipales}
-                onChange={set('monto_tasas_municipales')}
-                placeholder="ABL + alumbrado + inmobiliario" />
-            </div>
-            <div>
-              <label className="label">Otros conceptos $</label>
-              <input className="input" type="number" value={form.monto_otros} onChange={set('monto_otros')} />
+              <input className="input" type="date" value={form.fecha_pago}
+                onChange={e => setFecha(e.target.value)} />
             </div>
           </div>
 
           <div>
+            <label className="label">Alquiler $</label>
+            <input className="input" type="number" value={form.monto_alquiler}
+              onChange={e => setAlquiler(e.target.value)} />
+            <p className="text-[10px] text-muted mt-1">
+              Sobre este monto se calcula la comisión inmobiliaria ({item.comision_porc || 0}%).
+            </p>
+          </div>
+
+          {/* Conceptos dinámicos: expensas, tasas, luz, gas, etc. con quién paga */}
+          <ConceptosEditables
+            conceptos={form.conceptos}
+            onUpdate={updateConcepto}
+            onRemove={eliminarConcepto}
+            onAdd={agregarConcepto}
+          />
+
+          <div>
             <label className="label">Notas</label>
-            <textarea rows={2} className="input resize-none" value={form.notas} onChange={set('notas')} />
+            <textarea rows={2} className="input resize-none" value={form.notas}
+              onChange={e => setNotas(e.target.value)} />
           </div>
 
           {/* Refacciones pendientes a descontar */}
@@ -369,6 +500,12 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
               </>
             )}
             <div className="flex justify-between"><span className="text-muted">Total cobrado al inquilino</span><span className="font-semibold">{fmtMoney(total)}</span></div>
+            {cobradoPropietarioPaga > 0 && (
+              <div className="flex justify-between text-[11px] text-muted/70 italic">
+                <span>+ A cargo del propietario (informativo)</span>
+                <span>{fmtMoney(cobradoPropietarioPaga)}</span>
+              </div>
+            )}
             <div className="flex justify-between"><span className="text-muted">Alquiler base</span><span>{fmtMoney(alquiler)}</span></div>
             <div className="flex justify-between"><span className="text-muted">Comisión ({item.comision_porc || 0}% s/ alquiler)</span><span>− {fmtMoney(comision)}</span></div>
             <div className="border-t border-border pt-1.5 flex justify-between font-semibold"><span>Neto al propietario</span><span className="text-[#B8893A]">{fmtMoney(neto)}</span></div>
