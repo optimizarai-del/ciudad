@@ -484,10 +484,23 @@ function ModalMarcar({ pago, onClose, onSaved }) {
     } finally { setLoading(false) }
   }
 
+  // Parsear conceptos del JSON granular (si existe)
+  let conceptos = []
+  if (pago.detalle_conceptos) {
+    try { conceptos = JSON.parse(pago.detalle_conceptos) } catch {}
+  }
+  const conceptosInquilino = conceptos.filter(c => c.paga === 'inquilino')
+  const conceptosPropietario = conceptos.filter(c => c.paga === 'propietario')
+  const totalCobradoAlquiler = pago.monto_alquiler || 0
+  const totalCobradoConceptos = conceptosInquilino.reduce((s, c) => s + (Number(c.monto) || 0), 0)
+  const totalCobradoInquilino = totalCobradoAlquiler + totalCobradoConceptos
+  const comision = (totalCobradoAlquiler * (pago.comision_porc || 0)) / 100
+  const totalAEntregar = pago.mi_parte ?? pago.neto_a_pagar
+
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto"
       onClick={onClose}>
-      <div className="card p-6 sm:p-8 w-full max-w-md shadow-lift animate-scale-in my-6"
+      <div className="card p-6 sm:p-8 w-full max-w-lg shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-5">
           <div>
@@ -498,6 +511,72 @@ function ModalMarcar({ pago, onClose, onSaved }) {
             <p className="text-[11px] text-muted/70">{pago.propiedad_direccion}</p>
           </div>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
+        </div>
+
+        {/* Desglose detallado: cómo se compone lo que recibe el propietario */}
+        <div className="rounded-2xl border border-border dark:border-[#2A2A2A] bg-neutral-50 dark:bg-[#141414] p-4 mb-5">
+          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted mb-3">
+            Desglose
+          </p>
+          <div className="space-y-1.5 text-[12px]">
+            {/* Conceptos cobrados al inquilino */}
+            <div className="flex justify-between">
+              <span className="text-muted">Alquiler</span>
+              <span className="tabular-nums">{fmt(totalCobradoAlquiler)}</span>
+            </div>
+            {conceptosInquilino.map((c, i) => (
+              <div key={i} className="flex justify-between text-muted">
+                <span>{c.label}</span>
+                <span className="tabular-nums">{fmt(c.monto)}</span>
+              </div>
+            ))}
+            {totalCobradoConceptos > 0 && (
+              <div className="border-t border-border pt-1.5 flex justify-between font-medium">
+                <span>Total cobrado al inquilino</span>
+                <span className="tabular-nums">{fmt(totalCobradoInquilino)}</span>
+              </div>
+            )}
+
+            {/* Comisión */}
+            <div className="flex justify-between text-warn pt-1.5">
+              <span>Menos comisión inmobiliaria ({pago.comision_porc || 0}% s/alquiler)</span>
+              <span className="tabular-nums">− {fmt(comision)}</span>
+            </div>
+
+            {/* Pasantes que se derivan a otros (no integran neto al propietario) */}
+            {totalCobradoConceptos > 0 && (
+              <div className="text-[10px] text-muted/70 italic mt-1">
+                Las {conceptosInquilino.map(c => c.label).join(' / ').toLowerCase()} se cobran al inquilino y se derivan al consorcio/municipio — no integran lo que recibe el propietario.
+              </div>
+            )}
+
+            {/* Total a entregar */}
+            <div className="border-t-2 border-[#B8893A]/40 pt-2 mt-2 flex justify-between text-[14px] font-bold">
+              <span>TOTAL A ENTREGAR</span>
+              <span className="text-[#B8893A] tabular-nums">{fmt(totalAEntregar)}</span>
+            </div>
+
+            {pago.mi_porcentaje != null && pago.mi_porcentaje < 100 && (
+              <p className="text-[10px] text-muted text-right">
+                {pago.mi_porcentaje}% de {fmt(pago.neto_a_pagar)} (neto total)
+              </p>
+            )}
+
+            {/* A cargo del propietario (informativo) */}
+            {conceptosPropietario.length > 0 && (
+              <div className="border-t border-border pt-2 mt-2">
+                <p className="text-[10px] uppercase tracking-widest font-semibold text-[#B8893A] mb-1">
+                  A cargo del propietario (no descuenta)
+                </p>
+                {conceptosPropietario.map((c, i) => (
+                  <div key={i} className="flex justify-between text-[#B8893A]">
+                    <span>{c.label}</span>
+                    <span className="tabular-nums">{fmt(c.monto)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <form onSubmit={submit} className="space-y-4">
