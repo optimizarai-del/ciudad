@@ -144,6 +144,22 @@ def _serializar_pago(pago: models.Pago) -> dict:
     inquilino = contrato.inquilino if contrato else None
     neto = _calcular_neto(pago, contrato)
     split = _split_neto_por_copropietarios(pago, neto)
+    # Refacciones que se descontaron en este pago — las mostramos en el
+    # desglose del modal de liquidación para que el operador vea por qué
+    # el monto cobrado al inquilino fue menor.
+    from sqlalchemy.orm import object_session
+    sess = object_session(pago)
+    refacciones_aplicadas = []
+    if sess:
+        refs = sess.query(models.Refaccion).filter_by(pago_id=pago.id).all()
+        for r in refs:
+            refacciones_aplicadas.append({
+                "id": r.id,
+                "descripcion": r.descripcion,
+                "monto": r.monto,
+                "fecha": r.fecha.isoformat() if r.fecha else None,
+                "pagador": r.pagador.value if hasattr(r.pagador, "value") else r.pagador,
+            })
     return {
         "pago_id": pago.id,
         "periodo": pago.periodo,
@@ -154,6 +170,7 @@ def _serializar_pago(pago: models.Pago) -> dict:
         "monto_municipal": pago.monto_municipal or 0,
         "monto_otros": pago.monto_otros or 0,
         "detalle_conceptos": pago.detalle_conceptos,
+        "refacciones_aplicadas": refacciones_aplicadas,
         "comision_porc": float(contrato.comision_porc or 0) if contrato else 0.0,
         "neto_a_pagar": neto,
         # estado de liquidación

@@ -584,6 +584,24 @@ function ModalMarcar({ pago, onClose, onSaved }) {
                 ))}
               </div>
             )}
+
+            {/* Refacciones aplicadas a este pago */}
+            {(pago.refacciones_aplicadas || []).length > 0 && (
+              <div className="border-t border-border pt-2 mt-2">
+                <p className="text-[10px] uppercase tracking-widest font-semibold text-success mb-1">
+                  Refacciones aplicadas en este pago
+                </p>
+                {pago.refacciones_aplicadas.map((r, i) => (
+                  <div key={i} className="flex justify-between text-success">
+                    <span className="truncate">{r.descripcion}</span>
+                    <span className="tabular-nums">− {fmt(r.monto)}</span>
+                  </div>
+                ))}
+                <p className="text-[10px] text-muted/70 italic mt-1">
+                  Las refacciones del inquilino ya descontadas del monto cobrado.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
