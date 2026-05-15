@@ -484,10 +484,18 @@ function ModalMarcar({ pago, onClose, onSaved }) {
     } finally { setLoading(false) }
   }
 
-  // Parsear conceptos del JSON granular (si existe)
+  // Parsear conceptos del JSON granular (si existe). Si el pago es viejo
+  // (no tiene detalle_conceptos), reconstruir desde los campos legacy
+  // monto_expensas/municipal/otros para que el desglose se vea SIEMPRE.
   let conceptos = []
   if (pago.detalle_conceptos) {
     try { conceptos = JSON.parse(pago.detalle_conceptos) } catch {}
+  }
+  if (conceptos.length === 0) {
+    // Fallback legacy: cualquier monto > 0 lo asumimos como pasante del inquilino
+    if (pago.monto_expensas > 0) conceptos.push({ label: 'Expensas', monto: pago.monto_expensas, paga: 'inquilino' })
+    if (pago.monto_municipal > 0) conceptos.push({ label: 'Tasas municipales', monto: pago.monto_municipal, paga: 'inquilino' })
+    if (pago.monto_otros > 0) conceptos.push({ label: 'Otros conceptos', monto: pago.monto_otros, paga: 'inquilino' })
   }
   const conceptosInquilino = conceptos.filter(c => c.paga === 'inquilino')
   const conceptosPropietario = conceptos.filter(c => c.paga === 'propietario')
