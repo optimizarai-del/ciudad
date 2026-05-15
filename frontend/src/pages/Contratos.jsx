@@ -26,7 +26,11 @@ const TIPO_LABEL = {
 }
 
 const empty = {
-  codigo:'', tipo:'alquiler_vivienda', estado:'borrador',
+  // Default 'vigente' porque es lo más usado por inmobiliarias: cuando creás
+  // un contrato típicamente ya está activo. Para que aparezca en Cobranza,
+  // Liquidaciones y demás flujos operativos, el estado tiene que ser 'vigente'.
+  // 'borrador' es para guardar un draft que todavía no se firmó.
+  codigo:'', tipo:'alquiler_vivienda', estado:'vigente',
   propiedad_id:'', inquilino_id:'',
   fecha_inicio:'', fecha_fin:'',
   monto_inicial:'', deposito:'',
@@ -468,6 +472,17 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
               <select className="input" value={form.estado} onChange={set('estado')}>
                 {ESTADOS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
+              <p className="text-[11px] text-muted mt-1">
+                {form.estado === 'vigente'
+                  ? '✓ Aparecerá en Cobranza para gestionar pagos.'
+                  : form.estado === 'borrador'
+                  ? '⚠ Como borrador NO aparece en Cobranza. Cambialo a "vigente" cuando se firme.'
+                  : form.estado === 'vencido'
+                  ? 'Cerrado por vencimiento. No genera nuevos cobros.'
+                  : form.estado === 'rescindido'
+                  ? 'Cerrado anticipadamente. No genera nuevos cobros.'
+                  : 'Reservado pero no firmado.'}
+              </p>
             </div>
           </div>
 
