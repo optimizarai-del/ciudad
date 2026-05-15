@@ -212,17 +212,9 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
         </p>
       </div>
 
-      {/* Propietario */}
-      <Seccion titulo="Propietario">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Nombre" value={datos.propietario?.nombre} onChange={v => setNested('propietario.nombre', v)} />
-          <Field label="Apellido" value={datos.propietario?.apellido} onChange={v => setNested('propietario.apellido', v)} />
-          <Field label="Razón social" value={datos.propietario?.razon_social} onChange={v => setNested('propietario.razon_social', v)} />
-          <Field label="DNI / CUIT" value={datos.propietario?.documento} onChange={v => setNested('propietario.documento', v)} />
-          <Field label="Email" value={datos.propietario?.email} onChange={v => setNested('propietario.email', v)} type="email" />
-          <Field label="Teléfono" value={datos.propietario?.telefono} onChange={v => setNested('propietario.telefono', v)} />
-        </div>
-      </Seccion>
+      {/* Propietarios: lista — el contrato puede tener 1 o varios */}
+      <PropietariosSection datos={datos} setNested={setNested} />
+
 
       {/* Inquilino */}
       <Seccion titulo="Inquilino / Comprador">
@@ -312,6 +304,113 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
   )
 }
 
+/**
+ * Sección de propietarios extraídos del PDF. Acepta múltiples co-propietarios.
+ * El array es `datos.propietarios` (formato nuevo). Mantiene compat con el
+ * formato viejo donde había un solo objeto `datos.propietario`.
+ */
+function PropietariosSection({ datos, setNested }) {
+  // Normalizar a array si vino como objeto único (compat)
+  const lista = datos.propietarios || (datos.propietario ? [datos.propietario] : [])
+
+  const updateAt = (idx, field, value) => {
+    const copy = lista.map((p, i) => i === idx ? { ...p, [field]: value === '' ? null : value } : p)
+    setNested('propietarios', copy)
+  }
+  const eliminar = (idx) => {
+    setNested('propietarios', lista.filter((_, i) => i !== idx))
+  }
+  const agregar = () => {
+    setNested('propietarios', [
+      ...lista,
+      { nombre: '', apellido: '', razon_social: null, documento: null,
+        email: null, telefono: null, porcentaje: null },
+    ])
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">
+          Propietarios <span className="text-muted/70 font-normal lowercase tracking-normal">({lista.length})</span>
+        </p>
+        <button type="button" onClick={agregar}
+          className="text-[11px] text-primary dark:text-white hover:underline font-medium">
+          + Agregar propietario
+        </button>
+      </div>
+
+      {lista.length === 0 && (
+        <div className="rounded-2xl bg-warn/5 border border-warn/20 p-4 text-[12px] text-warn">
+          La IA no detectó ningún propietario en el PDF. Agregá al menos uno antes de confirmar.
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {lista.map((p, idx) => (
+          <div key={idx} className="rounded-2xl bg-neutral-50 dark:bg-[#141414] border border-border dark:border-[#2A2A2A] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[12px] font-semibold">
+                Propietario #{idx + 1}
+                {idx === 0 && <span className="ml-2 text-[10px] text-[#B8893A]">PRINCIPAL</span>}
+              </p>
+              {lista.length > 1 && (
+                <button type="button" onClick={() => eliminar(idx)}
+                  className="text-[11px] text-danger hover:underline">
+                  Quitar
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Nombre</label>
+                <input className="input" value={p.nombre || ''}
+                  onChange={e => updateAt(idx, 'nombre', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Apellido</label>
+                <input className="input" value={p.apellido || ''}
+                  onChange={e => updateAt(idx, 'apellido', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Razón social</label>
+                <input className="input" value={p.razon_social || ''}
+                  onChange={e => updateAt(idx, 'razon_social', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">DNI / CUIT</label>
+                <input className="input" value={p.documento || ''}
+                  onChange={e => updateAt(idx, 'documento', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input className="input" type="email" value={p.email || ''}
+                  onChange={e => updateAt(idx, 'email', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Teléfono</label>
+                <input className="input" value={p.telefono || ''}
+                  onChange={e => updateAt(idx, 'telefono', e.target.value)} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="label">% copropiedad (opcional)</label>
+                <input className="input !max-w-[120px]" type="number" min="0" max="100" step="0.01"
+                  placeholder="—"
+                  value={p.porcentaje ?? ''}
+                  onChange={e => updateAt(idx, 'porcentaje', e.target.value === '' ? null : Number(e.target.value))} />
+                <p className="text-[10px] text-muted mt-1">
+                  Dejalo vacío si todos cobran por igual (división equitativa en liquidaciones).
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
 function Seccion({ titulo, children }) {
   return (
     <div>
@@ -343,7 +442,17 @@ function DoneStep({ resumen, onClose }) {
       </p>
 
       <div className="text-left card p-4 mb-4">
-        <Row label="Propietario" info={resumen.propietario} />
+        {(resumen.propietarios || []).map((p, i) => (
+          <Row
+            key={p.id || i}
+            label={`Propietario${(resumen.propietarios?.length || 0) > 1 ? ` ${i + 1}` : ''}${p.porcentaje ? ` (${p.porcentaje}%)` : ''}`}
+            info={p}
+          />
+        ))}
+        {/* Compat con respuesta vieja */}
+        {!resumen.propietarios && resumen.propietario && (
+          <Row label="Propietario" info={resumen.propietario} />
+        )}
         {resumen.inquilino?.id && <Row label="Inquilino" info={resumen.inquilino} />}
         <Row label="Propiedad" info={resumen.propiedad} />
       </div>

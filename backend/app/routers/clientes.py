@@ -98,21 +98,41 @@ def eliminar(
             f"Eliminá o reasigná esos contratos primero.",
         )
 
-    # Si es propietario y tiene propiedades, decidir según `forzar`
+    # Si es propietario y tiene propiedades, decidir según `forzar`.
+    # Chequeamos AMBAS fuentes: el legacy `propietario_id` y la M2M nueva.
     if obj.rol == models.ClienteRol.propietario:
-        props = db.query(models.Propiedad).filter_by(propietario_id=id).all()
-        if props and not forzar:
+        props_legacy = db.query(models.Propiedad).filter_by(propietario_id=id).all()
+        m2m_rows = db.query(models.PropiedadPropietario).filter_by(cliente_id=id).all()
+        # Total único de propiedades donde figura
+        prop_ids = set(p.id for p in props_legacy) | set(r.propiedad_id for r in m2m_rows)
+        if prop_ids and not forzar:
             raise HTTPException(
                 409,
-                f"Este propietario tiene {len(props)} propiedad"
-                f"{'es' if len(props) != 1 else ''} asignada"
-                f"{'s' if len(props) != 1 else ''}. "
-                f"Pasá ?forzar=true para desvincularlas y eliminar, "
+                f"Este propietario figura en {len(prop_ids)} propiedad"
+                f"{'es' if len(prop_ids) != 1 else ''}. "
+                f"Pasá ?forzar=true para desvincularlo, "
                 f"o reasigná las propiedades primero.",
             )
-        # Desvincular propiedades
-        for p in props:
+        # Desvincular: borrar filas de la M2M y limpiar legacy
+        for p in props_legacy:
             p.propietario_id = None
+        for r in m2m_rows:
+            db.delete(r)
+        db.flush()
+        # Si la propiedad quedó sin nadie en la M2M pero tenía otros co-propietarios,
+        # promover al primero como principal.
+        for pid in prop_ids:
+            queda = db.query(models.PropiedadPropietario).filter_by(propiedad_id=pid).first()
+            if queda:
+                # Promover si no había principal
+                hay_principal = db.query(models.PropiedadPropietario).filter_by(
+                    propiedad_id=pid, es_principal=True
+                ).first()
+                if not hay_principal:
+                    queda.es_principal = True
+                    prop = db.query(models.Propiedad).filter_by(id=pid).first()
+                    if prop:
+                        prop.propietario_id = queda.cliente_id
         db.flush()
 
     db.delete(obj)

@@ -56,12 +56,94 @@ def _propietario_dict(c: models.Cliente | None) -> dict:
     }
 
 
+def _split_neto_por_copropietarios(pago: models.Pago, neto_total: float) -> list[dict]:
+    """Divide el neto total entre los co-propietarios de la propiedad según
+    el porcentaje configurado en la pivote `propiedad_propietarios`.
+
+    Reglas:
+    - Si la propiedad tiene 1 solo dueño: 100% para él.
+    - Si tiene varios y todos tienen porcentaje seteado: respeta los porcentajes
+      (los normaliza si no suman 100, evitando que el operador pague de más).
+    - Si ninguno tiene porcentaje: división equitativa.
+    - Si algunos sí y otros no: ignora los porcentajes parciales y divide en
+      partes iguales (más seguro que mezclar).
+    """
+    contrato = pago.contrato
+    prop = contrato.propiedad if contrato else None
+    if not prop:
+        return [{
+            "cliente_id": None, "nombre": "Sin propietario",
+            "porcentaje_efectivo": 100.0, "neto_parte": neto_total,
+        }]
+    co_props = list(prop.propietarios or [])
+    if not co_props:
+        # Fallback al legacy propietario_id
+        if prop.propietario:
+            return [{
+                "cliente_id": prop.propietario.id,
+                "nombre": (prop.propietario.razon_social or
+                           f"{prop.propietario.nombre} {prop.propietario.apellido or ''}".strip()),
+                "porcentaje_efectivo": 100.0,
+                "neto_parte": neto_total,
+            }]
+        return [{
+            "cliente_id": None, "nombre": "Sin propietario",
+            "porcentaje_efectivo": 100.0, "neto_parte": neto_total,
+        }]
+
+    if len(co_props) == 1:
+        c = co_props[0].cliente
+        return [{
+            "cliente_id": c.id if c else None,
+            "nombre": (c.razon_social or
+                       f"{c.nombre} {c.apellido or ''}".strip()) if c else "Sin nombre",
+            "porcentaje_efectivo": 100.0,
+            "neto_parte": neto_total,
+        }]
+
+    # Múltiples co-propietarios
+    todos_con_porc = all(pp.porcentaje is not None for pp in co_props)
+    suma = sum((pp.porcentaje or 0) for pp in co_props)
+    if todos_con_porc and suma > 0:
+        # Normalizar a 100 si la suma no es exactamente 100
+        factor = 100.0 / suma
+        partes = []
+        for pp in co_props:
+            porc_norm = (pp.porcentaje or 0) * factor
+            c = pp.cliente
+            partes.append({
+                "cliente_id": c.id if c else None,
+                "nombre": (c.razon_social or
+                           f"{c.nombre} {c.apellido or ''}".strip()) if c else "Sin nombre",
+                "porcentaje_efectivo": round(porc_norm, 2),
+                "neto_parte": round(neto_total * porc_norm / 100.0, 2),
+            })
+        return partes
+
+    # Sin porcentajes (o mezclados) → división equitativa
+    n = len(co_props)
+    porc_cada = 100.0 / n
+    parte = round(neto_total / n, 2)
+    return [
+        {
+            "cliente_id": pp.cliente.id if pp.cliente else None,
+            "nombre": (pp.cliente.razon_social or
+                       f"{pp.cliente.nombre} {pp.cliente.apellido or ''}".strip())
+                      if pp.cliente else "Sin nombre",
+            "porcentaje_efectivo": round(porc_cada, 2),
+            "neto_parte": parte,
+        }
+        for pp in co_props
+    ]
+
+
 def _serializar_pago(pago: models.Pago) -> dict:
     contrato = pago.contrato
     prop = contrato.propiedad if contrato else None
     propietario = prop.propietario if prop else None
     inquilino = contrato.inquilino if contrato else None
     neto = _calcular_neto(pago, contrato)
+    split = _split_neto_por_copropietarios(pago, neto)
     return {
         "pago_id": pago.id,
         "periodo": pago.periodo,
@@ -88,7 +170,12 @@ def _serializar_pago(pago: models.Pago) -> dict:
             f"{inquilino.nombre} {inquilino.apellido or ''}".strip()
             if inquilino else None
         ),
+        # Propietario principal (legacy) — para compatibilidad con UI vieja
         "propietario": _propietario_dict(propietario),
+        # Split entre co-propietarios: cada uno con porcentaje y monto que le toca.
+        # Si hay 1 solo, viene una entrada con 100%. Si hay varios, viene el
+        # detalle según porcentajes de la pivote.
+        "co_propietarios": split,
     }
 
 
@@ -134,27 +221,46 @@ def listar(
     rows = q.order_by(models.Pago.fecha_pago.desc().nullslast(), models.Pago.id.desc()).all()
     items = [_serializar_pago(p) for p in rows]
 
-    # Agrupado por propietario para que el operador pueda revisar de un vistazo
-    # cuánto le debemos a cada uno
+    # Agrupado por co-propietario: si una propiedad tiene 2 dueños, el pago
+    # aparece en AMBOS grupos con su parte correspondiente. Esto es lo que
+    # el operador necesita: "¿cuánto le debo a cada propietario?".
     grupos = {}
     for it in items:
-        pid = it["propietario"]["id"] or 0
-        if pid not in grupos:
-            grupos[pid] = {
-                "propietario": it["propietario"],
-                "items": [],
-                "total_neto_pendiente": 0,
-                "total_neto_liquidado": 0,
-                "pendientes": 0,
-                "liquidados": 0,
-            }
-        grupos[pid]["items"].append(it)
-        if it["liquidado"]:
-            grupos[pid]["liquidados"] += 1
-            grupos[pid]["total_neto_liquidado"] += it["monto_liquidado"] or it["neto_a_pagar"]
-        else:
-            grupos[pid]["pendientes"] += 1
-            grupos[pid]["total_neto_pendiente"] += it["neto_a_pagar"]
+        for co in it["co_propietarios"]:
+            pid = co["cliente_id"] or 0
+            if pid not in grupos:
+                grupos[pid] = {
+                    "propietario": {
+                        "id": co["cliente_id"],
+                        "nombre": co["nombre"],
+                        # Datos extra del cliente principal de ese ítem si coincide
+                        "documento": (it["propietario"].get("documento")
+                                      if it["propietario"]["id"] == co["cliente_id"] else None),
+                        "email": (it["propietario"].get("email")
+                                  if it["propietario"]["id"] == co["cliente_id"] else None),
+                    },
+                    "items": [],
+                    "total_neto_pendiente": 0,
+                    "total_neto_liquidado": 0,
+                    "pendientes": 0,
+                    "liquidados": 0,
+                }
+            # Item enriquecido con la parte específica de este co-propietario
+            item_co = dict(it)
+            item_co["mi_porcentaje"] = co["porcentaje_efectivo"]
+            item_co["mi_parte"] = co["neto_parte"]
+            grupos[pid]["items"].append(item_co)
+            if it["liquidado"]:
+                grupos[pid]["liquidados"] += 1
+                # Si está liquidado, prorrateamos el monto realmente entregado
+                # según el porcentaje (asume que se entregó proporcional)
+                entregado_total = it["monto_liquidado"] or it["neto_a_pagar"]
+                grupos[pid]["total_neto_liquidado"] += round(
+                    entregado_total * co["porcentaje_efectivo"] / 100.0, 2
+                )
+            else:
+                grupos[pid]["pendientes"] += 1
+                grupos[pid]["total_neto_pendiente"] += co["neto_parte"]
 
     grupos_lista = sorted(grupos.values(), key=lambda g: g["total_neto_pendiente"], reverse=True)
 

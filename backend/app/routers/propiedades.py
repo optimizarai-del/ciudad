@@ -14,14 +14,113 @@ router = APIRouter(prefix="/api/propiedades", tags=["propiedades"])
 
 
 def _to_out(p: models.Propiedad) -> dict:
-    """Serialización con propietario_nombre para facilitar búsqueda/render en UI."""
+    """Serialización con propietario_nombre (legacy) y propietarios_lista (M2M)."""
     d = {c.name: getattr(p, c.name) for c in p.__table__.columns}
+    # Legacy: nombre del propietario principal
     nombre = None
     if p.propietario:
         partes = [p.propietario.nombre or "", p.propietario.apellido or ""]
-        nombre = " ".join([s for s in partes if s]).strip() or None
+        nombre = (p.propietario.razon_social or
+                  " ".join([s for s in partes if s]).strip() or None)
     d["propietario_nombre"] = nombre
+
+    # M2M: lista de todos los co-propietarios
+    lista = []
+    for pp in (p.propietarios or []):
+        c = pp.cliente
+        if not c:
+            continue
+        partes = [c.nombre or "", c.apellido or ""]
+        nombre_co = (c.razon_social or
+                     " ".join([s for s in partes if s]).strip() or "Sin nombre")
+        lista.append({
+            "cliente_id": c.id,
+            "nombre": nombre_co,
+            "documento": c.documento,
+            "email": c.email,
+            "porcentaje": pp.porcentaje,
+            "es_principal": pp.es_principal,
+        })
+    d["propietarios_lista"] = lista
     return d
+
+
+def _sincronizar_propietarios(
+    db: Session,
+    propiedad: models.Propiedad,
+    propietarios: list[dict] | None,
+    propietario_id_legacy: int | None,
+):
+    """Sincroniza la pivote `propiedad_propietarios` según lo que mande el
+    frontend.
+
+    Reglas:
+    - Si viene `propietarios` (lista) → es la fuente de verdad, reemplaza
+      la pivote completa. Cada item: {cliente_id, porcentaje?, es_principal?}.
+    - Si viene solo `propietario_id` (legacy) → si la pivote está vacía,
+      crea una fila con ese cliente. Si ya hay filas, no toca nada (el
+      frontend nuevo usa propietarios=[]).
+    - El campo `Propiedad.propietario_id` se mantiene sincronizado con el
+      es_principal de la pivote para compatibilidad.
+    """
+    if propietarios is not None:
+        # Borrar todas las filas actuales y volver a crear
+        db.query(models.PropiedadPropietario).filter_by(
+            propiedad_id=propiedad.id
+        ).delete()
+        db.flush()
+        if propietarios:
+            principal_set = False
+            for i, item in enumerate(propietarios):
+                cid = item.get("cliente_id") or item.get("id")
+                if not cid:
+                    continue
+                porc = item.get("porcentaje")
+                if porc in ("", None):
+                    porc = None
+                else:
+                    try: porc = float(porc)
+                    except Exception: porc = None
+                es_principal = bool(item.get("es_principal", i == 0 and not principal_set))
+                if es_principal:
+                    principal_set = True
+                db.add(models.PropiedadPropietario(
+                    propiedad_id=propiedad.id,
+                    cliente_id=int(cid),
+                    porcentaje=porc,
+                    es_principal=es_principal,
+                ))
+            db.flush()
+            # Sincronizar el legacy propietario_id con el es_principal
+            principal = (
+                db.query(models.PropiedadPropietario)
+                  .filter_by(propiedad_id=propiedad.id, es_principal=True)
+                  .first()
+            )
+            if not principal:
+                principal = (
+                    db.query(models.PropiedadPropietario)
+                      .filter_by(propiedad_id=propiedad.id)
+                      .first()
+                )
+                if principal:
+                    principal.es_principal = True
+                    db.flush()
+            propiedad.propietario_id = principal.cliente_id if principal else None
+        else:
+            propiedad.propietario_id = None
+    elif propietario_id_legacy is not None:
+        # Modo compat: crear una fila pivote si no existe ninguna
+        existe = db.query(models.PropiedadPropietario).filter_by(
+            propiedad_id=propiedad.id
+        ).first()
+        if not existe:
+            db.add(models.PropiedadPropietario(
+                propiedad_id=propiedad.id,
+                cliente_id=propietario_id_legacy,
+                es_principal=True,
+            ))
+            db.flush()
 
 
 def _scope(db: Session, user):
@@ -37,9 +136,15 @@ def listar(db: Session = Depends(get_db), user=Depends(get_current_user)):
 
 @router.post("/", response_model=schemas.PropiedadOut)
 def crear(data: schemas.PropiedadCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    obj = models.Propiedad(**data.model_dump())
+    payload = data.model_dump()
+    # Extraer lista nueva y propietario legacy antes de instanciar el modelo
+    propietarios_lista = payload.pop("propietarios", None)
+    propietario_legacy = payload.get("propietario_id")
+    obj = models.Propiedad(**payload)
     obj.is_demo = workspace_flag(user)
-    db.add(obj); db.commit(); db.refresh(obj)
+    db.add(obj); db.flush()
+    _sincronizar_propietarios(db, obj, propietarios_lista, propietario_legacy)
+    db.commit(); db.refresh(obj)
     return _to_out(obj)
 
 
@@ -54,10 +159,17 @@ def detalle(id: int, db: Session = Depends(get_db), user=Depends(get_current_use
 def editar(id: int, data: schemas.PropiedadCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     obj = _scope(db, user).filter_by(id=id).first()
     if not obj: raise HTTPException(404, "No encontrada")
-    for k, v in data.model_dump(exclude_unset=True).items():
+    payload = data.model_dump(exclude_unset=True)
+    propietarios_lista = payload.pop("propietarios", None)
+    propietario_legacy = payload.get("propietario_id")
+    for k, v in payload.items():
         if k == "is_demo":  # no se puede cambiar el workspace via API
             continue
         setattr(obj, k, v)
+    db.flush()
+    # Solo tocamos la pivote si el frontend mandó algo explícito
+    if propietarios_lista is not None or "propietario_id" in payload:
+        _sincronizar_propietarios(db, obj, propietarios_lista, propietario_legacy)
     db.commit(); db.refresh(obj)
     return _to_out(obj)
 

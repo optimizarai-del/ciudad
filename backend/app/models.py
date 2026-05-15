@@ -148,11 +148,42 @@ class Propiedad(Base):
     # JSON con últimos cuotas/montos devueltos por la municipalidad
     tasa_detalle = Column(Text, nullable=True)
 
+    # `propietario_id` queda como referencia al propietario PRINCIPAL para
+    # mantener compatibilidad con código viejo. Cuando una propiedad tiene
+    # múltiples dueños se llena con el primero (es_principal=True) de la
+    # tabla pivote `propiedad_propietarios`. Toda la lista de dueños vive en
+    # esa tabla con porcentaje opcional por co-propietario.
     propietario_id = Column(Integer, ForeignKey("clientes.id"))
     propietario = relationship("Cliente", foreign_keys=[propietario_id])
+    propietarios = relationship(
+        "PropiedadPropietario",
+        back_populates="propiedad",
+        cascade="all, delete-orphan",
+        order_by="desc(PropiedadPropietario.es_principal)",
+    )
     # Aislamiento de workspace: True = pertenece al sandbox demo, False = data real.
     is_demo = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PropiedadPropietario(Base):
+    """Tabla pivote propiedad ↔ cliente (rol propietario).
+
+    Permite que una propiedad tenga varios dueños con porcentaje opcional
+    (ej: hermanos 50/50). Si no se asignan porcentajes explícitos, las
+    liquidaciones dividen el neto en partes iguales.
+    """
+    __tablename__ = "propiedad_propietarios"
+    id = Column(Integer, primary_key=True)
+    propiedad_id = Column(Integer, ForeignKey("propiedades.id", ondelete="CASCADE"), nullable=False, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id", ondelete="CASCADE"), nullable=False, index=True)
+    porcentaje = Column(Float, nullable=True)        # null = división equitativa
+    es_principal = Column(Boolean, default=False, nullable=False)
+    notas = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    propiedad = relationship("Propiedad", back_populates="propietarios")
+    cliente = relationship("Cliente")
 
 
 class Cliente(Base):

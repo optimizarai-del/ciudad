@@ -400,6 +400,46 @@ def _migrar_etapa_venta():
 
 
 @app.on_event("startup")
+def _crear_tabla_propiedad_propietarios():
+    """Crea la tabla pivote propiedad↔propietario y migra los registros
+    existentes (Propiedad.propietario_id) a una fila pivote es_principal=true.
+    Idempotente.
+    """
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+
+    db = SessionLocal()
+    try:
+        ins = inspect(engine)
+        if "propiedad_propietarios" not in ins.get_table_names(schema=schema):
+            from app.models import PropiedadPropietario  # noqa
+            PropiedadPropietario.__table__.create(engine, checkfirst=True)
+            print("[migrar] tabla propiedad_propietarios creada")
+
+        # Backfill: para cada propiedad con propietario_id que no tenga aún
+        # ninguna fila pivote, crear una con es_principal=True.
+        # Postgres + SQLite ambos soportan esta forma.
+        db.execute(text(f"""
+            INSERT INTO {qual}propiedad_propietarios (propiedad_id, cliente_id, es_principal, created_at)
+            SELECT p.id, p.propietario_id, TRUE, CURRENT_TIMESTAMP
+            FROM {qual}propiedades p
+            WHERE p.propietario_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM {qual}propiedad_propietarios pp
+                  WHERE pp.propiedad_id = p.id
+              )
+        """))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[migrar] propiedad_propietarios: {e}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _crear_tabla_refacciones():
     """Defensivo: si por algún motivo `create_all` no dejó la tabla creada,
     la creamos manualmente. Idempotente."""

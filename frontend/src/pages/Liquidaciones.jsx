@@ -333,11 +333,18 @@ function ItemLiquidacion({ item, onMarcar, onRevertir }) {
       </div>
 
       <div className="text-right shrink-0">
-        <p className="text-[10px] text-muted uppercase tracking-widest">Neto</p>
+        <p className="text-[10px] text-muted uppercase tracking-widest">Su parte</p>
         <p className={`text-[15px] font-bold tabular-nums ${item.liquidado ? 'text-success' : 'text-[#B8893A]'}`}>
-          {fmt(item.liquidado ? (item.monto_liquidado || item.neto_a_pagar) : item.neto_a_pagar)}
+          {fmt(item.liquidado
+            ? Math.round((item.monto_liquidado || item.neto_a_pagar) * (item.mi_porcentaje || 100) / 100)
+            : (item.mi_parte ?? item.neto_a_pagar))}
         </p>
-        {item.comision_porc > 0 && (
+        {item.mi_porcentaje != null && item.mi_porcentaje < 100 && (
+          <p className="text-[10px] text-muted">
+            {item.mi_porcentaje}% de {fmt(item.neto_a_pagar)}
+          </p>
+        )}
+        {item.comision_porc > 0 && (!item.mi_porcentaje || item.mi_porcentaje >= 100) && (
           <p className="text-[10px] text-muted">comisión {item.comision_porc}%</p>
         )}
       </div>
@@ -424,6 +431,23 @@ function ModalMarcar({ pago, onClose, onSaved }) {
               value={form.notas}
               onChange={e => setForm({ ...form, notas: e.target.value })} />
           </div>
+
+          {pago.co_propietarios?.length > 1 && (
+            <div className="rounded-xl p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-900 text-[12px] flex items-start gap-2">
+              <AlertCircle size={13} className="text-blue-600 shrink-0 mt-0.5" />
+              <div className="text-blue-700 dark:text-blue-300">
+                Esta propiedad tiene <strong>{pago.co_propietarios.length} co-propietarios</strong>.
+                Al marcar este pago como entregado, se asume que ya pagaste la parte a todos.
+                <ul className="mt-1.5 space-y-0.5 list-disc list-inside text-[11px] opacity-90">
+                  {pago.co_propietarios.map((co, i) => (
+                    <li key={i}>
+                      {co.nombre} — {co.porcentaje_efectivo}% ({fmt(co.neto_parte)})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
 
           <div className="rounded-xl p-3 bg-[#B8893A]/5 border border-[#B8893A]/20 text-[12px] text-muted flex items-start gap-2">
             <AlertCircle size={13} className="text-[#B8893A] shrink-0 mt-0.5" />

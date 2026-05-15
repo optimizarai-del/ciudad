@@ -79,7 +79,13 @@ class PropiedadBase(BaseModel):
     impuesto_inmobiliario: Optional[float] = 0
     tasa_municipal: Optional[float] = 0
     tokko_id: Optional[str] = None
+    # Legacy: propietario principal. Si se manda solo este, se mappea
+    # automáticamente a la tabla pivote como es_principal=True.
     propietario_id: Optional[int] = None
+    # Nuevo: lista de co-propietarios. Cada uno: {cliente_id, porcentaje?}.
+    # Si todos los porcentajes son null/0, se asume división equitativa.
+    # Si se manda esta lista, sobreescribe la pivote completa.
+    propietarios: Optional[list[dict]] = None
     # Padrón municipal (Santa Rosa). Opcional.
     numero_referencia: Optional[str] = None
 
@@ -91,6 +97,9 @@ class PropiedadCreate(PropiedadBase):
 class PropiedadOut(PropiedadBase):
     id: int
     propietario_nombre: Optional[str] = None
+    # Lista derivada de la pivote: [{cliente_id, nombre, porcentaje, es_principal}].
+    # Si solo hay 1, viene esa entrada (consistente con flujo nuevo).
+    propietarios_lista: Optional[list[dict]] = None
     tasa_consultada_at: Optional[datetime] = None
 
     class Config:

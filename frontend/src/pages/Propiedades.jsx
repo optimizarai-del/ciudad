@@ -214,7 +214,19 @@ export default function Propiedades() {
                     <p className="text-[12px] text-muted capitalize">{p.ciudad}{p.provincia ? `, ${p.provincia}` : ''}</p>
                   </div>
                   <p className="text-[11px] text-muted mt-1">{TIPO_LABEL[p.tipo] || p.tipo} {p.superficie_m2 ? `· ${p.superficie_m2} m²` : ''} {p.ambientes ? `· ${p.ambientes} amb.` : ''}</p>
-                  {p.propietario_nombre && (
+                  {/* Co-propietarios: si hay más de uno mostramos cantidad */}
+                  {p.propietarios_lista?.length > 1 ? (
+                    <div className="text-[11px] text-muted mt-1">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary/40" />
+                        <span className="font-medium">{p.propietarios_lista.length} propietarios:</span>
+                      </span>
+                      <span className="ml-1">
+                        {p.propietarios_lista.slice(0, 2).map(co => co.nombre).join(', ')}
+                        {p.propietarios_lista.length > 2 && ` + ${p.propietarios_lista.length - 2}`}
+                      </span>
+                    </div>
+                  ) : p.propietario_nombre && (
                     <p className="text-[11px] text-muted mt-1 flex items-center gap-1">
                       <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary/40" />
                       <span className="font-medium">Propietario:</span> {p.propietario_nombre}
@@ -432,8 +444,176 @@ function FilterPill({ active, onClick, label }) {
   )
 }
 
+/**
+ * Multi-select de co-propietarios con porcentaje opcional.
+ *
+ * Permite que una propiedad tenga 1+ dueños. Si todos los porcentajes
+ * quedan vacíos → división equitativa en liquidaciones. Si se asignan,
+ * el total puede sumar 100 (lo validamos visualmente, no bloqueamos).
+ */
+function PropietariosMulti({ propietarios, clientes, onChange, onNuevoPropietario }) {
+  const sumaPorc = propietarios.reduce(
+    (s, p) => s + (Number(p.porcentaje) || 0), 0
+  )
+  const tieneAlgunoConPorc = propietarios.some(p => p.porcentaje != null && p.porcentaje !== '')
+  const sumaInvalida = tieneAlgunoConPorc && Math.abs(sumaPorc - 100) > 0.01
+
+  const agregar = (cliente_id) => {
+    if (!cliente_id) return
+    if (propietarios.some(p => String(p.cliente_id) === String(cliente_id))) return
+    const cli = clientes.find(c => String(c.id) === String(cliente_id))
+    const nombre = cli ? `${cli.nombre} ${cli.apellido || ''}`.trim() : `#${cliente_id}`
+    onChange([
+      ...propietarios,
+      {
+        cliente_id: Number(cliente_id),
+        nombre,
+        porcentaje: null,
+        es_principal: propietarios.length === 0,
+      },
+    ])
+  }
+
+  const eliminar = (idx) => {
+    const next = propietarios.filter((_, i) => i !== idx)
+    // Si saqué al principal, promover al primero
+    if (next.length && !next.some(p => p.es_principal)) {
+      next[0] = { ...next[0], es_principal: true }
+    }
+    onChange(next)
+  }
+
+  const setPorc = (idx, val) => {
+    const next = propietarios.map((p, i) =>
+      i === idx ? { ...p, porcentaje: val === '' ? null : Number(val) } : p
+    )
+    onChange(next)
+  }
+
+  const setPrincipal = (idx) => {
+    onChange(propietarios.map((p, i) => ({ ...p, es_principal: i === idx })))
+  }
+
+  // Filtrar candidatos (los que NO están ya en la lista)
+  const yaElegidos = new Set(propietarios.map(p => String(p.cliente_id)))
+  const candidatos = clientes.filter(c => !yaElegidos.has(String(c.id)))
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <label className="label !mb-0">
+          Propietarios
+          <span className="text-muted font-normal ml-2 text-[11px]">
+            ({propietarios.length}) — pueden ser varios
+          </span>
+        </label>
+        <button type="button"
+          onClick={onNuevoPropietario}
+          className="text-[11px] text-primary dark:text-white hover:underline font-medium">
+          + Nuevo propietario
+        </button>
+      </div>
+
+      {/* Lista de co-propietarios */}
+      {propietarios.length > 0 && (
+        <div className="space-y-2 mb-2">
+          {propietarios.map((p, i) => (
+            <div key={p.cliente_id || i}
+              className="flex items-center gap-2 p-2 rounded-xl bg-neutral-50 dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A]">
+              <button type="button"
+                onClick={() => setPrincipal(i)}
+                title={p.es_principal ? 'Principal' : 'Marcar como principal'}
+                className={`w-4 h-4 rounded-full border-2 grid place-items-center shrink-0 ${
+                  p.es_principal ? 'border-[#B8893A] bg-[#B8893A]' : 'border-muted hover:border-[#B8893A]'
+                }`}>
+                {p.es_principal && <span className="w-1.5 h-1.5 bg-white rounded-full" />}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-medium truncate">{p.nombre || `#${p.cliente_id}`}</p>
+                {p.es_principal && (
+                  <p className="text-[10px] text-[#B8893A]">Principal</p>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  placeholder="—"
+                  value={p.porcentaje ?? ''}
+                  onChange={e => setPorc(i, e.target.value)}
+                  className="input !py-1 !px-2 !w-16 text-right text-[12px] tabular-nums"
+                  title="Porcentaje opcional"
+                />
+                <span className="text-[11px] text-muted">%</span>
+              </div>
+              <button type="button"
+                onClick={() => eliminar(i)}
+                className="p-1.5 text-muted hover:text-danger rounded-lg">
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+
+          {tieneAlgunoConPorc && (
+            <p className={`text-[10px] ${sumaInvalida ? 'text-warn' : 'text-success'}`}>
+              {sumaInvalida
+                ? `⚠ Suma actual: ${sumaPorc.toFixed(2)}%. Idealmente debería sumar 100%.`
+                : `✓ Suma: ${sumaPorc.toFixed(2)}%`}
+            </p>
+          )}
+          {!tieneAlgunoConPorc && propietarios.length > 1 && (
+            <p className="text-[10px] text-muted">
+              Sin porcentajes: las liquidaciones se dividirán en partes iguales.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Selector para agregar */}
+      <select
+        className="input"
+        value=""
+        onChange={e => agregar(e.target.value)}
+      >
+        <option value="">
+          {propietarios.length === 0
+            ? '+ Elegí el propietario (podés agregar más después)'
+            : '+ Agregar otro co-propietario'}
+        </option>
+        {candidatos.map(c => (
+          <option key={c.id} value={c.id}>
+            {c.razon_social || `${c.nombre} ${c.apellido || ''}`.trim()}
+            {c.documento ? ` · ${c.documento}` : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+
 function Modal({ initial, clientes, onClose, onSaved }) {
-  const [form, setForm] = useState(initial ? { ...initial } : { ...empty })
+  // Inicializar `propietarios` desde la lista que devolvió el backend
+  // (propietarios_lista) si estamos editando. Si es nuevo, arranca vacío.
+  const initialPropietarios = initial?.propietarios_lista?.length
+    ? initial.propietarios_lista.map(p => ({
+        cliente_id: p.cliente_id,
+        nombre: p.nombre,
+        porcentaje: p.porcentaje,
+        es_principal: p.es_principal,
+      }))
+    : (initial?.propietario_id ? [{
+        cliente_id: initial.propietario_id,
+        nombre: initial.propietario_nombre,
+        porcentaje: null,
+        es_principal: true,
+      }] : [])
+  const [form, setForm] = useState(initial
+    ? { ...initial, propietarios: initialPropietarios }
+    : { ...empty, propietarios: [] }
+  )
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
   const [errors, setErrors] = useState({})
@@ -481,6 +661,14 @@ function Modal({ initial, clientes, onClose, onSaved }) {
       if (payload[k] === '' || payload[k] === null) payload[k] = null
       else payload[k] = Number(payload[k]) || null
     })
+    // Limpiar la lista de propietarios: solo enviar cliente_id, porcentaje,
+    // es_principal (el resto es para UI). Si está vacía, enviar [] explícito
+    // para que el backend desvincule todos.
+    payload.propietarios = (form.propietarios || []).map(p => ({
+      cliente_id: Number(p.cliente_id),
+      porcentaje: p.porcentaje === '' || p.porcentaje == null ? null : Number(p.porcentaje),
+      es_principal: !!p.es_principal,
+    })).filter(p => p.cliente_id)
     // Si la propiedad fue cargada antes de la unificación, sumamos lo que tuviera en
     // impuesto_inmobiliario al campo de tasas municipales y dejamos el otro en 0.
     if (payload.impuesto_inmobiliario) {
@@ -560,28 +748,22 @@ function Modal({ initial, clientes, onClose, onSaved }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label" htmlFor="prop-superficie">Superficie m²</label>
-              <input id="prop-superficie" name="superficie_m2" className="input" type="number" value={form.superficie_m2 || ''} onChange={set('superficie_m2')} />
-            </div>
-            <div>
-              <div className="flex items-center justify-between">
-                <label className="label" htmlFor="prop-propietario">Propietario</label>
-                <button type="button"
-                  onClick={() => setCreandoProp(true)}
-                  className="text-[11px] text-primary dark:text-white hover:underline font-medium">
-                  + Nuevo propietario
-                </button>
-              </div>
-              <select id="prop-propietario" name="propietario_id" className="input" value={form.propietario_id || ''} onChange={set('propietario_id')}>
-                <option value="">Sin asignar</option>
-                {clientesLocal.filter(c => c.rol === 'propietario').map(c => (
-                  <option key={c.id} value={c.id}>{c.nombre} {c.apellido}</option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label className="label" htmlFor="prop-superficie">Superficie m²</label>
+            <input id="prop-superficie" name="superficie_m2" className="input !max-w-[200px]" type="number" value={form.superficie_m2 || ''} onChange={set('superficie_m2')} />
           </div>
+
+          <PropietariosMulti
+            propietarios={form.propietarios || []}
+            clientes={clientesLocal.filter(c => c.rol === 'propietario')}
+            onChange={lista => setForm(f => ({
+              ...f,
+              propietarios: lista,
+              // Sincronizar el legacy propietario_id con el primer "es_principal"
+              propietario_id: (lista.find(p => p.es_principal) || lista[0])?.cliente_id || '',
+            }))}
+            onNuevoPropietario={() => setCreandoProp(true)}
+          />
 
           <div className="divider !my-1" />
           <p className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">Costos mensuales</p>

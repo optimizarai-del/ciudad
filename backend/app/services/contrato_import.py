@@ -47,14 +47,19 @@ Esquema de respuesta:
   "comision_porc": <number> | null,
   "notas": <string breve resumiendo cláusulas relevantes>,
 
-  "propietario": {
-    "nombre": <string>,
-    "apellido": <string> | null,
-    "razon_social": <string> | null,
-    "documento": <DNI o CUIT con guiones si los hay> | null,
-    "email": <string> | null,
-    "telefono": <string> | null
-  },
+  "propietarios": [
+    {
+      "nombre": <string>,
+      "apellido": <string> | null,
+      "razon_social": <string> | null,
+      "documento": <DNI o CUIT con guiones si los hay> | null,
+      "email": <string> | null,
+      "telefono": <string> | null,
+      "porcentaje": <number 0-100> | null
+    }
+    // ... uno o más; si en el contrato firma sólo uno, devolvé el array con 1
+    // si firman 2+ (matrimonio, hermanos, sociedad de hecho) devolvé todos
+  ],
   "inquilino": {
     "nombre": <string>,
     "apellido": <string> | null,
@@ -90,6 +95,10 @@ Reglas:
 - Para los nombres: separá nombre y apellido si vienen juntos. Si es una
   empresa, usá `razon_social` y dejá `nombre`/`apellido` vacíos.
 - Si encontrás CUIT/CUIL en formato XX-XXXXXXXX-X mantené los guiones.
+- Múltiples propietarios: si el contrato firma como locadores 2 o más
+  personas (matrimonio, herederos, sociedad), devolvelos a todos en
+  `propietarios`. Si el contrato menciona explícitamente porcentajes de
+  copropiedad, completalos en `porcentaje`; sino dejá `porcentaje: null`.
 """
 
 
@@ -151,8 +160,16 @@ def parsear_contrato_pdf(pdf_bytes: bytes, filename: str = "contrato.pdf") -> di
     except json.JSONDecodeError as e:
         raise ValueError(f"Claude no devolvió JSON parseable: {e}. Respuesta: {out[:500]}")
 
+    # Compatibilidad: si el modelo devolvió el formato viejo `propietario: {}`
+    # lo convertimos a la lista nueva `propietarios: [{}]`.
+    if "propietario" in data and "propietarios" not in data:
+        single = data.pop("propietario")
+        if single and (single.get("nombre") or single.get("razon_social")):
+            data["propietarios"] = [single]
+        else:
+            data["propietarios"] = []
     # Asegurar las claves obligatorias
-    data.setdefault("propietario", {})
+    data.setdefault("propietarios", [])
     data.setdefault("inquilino", {})
     data.setdefault("propiedad", {})
     return data
@@ -206,33 +223,55 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
     """
     is_demo = workspace_flag(user)
     resumen = {
-        "propietario": {"id": None, "reutilizado": False},
+        "propietarios": [],   # lista de {id, nombre, reutilizado, porcentaje}
         "inquilino":   {"id": None, "reutilizado": False},
         "propiedad":   {"id": None, "reutilizado": False},
         "contrato":    {"id": None, "codigo": None},
     }
 
-    # 1. Propietario
-    prop_data = datos.get("propietario") or {}
-    propietario = _buscar_cliente_existente(db, prop_data, "propietario", is_demo)
-    if propietario:
-        resumen["propietario"] = {"id": propietario.id, "reutilizado": True}
-    else:
+    # 1. Propietarios — lista de uno o más
+    propietarios_data = datos.get("propietarios") or []
+    # Compat: si vino el formato viejo {propietario: {}}, convertirlo
+    if not propietarios_data and datos.get("propietario"):
+        propietarios_data = [datos["propietario"]]
+    if not propietarios_data:
+        raise ValueError("Falta al menos un propietario para poder importar.")
+
+    propietarios_creados = []  # tuplas (cliente, porcentaje, reutilizado)
+    for prop_data in propietarios_data:
         if not (prop_data.get("nombre") or prop_data.get("razon_social")):
-            raise ValueError("Falta el nombre del propietario para poder importar.")
-        propietario = models.Cliente(
-            nombre=prop_data.get("nombre") or (prop_data.get("razon_social") or "Propietario"),
-            apellido=prop_data.get("apellido"),
-            razon_social=prop_data.get("razon_social"),
-            documento=prop_data.get("documento"),
-            email=prop_data.get("email"),
-            telefono=prop_data.get("telefono"),
-            rol=models.ClienteRol.propietario,
-            notas="[IMPORTADO desde PDF]",
-            is_demo=is_demo,
-        )
-        db.add(propietario); db.flush()
-        resumen["propietario"] = {"id": propietario.id, "reutilizado": False}
+            continue
+        existing = _buscar_cliente_existente(db, prop_data, "propietario", is_demo)
+        if existing:
+            propietarios_creados.append((existing, prop_data.get("porcentaje"), True))
+        else:
+            nuevo = models.Cliente(
+                nombre=prop_data.get("nombre") or (prop_data.get("razon_social") or "Propietario"),
+                apellido=prop_data.get("apellido"),
+                razon_social=prop_data.get("razon_social"),
+                documento=prop_data.get("documento"),
+                email=prop_data.get("email"),
+                telefono=prop_data.get("telefono"),
+                rol=models.ClienteRol.propietario,
+                notas="[IMPORTADO desde PDF]",
+                is_demo=is_demo,
+            )
+            db.add(nuevo); db.flush()
+            propietarios_creados.append((nuevo, prop_data.get("porcentaje"), False))
+
+    if not propietarios_creados:
+        raise ValueError("Ningún propietario válido en el PDF (faltan nombres).")
+
+    # El principal será el primero
+    propietario = propietarios_creados[0][0]
+    for cli, porc, reu in propietarios_creados:
+        resumen["propietarios"].append({
+            "id": cli.id,
+            "nombre": (cli.razon_social or
+                       f"{cli.nombre} {cli.apellido or ''}".strip()),
+            "porcentaje": porc,
+            "reutilizado": reu,
+        })
 
     # 2. Inquilino
     inq_data = datos.get("inquilino") or {}
@@ -266,6 +305,20 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
         # Reasignar propietario si la propiedad no tenía uno y ahora sí
         if not propiedad.propietario_id:
             propiedad.propietario_id = propietario.id
+        # Agregar los co-propietarios del PDF que NO estén ya vinculados.
+        # No borramos los que ya tenía la propiedad reutilizada — el operador
+        # puede limpiar manualmente si quiere reemplazar.
+        ya_vinculados = {pp.cliente_id for pp in (propiedad.propietarios or [])}
+        for i, (cli, porc, _reu) in enumerate(propietarios_creados):
+            if cli.id in ya_vinculados:
+                continue
+            db.add(models.PropiedadPropietario(
+                propiedad_id=propiedad.id,
+                cliente_id=cli.id,
+                porcentaje=porc,
+                es_principal=False,  # ya hay un principal previo
+            ))
+        db.flush()
     else:
         tipo = propd.get("tipo") or "departamento"
         modalidad = propd.get("modalidad") or "alquiler"
@@ -295,6 +348,15 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
         )
         db.add(propiedad); db.flush()
         resumen["propiedad"] = {"id": propiedad.id, "reutilizado": False}
+        # Crear filas pivote para cada co-propietario del PDF
+        for i, (cli, porc, _reu) in enumerate(propietarios_creados):
+            db.add(models.PropiedadPropietario(
+                propiedad_id=propiedad.id,
+                cliente_id=cli.id,
+                porcentaje=porc,
+                es_principal=(i == 0),
+            ))
+        db.flush()
 
     # 4. Contrato
     tipo_c = datos.get("tipo") or "alquiler_vivienda"
