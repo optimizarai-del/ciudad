@@ -4,6 +4,7 @@ import Layout from '../components/Layout/Layout'
 import HistorialPagos from '../components/HistorialPagos'
 import SearchBar, { match } from '../components/SearchBar'
 import ImportarContratoPDF from '../components/ImportarContratoPDF'
+import ProgresoContrato from '../components/ProgresoContrato'
 import api from '../utils/api'
 
 const TIPOS = ['alquiler_vivienda','alquiler_comercial','boleto_compraventa','sena_alquiler']
@@ -284,9 +285,12 @@ export default function Contratos() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {c.archivado && <span className="chip-muted">archivado</span>}
-                    <span className={ESTADO_CHIP[c.estado] || 'chip-muted'}>{c.estado}</span>
+                  <div className="flex flex-col items-end gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      {c.archivado && <span className="chip-muted">archivado</span>}
+                      <span className={ESTADO_CHIP[c.estado] || 'chip-muted'}>{c.estado}</span>
+                    </div>
+                    <ProgresoContrato inicio={c.fecha_inicio} fin={c.fecha_fin} estado={c.estado} />
                   </div>
                 </div>
 

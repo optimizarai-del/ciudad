@@ -31,6 +31,59 @@ from app.services import supabase_storage
 router = APIRouter(prefix="/api/cobranza", tags=["cobranza"])
 
 
+def _conceptos_pendientes_arrastrados(db: Session, contrato_id: int, mes_actual: str) -> list[dict]:
+    """
+    Mira todos los pagos previos del contrato y devuelve los conceptos que
+    quedaron en estado 'pendiente' y NO se cobraron/pagaron en períodos
+    posteriores. Cada item viene con `label`, `monto`, `desde_periodo` para
+    que el frontend muestre de dónde viene el arrastre.
+    """
+    import json as _json
+    pagos = (
+        db.query(models.Pago)
+        .filter(models.Pago.contrato_id == contrato_id, models.Pago.periodo < mes_actual)
+        .order_by(models.Pago.periodo.asc())
+        .all()
+    )
+    # Acumulador por label en minúsculas. Cada concepto puede aparecer
+    # `pendiente` en un mes y `cobrar`/`pagado_directo` en otro posterior,
+    # en cuyo caso se considera saldado.
+    pendientes: dict[str, dict] = {}
+    for p in pagos:
+        raw = p.detalle_conceptos
+        if not raw:
+            continue
+        try:
+            arr = _json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            continue
+        for c in (arr or []):
+            label = (c.get("label") or "").strip()
+            if not label:
+                continue
+            key = label.lower()
+            estado = c.get("estado") or _legacy_paga_to_estado(c.get("paga"))
+            if estado == "pendiente":
+                pendientes[key] = {
+                    "label": label,
+                    "monto": float(c.get("monto") or 0),
+                    "desde_periodo": p.periodo,
+                }
+            elif estado in ("cobrar", "pagado_directo"):
+                # Saldó la deuda — lo sacamos del acumulador.
+                pendientes.pop(key, None)
+    return list(pendientes.values())
+
+
+def _legacy_paga_to_estado(paga: str | None) -> str:
+    # Compat retro: el modelo viejo era `paga: inquilino|propietario`.
+    # `inquilino` significaba "se cobra ahora con el alquiler" → `cobrar`.
+    # `propietario` significaba "lo paga el propietario aparte" → `pagado_directo`.
+    if paga == "propietario":
+        return "pagado_directo"
+    return "cobrar"
+
+
 def _nombre_cliente(c: models.Cliente | None) -> str:
     if not c:
         return ""
@@ -70,6 +123,12 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
         alquiler_sug = float(c.monto_inicial or (prop.precio_alquiler if prop else 0) or 0)
         tasas_sug = float((prop.tasa_municipal if prop else 0) or 0) + float((prop.impuesto_inmobiliario if prop else 0) or 0)
         expensas_sug = float((prop.expensas if prop else 0) or 0)
+
+        # Conceptos pendientes que vienen arrastrados de períodos anteriores.
+        # Buscamos en TODOS los pagos previos del contrato los items que se
+        # marcaron como `pendiente` y todavía no se cobraron ni pagaron en un
+        # período posterior. Se devuelven al frontend para precargar el modal.
+        conceptos_pendientes = _conceptos_pendientes_arrastrados(db, c.id, mes)
 
         # Refacciones pendientes a cargo del inquilino: se descuentan
         # automáticamente del próximo cobro. Mandamos la lista para que el
@@ -122,6 +181,7 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
             "monto_alquiler_sug": round(alquiler_sug, 2),
             "monto_expensas_sug": round(expensas_sug, 2),
             "monto_tasas_sug": round(tasas_sug, 2),
+            "conceptos_pendientes": conceptos_pendientes,
             "refacciones_pendientes": refs_pend_data,
             "refacciones_descuento_sug": round(refs_total, 2),
             "fecha_vencimiento": fecha_venc,
@@ -318,29 +378,33 @@ def _registrar_pago_impl(
     descuento_refs = float(data.monto_descuento_refacciones or 0)
     tasas_municipales = float(data.monto_impuestos or 0) + float(data.monto_municipal or 0)
     conceptos_list = []
+    ESTADOS_VALIDOS = ("cobrar", "pagado_directo", "pendiente")
     if data.conceptos:
         for c in data.conceptos:
             label = (c.get("label") or "").strip()
             try: monto = float(c.get("monto") or 0)
             except Exception: monto = 0
-            paga = c.get("paga") or "inquilino"
-            if paga not in ("inquilino", "propietario"):
-                paga = "inquilino"
+            # Soporta tanto el modelo nuevo (`estado`) como el viejo (`paga`).
+            estado = c.get("estado") or _legacy_paga_to_estado(c.get("paga"))
+            if estado not in ESTADOS_VALIDOS:
+                estado = "cobrar"
             if label and monto != 0:
-                conceptos_list.append({"label": label, "monto": monto, "paga": paga})
+                conceptos_list.append({"label": label, "monto": monto, "estado": estado})
     else:
-        # Reconstruir desde legacy (todo paga el inquilino)
+        # Reconstruir desde legacy (todo se cobra ahora)
         if data.monto_expensas:
-            conceptos_list.append({"label": "Expensas", "monto": float(data.monto_expensas), "paga": "inquilino"})
+            conceptos_list.append({"label": "Expensas", "monto": float(data.monto_expensas), "estado": "cobrar"})
         if tasas_municipales:
-            conceptos_list.append({"label": "Tasas municipales", "monto": tasas_municipales, "paga": "inquilino"})
+            conceptos_list.append({"label": "Tasas municipales", "monto": tasas_municipales, "estado": "cobrar"})
         if data.monto_otros:
-            conceptos_list.append({"label": "Otros conceptos", "monto": float(data.monto_otros), "paga": "inquilino"})
+            conceptos_list.append({"label": "Otros conceptos", "monto": float(data.monto_otros), "estado": "cobrar"})
 
-    # Items para mostrar en el comprobante (incluye alquiler + cosas que paga el inquilino)
+    # Items para cobrar al inquilino (alquiler + conceptos en estado=cobrar).
+    # Esa plata se reenvía al propietario para que pague los servicios (es
+    # de paso, no afecta su neto).
     items_cobrar = [("Alquiler", float(data.monto_alquiler or 0))]
     for c in conceptos_list:
-        if c["paga"] == "inquilino":
+        if c["estado"] == "cobrar":
             items_cobrar.append((c["label"], c["monto"]))
     items_no_cero = [(l, v) for l, v in items_cobrar if v and v > 0]
     if descuento_refs > 0:
@@ -350,10 +414,17 @@ def _registrar_pago_impl(
         else sum(v for _, v in items_no_cero)
     )
 
-    # Conceptos informativos que paga el propietario (van al comprobante pero no se cobran)
-    items_propietario_paga = [
-        (c["label"], c["monto"]) for c in conceptos_list if c["paga"] == "propietario"
+    # Informativos: conceptos que el inquilino ya pagó directo al ente
+    # (no se cobran acá, no van al propietario, solo se asientan).
+    items_pagado_directo = [
+        (c["label"], c["monto"]) for c in conceptos_list if c["estado"] == "pagado_directo"
     ]
+    # Informativos: conceptos pendientes que pasan al próximo período.
+    items_pendientes = [
+        (c["label"], c["monto"]) for c in conceptos_list if c["estado"] == "pendiente"
+    ]
+    # Compat con el resto del flujo / PDFs (antes era items_propietario_paga).
+    items_propietario_paga = items_pagado_directo
 
     # Crear o actualizar el pago
     pago = (
@@ -369,7 +440,7 @@ def _registrar_pago_impl(
     # Sincronizar legacy desde conceptos (suma monto donde paga=inquilino)
     sumas_inq = {"expensas": 0.0, "municipal": 0.0, "otros": 0.0}
     for c in conceptos_list:
-        if c["paga"] != "inquilino":
+        if c["estado"] != "cobrar":
             continue
         low = c["label"].lower()
         if "expensa" in low:

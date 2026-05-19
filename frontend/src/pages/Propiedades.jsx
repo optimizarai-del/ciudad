@@ -4,6 +4,7 @@ import Layout from '../components/Layout/Layout'
 import SearchBar, { match } from '../components/SearchBar'
 import AdjuntosModal from '../components/AdjuntosModal'
 import ModalTasaMSR from '../components/ModalTasaMSR'
+import ProgresoContrato from '../components/ProgresoContrato'
 import api from '../utils/api'
 
 const TIPOS = ['departamento','casa','local','oficina','galpon','campo']
@@ -50,6 +51,8 @@ export default function Propiedades() {
   const [busqueda, setBusqueda] = useState('')
   const [adjPropiedad, setAdjPropiedad] = useState(null)
   const [tasaMSR, setTasaMSR] = useState(null)  // {propiedad, modo: 'consultar'|'ver'}
+  // Mapa propiedad_id → contrato vigente (para mostrar barra de progreso).
+  const [contratoPorProp, setContratoPorProp] = useState({})
 
   const load = () => {
     // Solo alquileres en esta página. Las propiedades de venta (incluyendo
@@ -58,6 +61,21 @@ export default function Propiedades() {
       setList((r.data || []).filter(p => p.modalidad !== 'venta' && !p.tokko_id))
     )
     api.get('/api/clientes').then(r => setClientes(r.data))
+    // Contratos vigentes para asociar fechas a cada propiedad.
+    api.get('/api/contratos').then(r => {
+      const map = {}
+      for (const c of (r.data || [])) {
+        if (c.estado === 'vigente' && c.propiedad_id) {
+          // Si hay varios contratos vigentes para una propiedad (raro), nos
+          // quedamos con el que vence más cerca.
+          const prev = map[c.propiedad_id]
+          if (!prev || (c.fecha_fin && (!prev.fecha_fin || c.fecha_fin < prev.fecha_fin))) {
+            map[c.propiedad_id] = c
+          }
+        }
+      }
+      setContratoPorProp(map)
+    }).catch(() => {})
   }
 
   useEffect(() => { load() }, [])
@@ -200,9 +218,18 @@ export default function Propiedades() {
                   <div className="w-10 h-10 rounded-2xl bg-neutral-100 dark:bg-[#1E1E1E] grid place-items-center shrink-0">
                     <Home size={16} className="text-muted" />
                   </div>
-                  <div className="flex gap-1.5 ml-auto">
-                    <span className={ESTADO_CHIP[p.estado] || 'chip-muted'}>{p.estado}</span>
-                    <span className={MODALIDAD_CHIP[p.modalidad] || 'chip-gray'}>{p.modalidad}</span>
+                  <div className="flex flex-col items-end gap-1.5 ml-auto">
+                    <div className="flex gap-1.5">
+                      <span className={ESTADO_CHIP[p.estado] || 'chip-muted'}>{p.estado}</span>
+                      <span className={MODALIDAD_CHIP[p.modalidad] || 'chip-gray'}>{p.modalidad}</span>
+                    </div>
+                    {contratoPorProp[p.id] && (
+                      <ProgresoContrato
+                        inicio={contratoPorProp[p.id].fecha_inicio}
+                        fin={contratoPorProp[p.id].fecha_fin}
+                        estado={contratoPorProp[p.id].estado}
+                      />
+                    )}
                   </div>
                 </div>
 

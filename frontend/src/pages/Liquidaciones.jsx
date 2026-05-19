@@ -317,8 +317,11 @@ function ItemLiquidacion({ item, onMarcar, onRevertir }) {
   if (item.detalle_conceptos) {
     try { conceptos = JSON.parse(item.detalle_conceptos) } catch {}
   }
-  const conceptosInquilino = conceptos.filter(c => c.paga === 'inquilino')
-  const conceptosPropietario = conceptos.filter(c => c.paga === 'propietario')
+  // Compat: modelo nuevo usa `estado` (cobrar/pagado_directo/pendiente),
+  // modelo viejo usa `paga` (inquilino/propietario).
+  const _estadoDe = c => c.estado || (c.paga === 'propietario' ? 'pagado_directo' : 'cobrar')
+  const conceptosInquilino = conceptos.filter(c => _estadoDe(c) === 'cobrar')
+  const conceptosPropietario = conceptos.filter(c => _estadoDe(c) === 'pagado_directo')
 
   return (
     <div>
@@ -493,12 +496,14 @@ function ModalMarcar({ pago, onClose, onSaved }) {
   }
   if (conceptos.length === 0) {
     // Fallback legacy: cualquier monto > 0 lo asumimos como pasante del inquilino
-    if (pago.monto_expensas > 0) conceptos.push({ label: 'Expensas', monto: pago.monto_expensas, paga: 'inquilino' })
-    if (pago.monto_municipal > 0) conceptos.push({ label: 'Tasas municipales', monto: pago.monto_municipal, paga: 'inquilino' })
-    if (pago.monto_otros > 0) conceptos.push({ label: 'Otros conceptos', monto: pago.monto_otros, paga: 'inquilino' })
+    if (pago.monto_expensas > 0) conceptos.push({ label: 'Expensas', monto: pago.monto_expensas, estado: 'cobrar' })
+    if (pago.monto_municipal > 0) conceptos.push({ label: 'Tasas municipales', monto: pago.monto_municipal, estado: 'cobrar' })
+    if (pago.monto_otros > 0) conceptos.push({ label: 'Otros conceptos', monto: pago.monto_otros, estado: 'cobrar' })
   }
-  const conceptosInquilino = conceptos.filter(c => c.paga === 'inquilino')
-  const conceptosPropietario = conceptos.filter(c => c.paga === 'propietario')
+  // Compat: modelo nuevo usa `estado`, viejo usa `paga`.
+  const _estadoDe = c => c.estado || (c.paga === 'propietario' ? 'pagado_directo' : 'cobrar')
+  const conceptosInquilino = conceptos.filter(c => _estadoDe(c) === 'cobrar')
+  const conceptosPropietario = conceptos.filter(c => _estadoDe(c) === 'pagado_directo')
   const totalCobradoAlquiler = pago.monto_alquiler || 0
   const totalCobradoConceptos = conceptosInquilino.reduce((s, c) => s + (Number(c.monto) || 0), 0)
   const totalCobradoInquilino = totalCobradoAlquiler + totalCobradoConceptos

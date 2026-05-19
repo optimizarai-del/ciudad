@@ -206,15 +206,28 @@ function Stat({ label, value, color = '' }) {
 
 /**
  * Lista dinámica de conceptos del pago. Cada item:
- *   { label: string, monto: number, paga: 'inquilino' | 'propietario' }
+ *   { label: string, monto: number, estado: 'cobrar' | 'pagado_directo' | 'pendiente' }
  *
- * El operador puede agregar expensas, tasas, servicios (luz, gas, internet),
- * etc., y elegir quién los paga. Los que paga el inquilino se cobran junto
- * con el alquiler; los que paga el propietario son informativos en el
- * comprobante (no se cobran).
- *
- * Sugerencias rápidas como botones para agregar conceptos comunes en 1 click.
+ * Tres estados posibles por concepto:
+ *   - `cobrar`         → se cobra al inquilino con el alquiler. Esa plata se
+ *                        reenvía al propietario para pagar el servicio (no
+ *                        afecta el neto, es plata de paso).
+ *   - `pagado_directo` → el inquilino ya pagó directo al ente. Informativo,
+ *                        no se cobra ni se reenvía.
+ *   - `pendiente`      → no se cobra ahora; queda pendiente y aparece
+ *                        precargado en el próximo período.
  */
+const ESTADO_OPCIONES = [
+  { val: 'cobrar', label: 'Cobrar ahora' },
+  { val: 'pagado_directo', label: 'Ya pagada por inquilino' },
+  { val: 'pendiente', label: 'Pendiente' },
+]
+const ESTADO_STYLE = {
+  cobrar: '',
+  pagado_directo: '!border-emerald-500/60 !text-emerald-600 dark:!text-emerald-400',
+  pendiente: '!border-amber-500/60 !text-amber-600 dark:!text-amber-400',
+}
+
 function ConceptosEditables({ conceptos, onUpdate, onRemove, onAdd }) {
   const SUGERENCIAS = [
     'Luz', 'Gas', 'Agua', 'Internet', 'ABL', 'Seguro', 'Servicios varios',
@@ -236,7 +249,12 @@ function ConceptosEditables({ conceptos, onUpdate, onRemove, onAdd }) {
       {/* Lista de conceptos */}
       <div className="space-y-2">
         {(conceptos || []).map((c, i) => (
-          <div key={i} className="flex items-center gap-2 p-2 rounded-xl bg-neutral-50 dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A]">
+          <div key={i} className={`flex items-center gap-2 p-2 rounded-xl border ${
+            c._arrastre
+              ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300/50 dark:border-amber-700/40'
+              : 'bg-neutral-50 dark:bg-[#1A1A1A] border-border dark:border-[#2A2A2A]'
+          }`}
+          title={c._arrastre ? `Arrastrado de ${c._arrastre} (quedó pendiente)` : undefined}>
             <input
               type="text"
               placeholder="Ej: Expensas"
@@ -252,15 +270,14 @@ function ConceptosEditables({ conceptos, onUpdate, onRemove, onAdd }) {
               onChange={e => onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))}
             />
             <select
-              className={`input !py-1.5 !px-2 !w-32 text-[12px] ${
-                c.paga === 'propietario' ? '!border-[#B8893A] !text-[#B8893A]' : ''
-              }`}
-              value={c.paga || 'inquilino'}
-              onChange={e => onUpdate(i, 'paga', e.target.value)}
-              title="¿Quién paga este concepto?"
+              className={`input !py-1.5 !px-2 !w-40 text-[12px] ${ESTADO_STYLE[c.estado] || ''}`}
+              value={c.estado || 'cobrar'}
+              onChange={e => onUpdate(i, 'estado', e.target.value)}
+              title="¿Cómo se trata este concepto?"
             >
-              <option value="inquilino">Paga inquilino</option>
-              <option value="propietario">Paga propietario</option>
+              {ESTADO_OPCIONES.map(o => (
+                <option key={o.val} value={o.val}>{o.label}</option>
+              ))}
             </select>
             <button type="button"
               onClick={() => onRemove(i)}
@@ -282,7 +299,7 @@ function ConceptosEditables({ conceptos, onUpdate, onRemove, onAdd }) {
             <button
               key={s}
               type="button"
-              onClick={() => onAdd({ label: s, monto: 0, paga: 'inquilino' })}
+              onClick={() => onAdd({ label: s, monto: 0, estado: 'cobrar' })}
               className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition"
             >
               + {s}
@@ -326,18 +343,28 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     .filter(r => refsSelected.has(r.id))
     .reduce((s, r) => s + (Number(r.monto) || 0), 0)
 
-  // Precarga: los conceptos arrancan con valores sugeridos desde el contrato/
-  // propiedad. Cada concepto tiene su label, monto y quién paga (inquilino
-  // por default, se puede cambiar a propietario si el dueño lo banca aparte).
+  // Precarga: los conceptos arrancan con (a) valores sugeridos desde el
+  // contrato/propiedad y (b) los conceptos que quedaron `pendiente` en
+  // períodos anteriores (los traemos del backend para no perderlos).
+  const pendientesArrastre = item.conceptos_pendientes || []
+  const labelsArrastre = new Set(pendientesArrastre.map(p => p.label.toLowerCase()))
   const [form, setForm] = useState({
     monto_alquiler: item.monto_alquiler_sug ?? item.monto_total ?? 0,
     conceptos: [
-      ...(item.monto_expensas_sug > 0
-        ? [{ label: 'Expensas', monto: item.monto_expensas_sug, paga: 'inquilino' }]
+      ...(item.monto_expensas_sug > 0 && !labelsArrastre.has('expensas')
+        ? [{ label: 'Expensas', monto: item.monto_expensas_sug, estado: 'cobrar' }]
         : []),
-      ...(item.monto_tasas_sug > 0
-        ? [{ label: 'Tasas municipales', monto: item.monto_tasas_sug, paga: 'inquilino' }]
+      ...(item.monto_tasas_sug > 0 && !labelsArrastre.has('tasas municipales')
+        ? [{ label: 'Tasas municipales', monto: item.monto_tasas_sug, estado: 'cobrar' }]
         : []),
+      // Arrastres de períodos anteriores — entran como `cobrar` por default
+      // (el operador puede cambiarlos a `pendiente` si tampoco se cobran ahora).
+      ...pendientesArrastre.map(p => ({
+        label: p.label,
+        monto: p.monto,
+        estado: 'cobrar',
+        _arrastre: p.desde_periodo,
+      })),
     ],
     fecha_pago: new Date().toISOString().slice(0, 10),
     notas: '',
@@ -360,23 +387,30 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     setForm(f => ({ ...f, conceptos: f.conceptos.filter((_, i) => i !== idx) }))
   }
   const agregarConcepto = (preset = null) => {
-    const nuevo = preset || { label: '', monto: 0, paga: 'inquilino' }
+    const nuevo = preset || { label: '', monto: 0, estado: 'cobrar' }
     setForm(f => ({ ...f, conceptos: [...f.conceptos, nuevo] }))
   }
 
-  // Cálculo: solo se cobra al inquilino lo que paga el inquilino + alquiler
-  const cobradoConceptosInq = (form.conceptos || [])
-    .filter(c => c.paga === 'inquilino')
+  // Cálculo según estado de cada concepto:
+  //   cobrar         → se suma al total cobrado al inquilino y se reenvía al propietario
+  //   pagado_directo → informativo (ya pagado al ente, no toca caja)
+  //   pendiente      → no se cobra ahora, queda pendiente para el próximo período
+  const sumByEstado = (estado) => (form.conceptos || [])
+    .filter(c => (c.estado || 'cobrar') === estado)
     .reduce((s, c) => s + (Number(c.monto) || 0), 0)
+  const cobradoConceptosInq = sumByEstado('cobrar')
+  const totalPagadoDirecto = sumByEstado('pagado_directo')
+  const totalPendiente = sumByEstado('pendiente')
+
   const alquiler = Number(form.monto_alquiler) || 0
   const subtotal = alquiler + cobradoConceptosInq
   const total = subtotal - descuentoRefs
-  const cobradoPropietarioPaga = (form.conceptos || [])
-    .filter(c => c.paga === 'propietario')
-    .reduce((s, c) => s + (Number(c.monto) || 0), 0)
   // La comisión se calcula sólo sobre el alquiler.
   const comision = (item.comision_porc || 0) * alquiler / 100
+  // Neto: alquiler − comisión. Los conceptos cobrados son plata de paso
+  // (se reenvían al propietario para que pague el ente), no afectan el neto.
   const neto = alquiler - comision
+  const reenviadoPropietario = cobradoConceptosInq
 
   const submit = async (e) => {
     e.preventDefault()
@@ -392,7 +426,8 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
           .map(c => ({
             label: c.label.trim(),
             monto: Number(c.monto),
-            paga: c.paga === 'propietario' ? 'propietario' : 'inquilino',
+            estado: ['cobrar', 'pagado_directo', 'pendiente'].includes(c.estado)
+              ? c.estado : 'cobrar',
           })),
         monto_descuento_refacciones: descuentoRefs,
         refacciones_aplicadas: Array.from(refsSelected),
@@ -500,14 +535,26 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
               </>
             )}
             <div className="flex justify-between"><span className="text-muted">Total cobrado al inquilino</span><span className="font-semibold">{fmtMoney(total)}</span></div>
-            {cobradoPropietarioPaga > 0 && (
-              <div className="flex justify-between text-[11px] text-muted/70 italic">
-                <span>+ A cargo del propietario (informativo)</span>
-                <span>{fmtMoney(cobradoPropietarioPaga)}</span>
+            {totalPagadoDirecto > 0 && (
+              <div className="flex justify-between text-[11px] text-emerald-700 dark:text-emerald-400 italic">
+                <span>✓ Ya pagado por inquilino (informativo)</span>
+                <span>{fmtMoney(totalPagadoDirecto)}</span>
+              </div>
+            )}
+            {totalPendiente > 0 && (
+              <div className="flex justify-between text-[11px] text-amber-700 dark:text-amber-400 italic">
+                <span>⏳ Pendiente (pasa al próximo período)</span>
+                <span>{fmtMoney(totalPendiente)}</span>
               </div>
             )}
             <div className="flex justify-between"><span className="text-muted">Alquiler base</span><span>{fmtMoney(alquiler)}</span></div>
             <div className="flex justify-between"><span className="text-muted">Comisión ({item.comision_porc || 0}% s/ alquiler)</span><span>− {fmtMoney(comision)}</span></div>
+            {reenviadoPropietario > 0 && (
+              <div className="flex justify-between text-[11px] text-muted">
+                <span>Reenviado al propietario p/ pagar servicios</span>
+                <span>{fmtMoney(reenviadoPropietario)}</span>
+              </div>
+            )}
             <div className="border-t border-border pt-1.5 flex justify-between font-semibold"><span>Neto al propietario</span><span className="text-[#B8893A]">{fmtMoney(neto)}</span></div>
           </div>
 

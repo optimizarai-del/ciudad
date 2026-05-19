@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Building2, FileText, Users, TrendingUp, Plus, ArrowRight, AlertTriangle, BarChart2, Clock } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
+import ProgresoContrato from '../components/ProgresoContrato'
 import api from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 
@@ -171,7 +172,10 @@ export default function Dashboard() {
                           <p className="text-[11px] text-[#737373] dark:text-[#7A7A7A] capitalize">{c.tipo?.replace(/_/g, ' ')}</p>
                         </div>
                       </div>
-                      <ContratoEstadoBadge estado={c.estado} />
+                      <div className="flex flex-col items-end gap-1.5 shrink-0">
+                        <ContratoEstadoBadge estado={c.estado} />
+                        <ProgresoContrato inicio={c.fecha_inicio} fin={c.fecha_fin} estado={c.estado} />
+                      </div>
                     </li>
                   ))}
                 </ul>
