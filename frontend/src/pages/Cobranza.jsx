@@ -326,13 +326,13 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
         <span className="text-[10px] text-muted uppercase tracking-widest mt-1.5 mr-1">Agregar:</span>
         {disponibles.map(s => (
           <button key={s} type="button"
-            onClick={() => onAdd({ label: s, monto: 0, incluido: true })}
+            onClick={() => onAdd({ label: s, monto: 0, incluido: false })}
             className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition">
             + {s}
           </button>
         ))}
         <button type="button"
-          onClick={() => onAdd({ label: '', monto: 0, incluido: true })}
+          onClick={() => onAdd({ label: '', monto: 0, incluido: false })}
           className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-dashed border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition">
           + Otro…
         </button>
@@ -378,14 +378,14 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     fecha_pago: new Date().toISOString().slice(0, 10),
     notas: '',
     conceptos: [
-      { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, incluido: true },
-      { label: 'Expensas',          fijo: true, monto: extraSug('Expensas', item.monto_expensas_sug),               incluido: true },
-      { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug),         incluido: true },
+      { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, incluido: false },
+      { label: 'Expensas',          fijo: true, monto: extraSug('Expensas', item.monto_expensas_sug),               incluido: false },
+      { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug),         incluido: false },
       // Arrastres de OTROS conceptos (no Expensas / Tasas que ya están arriba)
       ...pendientesArrastre
         .filter(p => !CONCEPTOS_FIJOS.some(f => f.toLowerCase() === p.label.toLowerCase()))
         .map(p => ({
-          label: p.label, monto: Number(p.monto) || 0, incluido: true, _arrastre: p.desde_periodo,
+          label: p.label, monto: Number(p.monto) || 0, incluido: false, _arrastre: p.desde_periodo,
         })),
     ],
   })
