@@ -68,7 +68,7 @@ export default function Indices() {
                   titulo="IPC"
                   subtitulo="Índice de Precios al Consumidor"
                   dato={data?.ipc}
-                  formatValue={v => v?.toFixed(2)}
+                  formatValue={v => v?.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   unidad="puntos"
                   color="blue"
                   icon={<BarChart2 size={18} />}
@@ -77,7 +77,7 @@ export default function Indices() {
                   titulo="ICL"
                   subtitulo="Índice de Contratos de Locación"
                   dato={data?.icl}
-                  formatValue={v => v?.toFixed(4)}
+                  formatValue={v => v?.toLocaleString('es-AR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                   unidad="puntos"
                   color="purple"
                   icon={<TrendingUp size={18} />}
@@ -168,7 +168,7 @@ function IndiceCard({ titulo, subtitulo, dato, formatValue, color, icon }) {
           <span className={`inline-flex items-center gap-1 text-[12px] font-medium px-2 py-0.5 rounded-full
             ${sube ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400' : baja ? 'bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400' : 'bg-[#F0F0F0] dark:bg-[#2A2A2A] text-[#737373]'}`}>
             {sube ? <TrendingUp size={11} /> : baja ? <TrendingDown size={11} /> : null}
-            {sube ? '+' : ''}{dato.variacion_mensual?.toFixed(2)}%
+            {sube ? '+' : ''}{dato.variacion_mensual?.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
           </span>
         )}
         <span className="text-[11px] text-[#737373] dark:text-[#7A7A7A]">

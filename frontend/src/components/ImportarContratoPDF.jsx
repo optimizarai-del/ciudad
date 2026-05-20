@@ -136,7 +136,7 @@ function UploadStep({ file, setFile, loading, err, onUpload }) {
             <>
               <p className="font-semibold text-[14px]">{file.name}</p>
               <p className="text-[11px] text-muted">
-                {(file.size / 1024).toFixed(0)} KB — click para cambiar
+                {Math.round(file.size / 1024).toLocaleString('es-AR')} KB — click para cambiar
               </p>
             </>
           ) : (

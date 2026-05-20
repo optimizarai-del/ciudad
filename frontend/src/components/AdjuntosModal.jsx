@@ -78,7 +78,9 @@ export default function AdjuntosModal({ propiedad, onClose }) {
   // No requiere Authorization header, va directo del browser a Supabase.
   const url = (a) => a.url || `${api.defaults.baseURL}/api/propiedades/${propiedad.id}/adjuntos/${a.id}`
   const isImg = (a) => (a.mime || '').startsWith('image/')
-  const tamano = (b) => !b ? '' : b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`
+  const tamano = (b) => !b ? '' : b > 1024 * 1024
+    ? `${(b / 1024 / 1024).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB`
+    : `${Math.round(b / 1024).toLocaleString('es-AR')} KB`
 
   const descargar = async (a) => {
     // Forzar download (no preview) — fetch + blob + a.download

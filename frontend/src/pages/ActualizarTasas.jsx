@@ -292,7 +292,7 @@ export default function ActualizarTasas() {
                         <td className="td text-center hidden lg:table-cell">
                           {diff !== null ? (
                             <span className={`chip-${diff > 0 ? 'warn' : diff < 0 ? 'gray' : 'muted'}`}>
-                              {diff > 0 ? '+' : ''}{diff.toFixed(1)} %
+                              {diff > 0 ? '+' : ''}{Number(diff).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %
                             </span>
                           ) : (
                             <span className="text-[11px] text-muted">—</span>

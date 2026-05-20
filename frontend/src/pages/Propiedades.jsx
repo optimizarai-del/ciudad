@@ -586,8 +586,8 @@ function PropietariosMulti({ propietarios, clientes, onChange, onNuevoPropietari
           {tieneAlgunoConPorc && (
             <p className={`text-[10px] ${sumaInvalida ? 'text-warn' : 'text-success'}`}>
               {sumaInvalida
-                ? `⚠ Suma actual: ${sumaPorc.toFixed(2)}%. Idealmente debería sumar 100%.`
-                : `✓ Suma: ${sumaPorc.toFixed(2)}%`}
+                ? `⚠ Suma actual: ${Number(sumaPorc).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%. Idealmente debería sumar 100%.`
+                : `✓ Suma: ${Number(sumaPorc).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}
             </p>
           )}
           {!tieneAlgunoConPorc && propietarios.length > 1 && (

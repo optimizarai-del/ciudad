@@ -36,7 +36,7 @@ export default function Calculadora() {
     } finally { setLoading(false) }
   }
 
-  const pct = val => val !== undefined ? `${(val * 100 - 100).toFixed(2)}%` : '—'
+  const pct = val => val !== undefined ? `${(val * 100 - 100).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : '—'
 
   return (
     <Layout>

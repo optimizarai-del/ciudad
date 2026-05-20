@@ -105,15 +105,15 @@ export default function DashboardAlquileres() {
           />
           <MetricCard
             label="Cobrado este mes"
-            value={cobranza ? `$${(cobranza.cobrado/1000).toFixed(0)}K` : '—'}
+            value={cobranza ? `$${Math.round(cobranza.cobrado/1000).toLocaleString('es-AR')}K` : '—'}
             sub={cobranza ? `${cobranza.porcentaje_cobrado}% del total` : ''}
             icon={CheckCircle}
             color="green"
           />
           <MetricCard
             label="Pendiente de cobro"
-            value={cobranza ? `$${(cobranza.pendiente/1000).toFixed(0)}K` : '—'}
-            sub={cobranza?.vencido > 0 ? `+ $${(cobranza.vencido/1000).toFixed(0)}K vencido` : ''}
+            value={cobranza ? `$${Math.round(cobranza.pendiente/1000).toLocaleString('es-AR')}K` : '—'}
+            sub={cobranza?.vencido > 0 ? `+ $${Math.round(cobranza.vencido/1000).toLocaleString('es-AR')}K vencido` : ''}
             icon={Clock}
             color={cobranza?.pendiente > 0 ? 'amber' : 'green'}
           />
@@ -124,7 +124,7 @@ export default function DashboardAlquileres() {
           <div className="card p-5">
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm font-semibold">Cobranza del mes</p>
-              <p className="text-sm text-gray-400 dark:text-gray-500">${(cobranza.total_esperado/1000).toFixed(0)}K total</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500">${Math.round(cobranza.total_esperado/1000).toLocaleString('es-AR')}K total</p>
             </div>
             <div className="h-3 bg-gray-100 dark:bg-[#1E1E1E] rounded-full overflow-hidden">
               <div
@@ -133,8 +133,8 @@ export default function DashboardAlquileres() {
               />
             </div>
             <div className="flex justify-between mt-2 text-xs text-gray-400 dark:text-gray-500">
-              <span className="text-green-600 dark:text-green-400 font-medium">${(cobranza.cobrado/1000).toFixed(0)}K cobrado</span>
-              <span>${(cobranza.pendiente/1000).toFixed(0)}K pendiente</span>
+              <span className="text-green-600 dark:text-green-400 font-medium">${Math.round(cobranza.cobrado/1000).toLocaleString('es-AR')}K cobrado</span>
+              <span>${Math.round(cobranza.pendiente/1000).toLocaleString('es-AR')}K pendiente</span>
             </div>
           </div>
         )}

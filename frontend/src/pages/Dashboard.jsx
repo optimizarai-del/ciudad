@@ -108,9 +108,9 @@ export default function Dashboard() {
               </button>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <MiniIndice label="IPC" dato={indices.ipc} fmt={v => v?.toFixed(1)} />
-              <MiniIndice label="ICL" dato={indices.icl} fmt={v => v?.toFixed(3)} />
-              <MiniIndice label="UVA" dato={indices.uva} fmt={v => `$${v?.toFixed(2)}`} />
+              <MiniIndice label="IPC" dato={indices.ipc} fmt={v => v?.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} />
+              <MiniIndice label="ICL" dato={indices.icl} fmt={v => v?.toLocaleString('es-AR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} />
+              <MiniIndice label="UVA" dato={indices.uva} fmt={v => `$${v?.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
               <MiniIndice label="USD Oficial" dato={indices.dolar_oficial} fmt={v => `$${v?.toLocaleString('es-AR')}`} valueKey="venta" />
             </div>
           </section>
@@ -212,7 +212,7 @@ function MiniIndice({ label, dato, fmt, valueKey = 'valor' }) {
       </p>
       {varPct != null && (
         <p className={`text-[10px] mt-0.5 ${varPct > 0 ? 'text-red-500' : 'text-success'}`}>
-          {varPct > 0 ? '+' : ''}{varPct?.toFixed(2)}% mensual
+          {varPct > 0 ? '+' : ''}{varPct?.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% mensual
         </p>
       )}
     </div>
