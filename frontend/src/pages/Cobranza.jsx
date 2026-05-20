@@ -243,10 +243,10 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
       </div>
 
       {/* Header de columnas */}
-      <div className="grid grid-cols-[32px_1fr_110px_28px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
-        <span></span>
+      <div className="grid grid-cols-[1fr_110px_36px_28px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
         <span>Concepto</span>
         <span className="text-right">Monto</span>
+        <span></span>
         <span></span>
       </div>
 
@@ -256,7 +256,7 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
           const incluido = c.incluido !== false
           return (
             <div key={i}
-              className={`grid grid-cols-[32px_1fr_110px_28px] gap-2 items-center p-2 rounded-xl border transition-all ${
+              className={`grid grid-cols-[1fr_110px_36px_28px] gap-2 items-center p-2 rounded-xl border transition-all ${
                 c._arrastre
                   ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300/50 dark:border-amber-700/40'
                   : incluido
@@ -264,17 +264,6 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
                     : 'bg-white dark:bg-[#0F0F0F] border-border/40 dark:border-[#1E1E1E] opacity-45'
               }`}
               title={c._arrastre ? `Arrastrado de ${c._arrastre} (quedó pendiente)` : undefined}>
-
-              {/* Checkbox circular */}
-              <button type="button"
-                onClick={() => onUpdate(i, 'incluido', !incluido)}
-                className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                  incluido
-                    ? 'bg-green-500 border-green-500 text-white'
-                    : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
-                }`}>
-                {incluido && <Check size={12} />}
-              </button>
 
               {/* Concepto */}
               {c.fijo ? (
@@ -304,6 +293,17 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
                 className="input !py-1.5 !px-2 text-right tabular-nums text-[12px]"
                 value={c.monto || ''}
                 onChange={e => onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))} />
+
+              {/* Checkbox circular — borde negro resaltado */}
+              <button type="button"
+                onClick={() => onUpdate(i, 'incluido', !incluido)}
+                className={`w-8 h-8 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                  incluido
+                    ? 'bg-[#0A0A0A] dark:bg-white border-[#0A0A0A] dark:border-white text-white dark:text-[#0A0A0A]'
+                    : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
+                }`}>
+                {incluido && <Check size={13} />}
+              </button>
 
               {/* Quitar (sólo extras) */}
               {c.fijo ? (
