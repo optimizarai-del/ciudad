@@ -205,30 +205,19 @@ function Stat({ label, value, color = '' }) {
 }
 
 /**
- * Lista dinámica de conceptos del pago. Cada item:
- *   { label: string, monto: number, estado: 'cobrar' | 'pagado_directo' | 'pendiente' }
+ * Tabla de cobro al inquilino.
  *
- * Tres estados posibles por concepto:
- *   - `cobrar`         → se cobra al inquilino con el alquiler. Esa plata se
- *                        reenvía al propietario para pagar el servicio (no
- *                        afecta el neto, es plata de paso).
- *   - `pagado_directo` → el inquilino ya pagó directo al ente. Informativo,
- *                        no se cobra ni se reenvía.
- *   - `pendiente`      → no se cobra ahora; queda pendiente y aparece
- *                        precargado en el próximo período.
+ * Modelo por fila: { label, paga, pagado, a_cobrar, fijo?, _arrastre? }
+ *   - paga: 'inquilino' | 'propietario' — quién es responsable de ese ítem.
+ *   - pagado: monto que el inquilino YA pagó (directo o adelantado).
+ *   - a_cobrar: monto que se le cobra al inquilino AHORA con el alquiler.
+ *
+ * 3 filas fijas: Alquiler, Expensas, Tasas municipales (no se pueden eliminar).
+ * Se pueden agregar conceptos extra (Luz, Gas, Agua, Internet, ABL, Seguro, etc.)
  */
-const ESTADO_OPCIONES = [
-  { val: 'cobrar', label: 'Cobrar ahora' },
-  { val: 'pagado_directo', label: 'Ya pagada por inquilino' },
-  { val: 'pendiente', label: 'Pendiente' },
-]
-const ESTADO_STYLE = {
-  cobrar: '',
-  pagado_directo: '!border-emerald-500/60 !text-emerald-600 dark:!text-emerald-400',
-  pendiente: '!border-amber-500/60 !text-amber-600 dark:!text-amber-400',
-}
+const CONCEPTOS_FIJOS = ['Alquiler', 'Expensas', 'Tasas municipales']
 
-function ConceptosEditables({ conceptos, onUpdate, onRemove, onAdd }) {
+function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
   const SUGERENCIAS = [
     'Luz', 'Gas', 'Agua', 'Internet', 'ABL', 'Seguro', 'Servicios varios',
   ]
@@ -238,88 +227,88 @@ function ConceptosEditables({ conceptos, onUpdate, onRemove, onAdd }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <label className="label !mb-0">
-          Conceptos adicionales
-          <span className="text-muted font-normal ml-2 text-[11px]">
-            ({(conceptos || []).length})
-          </span>
-        </label>
+        <label className="label !mb-0">Conceptos del cobro</label>
       </div>
 
-      {/* Lista de conceptos */}
-      <div className="space-y-2">
-        {(conceptos || []).map((c, i) => (
-          <div key={i} className={`flex items-center gap-2 p-2 rounded-xl border ${
-            c._arrastre
-              ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300/50 dark:border-amber-700/40'
-              : 'bg-neutral-50 dark:bg-[#1A1A1A] border-border dark:border-[#2A2A2A]'
-          }`}
-          title={c._arrastre ? `Arrastrado de ${c._arrastre} (quedó pendiente)` : undefined}>
-            <input
-              type="text"
-              placeholder="Ej: Expensas"
-              className="input !py-1.5 !px-2 flex-1 min-w-[80px] text-[12px]"
-              value={c.label || ''}
-              onChange={e => onUpdate(i, 'label', e.target.value)}
-            />
-            <input
-              type="number"
-              placeholder="$"
-              className="input !py-1.5 !px-2 !w-24 text-right tabular-nums text-[12px]"
-              value={c.monto || ''}
-              onChange={e => onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))}
-            />
-            <select
-              className={`input !py-1.5 !px-2 !w-40 text-[12px] ${ESTADO_STYLE[c.estado] || ''}`}
-              value={c.estado || 'cobrar'}
-              onChange={e => onUpdate(i, 'estado', e.target.value)}
-              title="¿Cómo se trata este concepto?"
-            >
-              {ESTADO_OPCIONES.map(o => (
-                <option key={o.val} value={o.val}>{o.label}</option>
-              ))}
-            </select>
-            <button type="button"
-              onClick={() => onRemove(i)}
-              className="p-1.5 text-muted hover:text-danger rounded-lg shrink-0"
-              title="Quitar">
-              <X size={13} />
-            </button>
-          </div>
-        ))}
+      {/* Header de columnas */}
+      <div className="grid grid-cols-[1fr_115px_100px_100px_28px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
+        <span>Concepto</span>
+        <span>Quién paga</span>
+        <span className="text-right">Pagado</span>
+        <span className="text-right">A cobrar</span>
+        <span></span>
       </div>
 
-      {/* Sugerencias rápidas */}
-      {disponibles.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <span className="text-[10px] text-muted uppercase tracking-widest mt-1.5 mr-1">
-            Agregar:
-          </span>
-          {disponibles.map(s => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => onAdd({ label: s, monto: 0, estado: 'cobrar' })}
-              className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition"
-            >
-              + {s}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => onAdd()}
-            className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-dashed border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition"
-          >
-            + Otro…
+      {/* Filas */}
+      <div className="space-y-1.5">
+        {(conceptos || []).map((c, i) => {
+          const propietario = c.paga === 'propietario'
+          return (
+            <div key={i}
+              className={`grid grid-cols-[1fr_115px_100px_100px_28px] gap-2 items-center p-2 rounded-xl border ${
+                c._arrastre
+                  ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300/50 dark:border-amber-700/40'
+                  : propietario
+                    ? 'bg-[#FAF6EE] dark:bg-[#1A1612] border-[#B8893A]/30'
+                    : 'bg-neutral-50 dark:bg-[#1A1A1A] border-border dark:border-[#2A2A2A]'
+              }`}
+              title={c._arrastre ? `Arrastrado de ${c._arrastre} (quedó pendiente)` : undefined}>
+              {c.fijo ? (
+                <span className="text-[13px] font-medium px-1">{c.label}</span>
+              ) : (
+                <input type="text" placeholder="Ej: Luz"
+                  className="input !py-1.5 !px-2 text-[12px]"
+                  value={c.label || ''}
+                  onChange={e => onUpdate(i, 'label', e.target.value)} />
+              )}
+              <select
+                className={`input !py-1.5 !px-2 text-[11px] ${propietario ? '!border-[#B8893A]/60 !text-[#B8893A]' : ''}`}
+                value={c.paga || 'inquilino'}
+                onChange={e => onUpdate(i, 'paga', e.target.value)}>
+                <option value="inquilino">Inquilino</option>
+                <option value="propietario">Propietario</option>
+              </select>
+              <input type="number" placeholder="0"
+                className="input !py-1.5 !px-2 text-right tabular-nums text-[12px] disabled:opacity-40"
+                disabled={propietario}
+                value={c.pagado || ''}
+                onChange={e => onUpdate(i, 'pagado', e.target.value === '' ? 0 : Number(e.target.value))} />
+              <input type="number" placeholder="0"
+                className="input !py-1.5 !px-2 text-right tabular-nums text-[12px] disabled:opacity-40"
+                disabled={propietario}
+                value={c.a_cobrar || ''}
+                onChange={e => onUpdate(i, 'a_cobrar', e.target.value === '' ? 0 : Number(e.target.value))} />
+              {c.fijo ? (
+                <span />
+              ) : (
+                <button type="button"
+                  onClick={() => onRemove(i)}
+                  className="p-1 text-muted hover:text-danger rounded-lg"
+                  title="Quitar">
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Botones para agregar */}
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <span className="text-[10px] text-muted uppercase tracking-widest mt-1.5 mr-1">Agregar:</span>
+        {disponibles.map(s => (
+          <button key={s} type="button"
+            onClick={() => onAdd({ label: s, paga: 'inquilino', pagado: 0, a_cobrar: 0 })}
+            className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition">
+            + {s}
           </button>
-        </div>
-      )}
-
-      {(conceptos || []).length === 0 && (
-        <p className="text-[11px] text-muted mt-1">
-          Solo se cobrará el alquiler. Agregá expensas, tasas o servicios si corresponde.
-        </p>
-      )}
+        ))}
+        <button type="button"
+          onClick={() => onAdd({ label: '', paga: 'inquilino', pagado: 0, a_cobrar: 0 })}
+          className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-dashed border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition">
+          + Otro…
+        </button>
+      </div>
     </div>
   )
 }
@@ -343,40 +332,45 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     .filter(r => refsSelected.has(r.id))
     .reduce((s, r) => s + (Number(r.monto) || 0), 0)
 
-  // Precarga: los conceptos arrancan con (a) valores sugeridos desde el
-  // contrato/propiedad y (b) los conceptos que quedaron `pendiente` en
-  // períodos anteriores (los traemos del backend para no perderlos).
+  // Precarga: 3 filas fijas (Alquiler, Expensas, Tasas municipales) con
+  // monto sugerido desde el contrato/propiedad en columna "A cobrar".
+  // Después se suman los arrastres de períodos anteriores (que quedaron
+  // pendientes y se cobran ahora) y luego servicios extra que se agreguen.
   const pendientesArrastre = item.conceptos_pendientes || []
   const labelsArrastre = new Set(pendientesArrastre.map(p => p.label.toLowerCase()))
+
+  // Helper: si hay arrastre para este label fijo, sumamos el monto al a_cobrar.
+  const arrastreFor = (lbl) => {
+    const a = pendientesArrastre.find(p => p.label.toLowerCase() === lbl.toLowerCase())
+    return a ? Number(a.monto) || 0 : 0
+  }
+  const extraSug = (lbl, sug) => (Number(sug) || 0) + arrastreFor(lbl)
+
   const [form, setForm] = useState({
-    monto_alquiler: item.monto_alquiler_sug ?? item.monto_total ?? 0,
-    conceptos: [
-      ...(item.monto_expensas_sug > 0 && !labelsArrastre.has('expensas')
-        ? [{ label: 'Expensas', monto: item.monto_expensas_sug, estado: 'cobrar' }]
-        : []),
-      ...(item.monto_tasas_sug > 0 && !labelsArrastre.has('tasas municipales')
-        ? [{ label: 'Tasas municipales', monto: item.monto_tasas_sug, estado: 'cobrar' }]
-        : []),
-      // Arrastres de períodos anteriores — entran como `cobrar` por default
-      // (el operador puede cambiarlos a `pendiente` si tampoco se cobran ahora).
-      ...pendientesArrastre.map(p => ({
-        label: p.label,
-        monto: p.monto,
-        estado: 'cobrar',
-        _arrastre: p.desde_periodo,
-      })),
-    ],
     fecha_pago: new Date().toISOString().slice(0, 10),
     notas: '',
+    conceptos: [
+      { label: 'Alquiler', fijo: true, paga: 'inquilino', pagado: 0,
+        a_cobrar: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0 },
+      { label: 'Expensas', fijo: true, paga: 'inquilino', pagado: 0,
+        a_cobrar: extraSug('Expensas', item.monto_expensas_sug) },
+      { label: 'Tasas municipales', fijo: true, paga: 'inquilino', pagado: 0,
+        a_cobrar: extraSug('Tasas municipales', item.monto_tasas_sug) },
+      // Arrastres de OTROS conceptos (no Expensas / Tasas que ya están arriba)
+      ...pendientesArrastre
+        .filter(p => !CONCEPTOS_FIJOS.some(f => f.toLowerCase() === p.label.toLowerCase()))
+        .map(p => ({
+          label: p.label, paga: 'inquilino', pagado: 0,
+          a_cobrar: Number(p.monto) || 0, _arrastre: p.desde_periodo,
+        })),
+    ],
   })
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
-  const setAlquiler = (val) => setForm(f => ({ ...f, monto_alquiler: val }))
   const setFecha = (val) => setForm(f => ({ ...f, fecha_pago: val }))
   const setNotas = (val) => setForm(f => ({ ...f, notas: val }))
 
-  // Manejo de la lista dinámica de conceptos
   const updateConcepto = (idx, campo, valor) => {
     setForm(f => ({
       ...f,
@@ -386,49 +380,51 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
   const eliminarConcepto = (idx) => {
     setForm(f => ({ ...f, conceptos: f.conceptos.filter((_, i) => i !== idx) }))
   }
-  const agregarConcepto = (preset = null) => {
-    const nuevo = preset || { label: '', monto: 0, estado: 'cobrar' }
-    setForm(f => ({ ...f, conceptos: [...f.conceptos, nuevo] }))
+  const agregarConcepto = (preset) => {
+    setForm(f => ({ ...f, conceptos: [...f.conceptos, preset] }))
   }
 
-  // Cálculo según estado de cada concepto:
-  //   cobrar         → se suma al total cobrado al inquilino y se reenvía al propietario
-  //   pagado_directo → informativo (ya pagado al ente, no toca caja)
-  //   pendiente      → no se cobra ahora, queda pendiente para el próximo período
-  const sumByEstado = (estado) => (form.conceptos || [])
-    .filter(c => (c.estado || 'cobrar') === estado)
-    .reduce((s, c) => s + (Number(c.monto) || 0), 0)
-  const cobradoConceptosInq = sumByEstado('cobrar')
-  const totalPagadoDirecto = sumByEstado('pagado_directo')
-  const totalPendiente = sumByEstado('pendiente')
-
-  const alquiler = Number(form.monto_alquiler) || 0
-  const subtotal = alquiler + cobradoConceptosInq
-  const total = subtotal - descuentoRefs
-  // La comisión se calcula sólo sobre el alquiler.
-  const comision = (item.comision_porc || 0) * alquiler / 100
-  // Neto: alquiler − comisión. Los conceptos cobrados son plata de paso
-  // (se reenvían al propietario para que pague el ente), no afectan el neto.
-  const neto = alquiler - comision
-  const reenviadoPropietario = cobradoConceptosInq
+  // Total a cobrar al inquilino: suma de `a_cobrar` donde paga=inquilino,
+  // menos descuento de refacciones.
+  const aCobrarInq = (form.conceptos || [])
+    .filter(c => (c.paga || 'inquilino') === 'inquilino')
+    .reduce((s, c) => s + (Number(c.a_cobrar) || 0), 0)
+  const total = Math.max(0, aCobrarInq - descuentoRefs)
 
   const submit = async (e) => {
     e.preventDefault()
     setLoading(true); setErr('')
     try {
+      // Mapeo al backend:
+      // - El alquiler va en `monto_alquiler` (pagado + a_cobrar de la fila Alquiler).
+      // - Cada otra fila se traduce en hasta 2 conceptos:
+      //     pagado>0  → estado='pagado_directo'
+      //     a_cobrar>0→ estado='cobrar'
+      // - Si paga=propietario, el monto va como `pagado_directo` informativo
+      //   (no se cobra al inquilino).
+      const filaAlquiler = form.conceptos.find(c => c.label === 'Alquiler') || { pagado: 0, a_cobrar: 0 }
+      const montoAlquilerTotal = (Number(filaAlquiler.pagado) || 0) + (Number(filaAlquiler.a_cobrar) || 0)
+
+      const conceptos = []
+      for (const c of form.conceptos) {
+        if (c.label === 'Alquiler' || !c.label?.trim()) continue
+        const label = c.label.trim()
+        const pagado = Number(c.pagado) || 0
+        const aCobrar = Number(c.a_cobrar) || 0
+        if (c.paga === 'propietario') {
+          const monto = pagado + aCobrar
+          if (monto > 0) conceptos.push({ label, monto, estado: 'pagado_directo' })
+          continue
+        }
+        if (pagado > 0) conceptos.push({ label, monto: pagado, estado: 'pagado_directo' })
+        if (aCobrar > 0) conceptos.push({ label, monto: aCobrar, estado: 'cobrar' })
+      }
+
       const payload = {
         periodo: mes,
         fecha_pago: form.fecha_pago || null,
-        monto_alquiler: Number(form.monto_alquiler) || 0,
-        // Formato nuevo: lista granular con quién paga cada concepto
-        conceptos: (form.conceptos || [])
-          .filter(c => c.label?.trim() && Number(c.monto) > 0)
-          .map(c => ({
-            label: c.label.trim(),
-            monto: Number(c.monto),
-            estado: ['cobrar', 'pagado_directo', 'pendiente'].includes(c.estado)
-              ? c.estado : 'cobrar',
-          })),
+        monto_alquiler: montoAlquilerTotal,
+        conceptos,
         monto_descuento_refacciones: descuentoRefs,
         refacciones_aplicadas: Array.from(refsSelected),
         monto_total: total,
@@ -444,11 +440,11 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto"
       onClick={onClose}>
-      <div className="card p-7 w-full max-w-lg shadow-lift animate-scale-in my-6"
+      <div className="card p-7 w-full max-w-2xl shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h2 className="hero-title text-xl sm:text-2xl mb-0.5">Registrar pago</h2>
+            <h2 className="hero-title text-xl sm:text-2xl mb-0.5">Cobrar al inquilino</h2>
             <p className="text-[12px] text-[#737373]">{item.propiedad} · {item.contrato_codigo}</p>
             <p className="text-[12px] text-[#737373]">Inquilino: {item.inquilino}</p>
           </div>
@@ -468,17 +464,8 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
             </div>
           </div>
 
-          <div>
-            <label className="label">Alquiler $</label>
-            <input className="input" type="number" value={form.monto_alquiler}
-              onChange={e => setAlquiler(e.target.value)} />
-            <p className="text-[10px] text-muted mt-1">
-              Sobre este monto se calcula la comisión inmobiliaria ({item.comision_porc || 0}%).
-            </p>
-          </div>
-
-          {/* Conceptos dinámicos: expensas, tasas, luz, gas, etc. con quién paga */}
-          <ConceptosEditables
+          {/* Tabla de conceptos con columnas Pagado / A cobrar */}
+          <TablaConceptos
             conceptos={form.conceptos}
             onUpdate={updateConcepto}
             onRemove={eliminarConcepto}
@@ -521,41 +508,18 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
             </div>
           )}
 
-          {/* Resumen */}
-          <div className="rounded-2xl bg-[#F5F5F5] dark:bg-[#1A1A1A] p-4 space-y-1.5 text-[13px]">
-            {descuentoRefs > 0 && (
-              <>
-                <div className="flex justify-between text-muted">
-                  <span>Subtotal</span><span>{fmtMoney(subtotal)}</span>
-                </div>
-                <div className="flex justify-between text-[#B8893A]">
-                  <span>Descuento refacciones</span><span>− {fmtMoney(descuentoRefs)}</span>
-                </div>
-                <div className="border-t border-border my-1.5" />
-              </>
-            )}
-            <div className="flex justify-between"><span className="text-muted">Total cobrado al inquilino</span><span className="font-semibold">{fmtMoney(total)}</span></div>
-            {totalPagadoDirecto > 0 && (
-              <div className="flex justify-between text-[11px] text-emerald-700 dark:text-emerald-400 italic">
-                <span>✓ Ya pagado por inquilino (informativo)</span>
-                <span>{fmtMoney(totalPagadoDirecto)}</span>
-              </div>
-            )}
-            {totalPendiente > 0 && (
-              <div className="flex justify-between text-[11px] text-amber-700 dark:text-amber-400 italic">
-                <span>⏳ Pendiente (pasa al próximo período)</span>
-                <span>{fmtMoney(totalPendiente)}</span>
-              </div>
-            )}
-            <div className="flex justify-between"><span className="text-muted">Alquiler base</span><span>{fmtMoney(alquiler)}</span></div>
-            <div className="flex justify-between"><span className="text-muted">Comisión ({item.comision_porc || 0}% s/ alquiler)</span><span>− {fmtMoney(comision)}</span></div>
-            {reenviadoPropietario > 0 && (
-              <div className="flex justify-between text-[11px] text-muted">
-                <span>Reenviado al propietario p/ pagar servicios</span>
-                <span>{fmtMoney(reenviadoPropietario)}</span>
-              </div>
-            )}
-            <div className="border-t border-border pt-1.5 flex justify-between font-semibold"><span>Neto al propietario</span><span className="text-[#B8893A]">{fmtMoney(neto)}</span></div>
+          {/* Total a cobrar — único bloque visible al operador. Comisión y neto
+              al propietario se calculan en backend y aparecen sólo en el PDF. */}
+          <div className="rounded-2xl bg-[#0A0A0A] text-white dark:bg-white dark:text-[#0A0A0A] p-5 flex items-center justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-widest opacity-60">Total a cobrar al inquilino</p>
+              {descuentoRefs > 0 && (
+                <p className="text-[11px] opacity-60 mt-0.5">
+                  {fmtMoney(aCobrarInq)} − {fmtMoney(descuentoRefs)} refacciones
+                </p>
+              )}
+            </div>
+            <span className="text-3xl font-bold tabular-nums">{fmtMoney(total)}</span>
           </div>
 
           <div className="text-[11px] text-muted bg-[#FAF8F3] dark:bg-[#141414] border border-[#E5E5E5] dark:border-[#2A2A2A] rounded-xl p-3 flex gap-2">

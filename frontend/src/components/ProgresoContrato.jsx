@@ -36,8 +36,8 @@ export default function ProgresoContrato({ inicio, fin, estado, mode = 'compact'
     textColor = 'text-amber-600 dark:text-amber-400'
     label = `${Math.ceil(mesesRestantes)} meses`
   } else {
-    color = 'bg-emerald-500'; bg = 'bg-emerald-100 dark:bg-emerald-900/30'
-    textColor = 'text-emerald-700 dark:text-emerald-400'
+    color = 'bg-[#27FF00]'; bg = 'bg-[#27FF00]/15 dark:bg-[#27FF00]/20'
+    textColor = 'text-[#1F9F00] dark:text-[#27FF00]'
     label = `${Math.ceil(mesesRestantes)} meses`
   }
 
