@@ -5,7 +5,7 @@ import api from '../utils/api'
 import ModalTasaMSR from '../components/ModalTasaMSR'
 import {
   CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight,
-  Phone, Mail, X, FileText, Download, Send, AlertTriangle, Wrench, Landmark,
+  Phone, Mail, X, FileText, Download, Send, AlertTriangle, Wrench, Landmark, Check,
 } from 'lucide-react'
 
 const ESTADO_CONFIG = {
@@ -239,76 +239,86 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
     <div>
       <div className="flex items-center justify-between mb-2">
         <label className="label !mb-0">Conceptos del cobro</label>
+        <span className="text-[10px] text-muted">Marcá lo que cobrás</span>
       </div>
 
       {/* Header de columnas */}
-      <div className="grid grid-cols-[1fr_110px_auto_28px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
+      <div className="grid grid-cols-[32px_1fr_110px_28px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
+        <span></span>
         <span>Concepto</span>
         <span className="text-right">Monto</span>
-        <span className="text-center">¿Ya pagado?</span>
         <span></span>
       </div>
 
       {/* Filas */}
       <div className="space-y-1.5">
-        {(conceptos || []).map((c, i) => (
-          <div key={i}
-            className={`grid grid-cols-[1fr_110px_auto_28px] gap-2 items-center p-2 rounded-xl border ${
-              c._arrastre
-                ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300/50 dark:border-amber-700/40'
-                : c.ya_pagado
-                  ? 'bg-green-50 dark:bg-green-900/10 border-green-300/40 dark:border-green-700/30'
-                  : 'bg-neutral-50 dark:bg-[#1A1A1A] border-border dark:border-[#2A2A2A]'
-            }`}
-            title={c._arrastre ? `Arrastrado de ${c._arrastre} (quedó pendiente)` : undefined}>
+        {(conceptos || []).map((c, i) => {
+          const incluido = c.incluido !== false
+          return (
+            <div key={i}
+              className={`grid grid-cols-[32px_1fr_110px_28px] gap-2 items-center p-2 rounded-xl border transition-all ${
+                c._arrastre
+                  ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300/50 dark:border-amber-700/40'
+                  : incluido
+                    ? 'bg-neutral-50 dark:bg-[#1A1A1A] border-border dark:border-[#2A2A2A]'
+                    : 'bg-white dark:bg-[#0F0F0F] border-border/40 dark:border-[#1E1E1E] opacity-45'
+              }`}
+              title={c._arrastre ? `Arrastrado de ${c._arrastre} (quedó pendiente)` : undefined}>
 
-            {/* Concepto */}
-            {c.fijo ? (
-              <span className="text-[13px] font-medium px-1">{c.label}</span>
-            ) : (
-              <input type="text" placeholder="Ej: Luz"
-                className="input !py-1.5 !px-2 text-[12px]"
-                value={c.label || ''}
-                onChange={e => onUpdate(i, 'label', e.target.value)} />
-            )}
-
-            {/* Monto */}
-            <input type="number" placeholder="0"
-              className="input !py-1.5 !px-2 text-right tabular-nums text-[12px]"
-              value={c.monto || ''}
-              onChange={e => onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))} />
-
-            {/* Toggle ¿Ya pagado? */}
-            <label className="flex items-center justify-center gap-1.5 cursor-pointer select-none">
-              <div
-                onClick={() => onUpdate(i, 'ya_pagado', !c.ya_pagado)}
-                className={`relative w-9 h-5 rounded-full transition-colors ${
-                  c.ya_pagado ? 'bg-green-500 dark:bg-green-600' : 'bg-gray-200 dark:bg-gray-700'
-                }`}>
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                  c.ya_pagado ? 'translate-x-4' : 'translate-x-0'
-                }`} />
-              </div>
-              <span className={`text-[11px] font-medium w-14 ${
-                c.ya_pagado ? 'text-green-600 dark:text-green-400' : 'text-muted'
-              }`}>
-                {c.ya_pagado ? 'Pagado' : 'A cobrar'}
-              </span>
-            </label>
-
-            {/* Quitar (sólo extras) */}
-            {c.fijo ? (
-              <span />
-            ) : (
+              {/* Checkbox circular */}
               <button type="button"
-                onClick={() => onRemove(i)}
-                className="p-1 text-muted hover:text-danger rounded-lg"
-                title="Quitar">
-                <X size={13} />
+                onClick={() => onUpdate(i, 'incluido', !incluido)}
+                className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                  incluido
+                    ? 'bg-green-500 border-green-500 text-white'
+                    : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+                }`}>
+                {incluido && <Check size={12} />}
               </button>
-            )}
-          </div>
-        ))}
+
+              {/* Concepto */}
+              {c.fijo ? (
+                <div className="min-w-0 px-1">
+                  <p className="text-[13px] font-medium">{c.label}</p>
+                  {c.label === 'Tasas municipales' && incluido && (
+                    <p className="text-[10px] text-muted">100% al propietario</p>
+                  )}
+                  {c._arrastre && (
+                    <p className="text-[10px] text-amber-600 dark:text-amber-400">arrastre de {c._arrastre}</p>
+                  )}
+                </div>
+              ) : (
+                <div className="min-w-0">
+                  <input type="text" placeholder="Ej: Luz"
+                    className="input !py-1.5 !px-2 text-[12px]"
+                    value={c.label || ''}
+                    onChange={e => onUpdate(i, 'label', e.target.value)} />
+                  {c.label?.toLowerCase().includes('municipal') && incluido && (
+                    <p className="text-[10px] text-muted mt-0.5 px-1">100% al propietario</p>
+                  )}
+                </div>
+              )}
+
+              {/* Monto */}
+              <input type="number" placeholder="0"
+                className="input !py-1.5 !px-2 text-right tabular-nums text-[12px]"
+                value={c.monto || ''}
+                onChange={e => onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))} />
+
+              {/* Quitar (sólo extras) */}
+              {c.fijo ? (
+                <span />
+              ) : (
+                <button type="button"
+                  onClick={() => onRemove(i)}
+                  className="p-1 text-muted hover:text-danger rounded-lg"
+                  title="Quitar">
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {/* Botones para agregar */}
@@ -316,13 +326,13 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
         <span className="text-[10px] text-muted uppercase tracking-widest mt-1.5 mr-1">Agregar:</span>
         {disponibles.map(s => (
           <button key={s} type="button"
-            onClick={() => onAdd({ label: s, monto: 0, ya_pagado: false })}
+            onClick={() => onAdd({ label: s, monto: 0, incluido: true })}
             className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition">
             + {s}
           </button>
         ))}
         <button type="button"
-          onClick={() => onAdd({ label: '', monto: 0, ya_pagado: false })}
+          onClick={() => onAdd({ label: '', monto: 0, incluido: true })}
           className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-dashed border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition">
           + Otro…
         </button>
@@ -368,14 +378,14 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     fecha_pago: new Date().toISOString().slice(0, 10),
     notas: '',
     conceptos: [
-      { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, ya_pagado: false },
-      { label: 'Expensas',          fijo: true, monto: extraSug('Expensas', item.monto_expensas_sug),               ya_pagado: false },
-      { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug),          ya_pagado: false },
+      { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, incluido: true },
+      { label: 'Expensas',          fijo: true, monto: extraSug('Expensas', item.monto_expensas_sug),               incluido: true },
+      { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug),         incluido: true },
       // Arrastres de OTROS conceptos (no Expensas / Tasas que ya están arriba)
       ...pendientesArrastre
         .filter(p => !CONCEPTOS_FIJOS.some(f => f.toLowerCase() === p.label.toLowerCase()))
         .map(p => ({
-          label: p.label, monto: Number(p.monto) || 0, ya_pagado: false, _arrastre: p.desde_periodo,
+          label: p.label, monto: Number(p.monto) || 0, incluido: true, _arrastre: p.desde_periodo,
         })),
     ],
   })
@@ -400,10 +410,10 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     setForm(f => ({ ...f, conceptos: [...f.conceptos, preset] }))
   }
 
-  // Total a cobrar al inquilino: suma de montos donde ya_pagado=false,
+  // Total a cobrar al inquilino: suma de montos donde incluido=true,
   // menos descuento de refacciones.
   const aCobrarInq = (form.conceptos || [])
-    .filter(c => !c.ya_pagado)
+    .filter(c => c.incluido !== false)
     .reduce((s, c) => s + (Number(c.monto) || 0), 0)
   const total = Math.max(0, aCobrarInq - descuentoRefs)
 
@@ -412,19 +422,21 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     setLoading(true); setErr('')
     try {
       // Mapeo al backend:
-      // - El alquiler va en `monto_alquiler` (siempre el monto de esa fila).
-      // - Cada otra fila: ya_pagado=true → estado='pagado_directo' (ya lo pagó el
-      //   inquilino directamente); ya_pagado=false → estado='cobrar' (se cobra ahora).
-      const filaAlquiler = form.conceptos.find(c => c.label === 'Alquiler') || { monto: 0 }
+      // - El alquiler va en `monto_alquiler` (solo si está incluido).
+      // - Cada otra fila incluida → estado='cobrar'.
+      //   Tasas municipales cobradas pasan 100% al propietario sin comisión (pasa-mano).
+      // - Filas NO incluidas (desmarcadas) no se guardan en este pago.
+      const filaAlquiler = form.conceptos.find(c => c.label === 'Alquiler' && c.incluido !== false) || { monto: 0 }
       const montoAlquilerTotal = Number(filaAlquiler.monto) || 0
 
       const conceptos = []
       for (const c of form.conceptos) {
+        if (c.incluido === false) continue          // desmarcado: no va en este pago
         if (c.label === 'Alquiler' || !c.label?.trim()) continue
         const label = c.label.trim()
         const monto = Number(c.monto) || 0
         if (monto <= 0) continue
-        conceptos.push({ label, monto, estado: c.ya_pagado ? 'pagado_directo' : 'cobrar' })
+        conceptos.push({ label, monto, estado: 'cobrar' })
       }
 
       const payload = {
@@ -540,17 +552,6 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
           {/* Total a cobrar — único bloque visible al operador. Comisión y neto
               al propietario se calculan en backend y aparecen sólo en el PDF. */}
           <div className="rounded-2xl bg-[#0A0A0A] text-white dark:bg-white dark:text-[#0A0A0A] p-5">
-            {/* Resumen de ya pagados */}
-            {(() => {
-              const yaPagado = (form.conceptos || [])
-                .filter(c => c.ya_pagado && (Number(c.monto) || 0) > 0)
-                .reduce((s, c) => s + (Number(c.monto) || 0), 0)
-              return yaPagado > 0 ? (
-                <p className="text-[11px] opacity-50 mb-2 tabular-nums">
-                  Ya pagado directamente: {fmtMoney(yaPagado)}
-                </p>
-              ) : null
-            })()}
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[10px] uppercase tracking-widest opacity-60">Total a cobrar al inquilino</p>
@@ -580,7 +581,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
 
           <div className="flex gap-3 pt-1">
             <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
-            <button className="btn-primary flex-1" disabled={loading || (form.conceptos || []).every(c => (Number(c.monto) || 0) === 0)}>
+            <button className="btn-primary flex-1" disabled={loading || (form.conceptos || []).filter(c => c.incluido !== false).every(c => (Number(c.monto) || 0) === 0)}>
               {loading ? 'Procesando…' : 'Confirmar y emitir comprobantes'}
             </button>
           </div>
