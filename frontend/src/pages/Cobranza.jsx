@@ -4,7 +4,7 @@ import SearchBar, { match } from '../components/SearchBar'
 import api from '../utils/api'
 import {
   CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight,
-  Phone, Mail, X, FileText, Download, Send, AlertTriangle, Wrench,
+  Phone, Mail, X, FileText, Download, Send, AlertTriangle, Wrench, Landmark,
 } from 'lucide-react'
 
 const ESTADO_CONFIG = {
@@ -72,7 +72,17 @@ export default function Cobranza() {
             <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Alquileres</p>
             <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Cobranza</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Atajo a la web de la muni para consultar la deuda municipal en vivo */}
+            <a
+              href="https://consultadeuda.santarosa.gob.ar/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-ghost gap-1.5 text-[12px]"
+              title="Abrir el portal de la Municipalidad de Santa Rosa para consultar tasas/deuda municipal"
+            >
+              <Landmark size={14} /> Consultar tasas (Muni)
+            </a>
             <button onClick={() => setMes(prevMes(mes))} className="btn-ghost p-2"><ChevronLeft size={16} /></button>
             <span className="text-sm font-semibold capitalize min-w-[160px] text-center">{mesLabel(mes)}</span>
             <button onClick={() => setMes(nextMes(mes))} className="btn-ghost p-2"><ChevronRight size={16} /></button>

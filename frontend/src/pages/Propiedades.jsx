@@ -823,18 +823,19 @@ function Modal({ initial, clientes, onClose, onSaved }) {
 
           <div>
             <label className="label flex items-center gap-1.5" htmlFor="prop-padron">
-              <Landmark size={11} /> Nº de referencia municipal (padrón Santa Rosa)
+              <Landmark size={11} /> Número Ref. Inmueble <span className="text-danger">*</span>
             </label>
             <input
               id="prop-padron"
               name="numero_referencia"
               className="input font-mono"
               placeholder="ej. 123456"
+              required={form.modalidad !== 'venta'}
               value={form.numero_referencia || ''}
               onChange={set('numero_referencia')}
             />
             <p className="text-[11px] text-muted dark:text-gray-500 mt-1">
-              Permite consultar la deuda y la tasa actual desde el portal de la municipalidad con 1 click.
+              Número de padrón municipal del inmueble. Obligatorio para alquileres — permite consultar la deuda municipal en vivo.
             </p>
           </div>
 

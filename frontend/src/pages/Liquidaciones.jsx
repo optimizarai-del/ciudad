@@ -502,13 +502,47 @@ function ModalMarcar({ pago, onClose, onSaved }) {
   }
   // Compat: modelo nuevo usa `estado`, viejo usa `paga`.
   const _estadoDe = c => c.estado || (c.paga === 'propietario' ? 'pagado_directo' : 'cobrar')
-  const conceptosInquilino = conceptos.filter(c => _estadoDe(c) === 'cobrar')
-  const conceptosPropietario = conceptos.filter(c => _estadoDe(c) === 'pagado_directo')
+
+  // Construimos las filas para la tabla "Concepto | Pagado | A rendir":
+  //   - Pagado     = lo que el inquilino ya pagó (directo al ente o adelantado)
+  //   - A rendir   = lo que la inmobiliaria le tiene que dar al propietario
+  //     Alquiler: a_rendir = alquiler − comisión.
+  //     Resto (expensas/tasas/etc cobrados): pasante, se rinde igual al monto cobrado.
+  //     Si fue "pagado_directo": pagado>0, a_rendir=0 (no toca a la inmobiliaria).
   const totalCobradoAlquiler = pago.monto_alquiler || 0
-  const totalCobradoConceptos = conceptosInquilino.reduce((s, c) => s + (Number(c.monto) || 0), 0)
-  const totalCobradoInquilino = totalCobradoAlquiler + totalCobradoConceptos
   const comision = (totalCobradoAlquiler * (pago.comision_porc || 0)) / 100
+
+  const filasDesglose = []
+  filasDesglose.push({
+    label: 'Alquiler',
+    pagado: totalCobradoAlquiler,         // el inquilino lo pagó
+    a_rendir: totalCobradoAlquiler - comision,
+    nota: pago.comision_porc ? `cobramos ${pago.comision_porc}% comisión` : null,
+  })
+  // Agrupamos por label
+  const grupos = {}
+  for (const c of conceptos) {
+    const lbl = c.label || 'Otro'
+    const key = lbl.toLowerCase()
+    if (!grupos[key]) grupos[key] = { label: lbl, pagado: 0, a_rendir: 0 }
+    const estado = _estadoDe(c)
+    const monto = Number(c.monto) || 0
+    if (estado === 'cobrar') {
+      // Se cobró al inquilino → es plata de paso, hay que rendirla
+      grupos[key].pagado += monto
+      grupos[key].a_rendir += monto
+    } else if (estado === 'pagado_directo') {
+      // Inquilino lo pagó directo al ente → ya está saldado, no se rinde
+      grupos[key].pagado += monto
+    }
+  }
+  Object.values(grupos).forEach(g => filasDesglose.push(g))
+
+  const totalPagado = filasDesglose.reduce((s, f) => s + (f.pagado || 0), 0)
+  const totalARendir = filasDesglose.reduce((s, f) => s + (f.a_rendir || 0), 0)
   const totalAEntregar = pago.mi_parte ?? pago.neto_a_pagar
+  // Para compat con el resto del modal (refacciones, etc.)
+  const conceptosPropietario = conceptos.filter(c => _estadoDe(c) === 'pagado_directo')
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto"
@@ -526,44 +560,45 @@ function ModalMarcar({ pago, onClose, onSaved }) {
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
 
-        {/* Desglose detallado: cómo se compone lo que recibe el propietario */}
+        {/* Desglose en tabla: Concepto | Pagado (por inquilino) | A rendir (al propietario) */}
         <div className="rounded-2xl border border-border dark:border-[#2A2A2A] bg-neutral-50 dark:bg-[#141414] p-4 mb-5">
           <p className="text-[10px] uppercase tracking-widest font-semibold text-muted mb-3">
             Desglose
           </p>
-          <div className="space-y-1.5 text-[12px]">
-            {/* Conceptos cobrados al inquilino */}
-            <div className="flex justify-between">
-              <span className="text-muted">Alquiler</span>
-              <span className="tabular-nums">{fmt(totalCobradoAlquiler)}</span>
-            </div>
-            {conceptosInquilino.map((c, i) => (
-              <div key={i} className="flex justify-between text-muted">
-                <span>{c.label}</span>
-                <span className="tabular-nums">{fmt(c.monto)}</span>
+
+          {/* Header */}
+          <div className="grid grid-cols-[1fr_110px_110px] gap-2 px-1 text-[10px] uppercase tracking-wider text-muted font-semibold mb-1">
+            <span>Concepto</span>
+            <span className="text-right">Pagado</span>
+            <span className="text-right">A rendir</span>
+          </div>
+
+          <div className="space-y-1 text-[12px]">
+            {filasDesglose.map((f, i) => (
+              <div key={i} className="grid grid-cols-[1fr_110px_110px] gap-2 px-1 py-1 rounded-lg hover:bg-white/40 dark:hover:bg-black/20">
+                <div className="min-w-0">
+                  <p className="truncate">{f.label}</p>
+                  {f.nota && (
+                    <p className="text-[10px] text-muted/70 italic truncate">{f.nota}</p>
+                  )}
+                </div>
+                <span className="text-right tabular-nums text-muted">
+                  {f.pagado > 0 ? fmt(f.pagado) : '—'}
+                </span>
+                <span className="text-right tabular-nums">
+                  {f.a_rendir > 0 ? fmt(f.a_rendir) : '—'}
+                </span>
               </div>
             ))}
-            {totalCobradoConceptos > 0 && (
-              <div className="border-t border-border pt-1.5 flex justify-between font-medium">
-                <span>Total cobrado al inquilino</span>
-                <span className="tabular-nums">{fmt(totalCobradoInquilino)}</span>
-              </div>
-            )}
 
-            {/* Comisión */}
-            <div className="flex justify-between text-warn pt-1.5">
-              <span>Menos comisión inmobiliaria ({pago.comision_porc || 0}% s/alquiler)</span>
-              <span className="tabular-nums">− {fmt(comision)}</span>
+            {/* Totales */}
+            <div className="grid grid-cols-[1fr_110px_110px] gap-2 px-1 pt-2 border-t border-border font-semibold">
+              <span>Totales</span>
+              <span className="text-right tabular-nums text-muted">{fmt(totalPagado)}</span>
+              <span className="text-right tabular-nums">{fmt(totalARendir)}</span>
             </div>
 
-            {/* Pasantes que se derivan a otros (no integran neto al propietario) */}
-            {totalCobradoConceptos > 0 && (
-              <div className="text-[10px] text-muted/70 italic mt-1">
-                Las {conceptosInquilino.map(c => c.label).join(' / ').toLowerCase()} se cobran al inquilino y se derivan al consorcio/municipio — no integran lo que recibe el propietario.
-              </div>
-            )}
-
-            {/* Total a entregar */}
+            {/* Total a entregar destacado */}
             <div className="border-t-2 border-[#B8893A]/40 pt-2 mt-2 flex justify-between text-[14px] font-bold">
               <span>TOTAL A ENTREGAR</span>
               <span className="text-[#B8893A] tabular-nums">{fmt(totalAEntregar)}</span>
@@ -573,21 +608,6 @@ function ModalMarcar({ pago, onClose, onSaved }) {
               <p className="text-[10px] text-muted text-right">
                 {pago.mi_porcentaje}% de {fmt(pago.neto_a_pagar)} (neto total)
               </p>
-            )}
-
-            {/* A cargo del propietario (informativo) */}
-            {conceptosPropietario.length > 0 && (
-              <div className="border-t border-border pt-2 mt-2">
-                <p className="text-[10px] uppercase tracking-widest font-semibold text-[#B8893A] mb-1">
-                  A cargo del propietario (no descuenta)
-                </p>
-                {conceptosPropietario.map((c, i) => (
-                  <div key={i} className="flex justify-between text-[#B8893A]">
-                    <span>{c.label}</span>
-                    <span className="tabular-nums">{fmt(c.monto)}</span>
-                  </div>
-                ))}
-              </div>
             )}
 
             {/* Refacciones aplicadas a este pago */}
