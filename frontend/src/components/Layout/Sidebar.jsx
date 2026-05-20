@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, FileText, Users, Calculator,
   BarChart2, Bot, TrendingUp, Settings, DollarSign,
-  Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench
+  Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive
 } from 'lucide-react'
 import { useRole } from '../../context/RoleContext'
 
@@ -84,9 +84,10 @@ export default function Sidebar({ onNavigate }) {
 
       {/* Herramientas */}
       <Section label="Herramientas">
-        <NavItem to="/indices"        icon={BarChart2} label="Índices" />
-        <NavItem to="/agente"         icon={Bot}       label="Agente IA" />
-        <NavItem to="/recordatorios"  icon={Bell}      label="Recordatorios" />
+        <NavItem to="/indices"                         icon={BarChart2}  label="Índices" />
+        <NavItem to="/agente"                          icon={Bot}        label="Agente IA" />
+        <NavItem to="/recordatorios"                   icon={Bell}       label="Recordatorios" />
+        <NavItem to="/herramientas/versiones-local"    icon={HardDrive}  label="Versiones local" />
       </Section>
 
       {/* Admin */}

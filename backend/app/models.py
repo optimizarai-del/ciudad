@@ -459,3 +459,19 @@ class Comprobante(Base):
     fecha_envio = Column(DateTime)
     error_envio = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class VersionLocal(Base):
+    """Registro de cada snapshot ZIP generado para uso offline.
+
+    Cada vez que un usuario descarga una versión local, se crea una fila
+    aquí con la fecha, el nombre del archivo y el resumen de cuántas filas
+    se exportaron por tabla (JSON en `tablas`).
+    """
+    __tablename__ = "versiones_local"
+    id         = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    nombre     = Column(String, nullable=False)    # ej. "ciudad-v20260520-143012"
+    size_bytes = Column(Integer, default=0)        # tamaño del ZIP en bytes
+    tablas     = Column(Text, nullable=True)       # JSON: {"propiedades": 45, ...}
+    notas      = Column(String, nullable=True)

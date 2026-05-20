@@ -11,7 +11,7 @@ load_dotenv(override=True)
 from app.database import Base, engine
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
 from app.routers import cobranza, ventas_router, comprobantes
-from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr, tasas_mensuales, refacciones
+from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr, tasas_mensuales, refacciones, versiones
 
 Base.metadata.create_all(bind=engine)
 
@@ -46,6 +46,7 @@ app.include_router(demo_fixture.router)
 app.include_router(tasas_msr.router)
 app.include_router(tasas_mensuales.router)
 app.include_router(refacciones.router)
+app.include_router(versiones.router)
 
 
 @app.get("/health")
@@ -487,6 +488,21 @@ def _crear_tabla_propiedad_propietarios():
         print(f"[migrar] propiedad_propietarios: {e}")
     finally:
         db.close()
+
+
+@app.on_event("startup")
+def _crear_tabla_versiones_local():
+    """Crea la tabla versiones_local si no existe. Idempotente."""
+    from sqlalchemy import inspect
+    from app.database import engine
+    try:
+        ins = inspect(engine)
+        if "versiones_local" not in ins.get_table_names():
+            from app.models import VersionLocal  # noqa
+            VersionLocal.__table__.create(engine, checkfirst=True)
+            print("[migrar] tabla `versiones_local` creada")
+    except Exception as e:
+        print(f"[migrar] crear versiones_local: {e}")
 
 
 @app.on_event("startup")

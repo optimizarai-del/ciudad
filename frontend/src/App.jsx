@@ -25,6 +25,7 @@ import Recordatorios      from './pages/Recordatorios'
 import ActualizarTasas    from './pages/ActualizarTasas'
 import Refacciones        from './pages/Refacciones'
 import ClientesVentas     from './pages/ClientesVentas'
+import VersionesLocal     from './pages/VersionesLocal'
 
 export default function App() {
   return (
@@ -119,6 +120,11 @@ export default function App() {
         {/* Admin */}
         <Route path="/equipo" element={
           <ProtectedRoute requireAdmin><Equipo /></ProtectedRoute>
+        } />
+
+        {/* Herramientas */}
+        <Route path="/herramientas/versiones-local" element={
+          <ProtectedRoute><VersionesLocal /></ProtectedRoute>
         } />
 
         {/* Redirects */}
