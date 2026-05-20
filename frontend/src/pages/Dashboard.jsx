@@ -17,8 +17,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     api.get('/api/dashboard/hud').then(r => setStats(r.data)).catch(() => {})
-    api.get('/api/propiedades').then(r => setPropRec(r.data.slice(0, 5))).catch(() => {})
-    api.get('/api/contratos').then(r => setContratos(r.data.slice(0, 5))).catch(() => {})
+    api.get('/api/propiedades?limit=5').then(r => setPropRec(r.data)).catch(() => {})
+    api.get('/api/contratos?limit=5').then(r => setContratos(r.data)).catch(() => {})
     api.get('/api/alertas/vencimientos?dias=60').then(r => setAlertas(r.data)).catch(() => {})
     api.get('/api/indices').then(r => setIndices(r.data)).catch(() => {})
   }, [])

@@ -14,7 +14,7 @@ import base64
 from datetime import date, datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 
 from app.database import get_db
@@ -95,54 +95,118 @@ def _nombre_cliente(c: models.Cliente | None) -> str:
 @router.get("/mensual")
 def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """
-    Devuelve, para el mes pedido, una entrada por cada contrato vigente:
-    si ya hay un Pago para ese período, devuelve sus datos; si no, marca estado='pendiente'.
+    Devuelve, para el mes pedido, una entrada por cada contrato vigente.
+    Si ya hay un Pago para ese período devuelve sus datos; si no, marca estado='pendiente'.
+
+    Optimización de queries:
+      Antes: 5 queries por contrato (N+1) → con 100 contratos = 500+ queries.
+      Ahora: 4 queries TOTALES sin importar cuántos contratos haya:
+        1. Contratos vigentes con propiedad+propietario+inquilino cargados en JOIN.
+        2. Todos los Pagos del mes actual para esos contratos (IN clause).
+        3. Todos los Pagos previos (para conceptos arrastrados) en una sola query.
+        4. Todas las Refacciones pendientes del inquilino en una sola query.
+      Los conceptos arrastrados se calculan en Python (sin queries adicionales).
     """
+    import json as _json
+
     if not mes:
         hoy = date.today()
         mes = f"{hoy.year}-{hoy.month:02d}"
 
-    contratos = apply_workspace_filter(db.query(models.Contrato), models.Contrato, user).filter(
-        models.Contrato.estado == models.ContratoEstado.vigente
-    ).all()
+    # ── Query 1: contratos vigentes con todas las relaciones necesarias ──────
+    contratos = (
+        apply_workspace_filter(db.query(models.Contrato), models.Contrato, user)
+        .filter(models.Contrato.estado == models.ContratoEstado.vigente)
+        .options(
+            joinedload(models.Contrato.propiedad)
+            .joinedload(models.Propiedad.propietario),
+            joinedload(models.Contrato.inquilino),
+        )
+        .all()
+    )
 
+    if not contratos:
+        return []
+
+    cids = [c.id for c in contratos]
+
+    # ── Query 2: pagos del mes actual para todos los contratos ───────────────
+    # Tomamos el más reciente por contrato (mayor id).
+    pagos_mes: dict[int, models.Pago] = {}
+    for p in (
+        db.query(models.Pago)
+        .filter(models.Pago.contrato_id.in_(cids), models.Pago.periodo == mes)
+        .order_by(models.Pago.id.asc())   # asc → el último en el dict gana (mayor id)
+        .all()
+    ):
+        pagos_mes[p.contrato_id] = p
+
+    # ── Query 3: pagos previos para calcular conceptos arrastrados ───────────
+    prior_pagos: dict[int, list] = {}
+    for p in (
+        db.query(models.Pago)
+        .filter(models.Pago.contrato_id.in_(cids), models.Pago.periodo < mes)
+        .order_by(models.Pago.periodo.asc())
+        .all()
+    ):
+        prior_pagos.setdefault(p.contrato_id, []).append(p)
+
+    # ── Query 4: refacciones pendientes del inquilino para todos contratos ───
+    refs_map: dict[int, list] = {}
+    for r in (
+        db.query(models.Refaccion)
+        .filter(
+            models.Refaccion.contrato_id.in_(cids),
+            models.Refaccion.pagador == models.RefaccionPagador.inquilino,
+            models.Refaccion.estado == models.RefaccionEstado.pendiente,
+        )
+        .order_by(models.Refaccion.fecha.asc())
+        .all()
+    ):
+        refs_map.setdefault(r.contrato_id, []).append(r)
+
+    # ── Calcular conceptos arrastrados en Python (sin queries adicionales) ───
+    def _conceptos_desde_pagos(pagos: list) -> list[dict]:
+        pendientes: dict[str, dict] = {}
+        for p in pagos:
+            raw = p.detalle_conceptos
+            if not raw:
+                continue
+            try:
+                arr = _json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                continue
+            for c in (arr or []):
+                label = (c.get("label") or "").strip()
+                if not label:
+                    continue
+                key = label.lower()
+                estado = c.get("estado") or _legacy_paga_to_estado(c.get("paga"))
+                if estado == "pendiente":
+                    pendientes[key] = {
+                        "label": label,
+                        "monto": float(c.get("monto") or 0),
+                        "desde_periodo": p.periodo,
+                    }
+                elif estado in ("cobrar", "pagado_directo"):
+                    pendientes.pop(key, None)
+        return list(pendientes.values())
+
+    # ── Armar resultado en Python (sin más queries) ──────────────────────────
     result = []
     for c in contratos:
-        prop = c.propiedad
-        inq = c.inquilino
-        propietario = prop.propietario if prop else None
-        pago = (
-            db.query(models.Pago)
-            .filter(models.Pago.contrato_id == c.id, models.Pago.periodo == mes)
-            .order_by(models.Pago.id.desc())
-            .first()
-        )
+        prop = c.propiedad          # ya cargado con joinedload
+        inq  = c.inquilino          # ya cargado con joinedload
+        propietario = prop.propietario if prop else None  # ya cargado en JOIN
 
-        # Componentes sugeridos para precargar el modal de "Registrar pago".
-        # El usuario los puede editar antes de confirmar.
+        pago               = pagos_mes.get(c.id)
+        conceptos_pendientes = _conceptos_desde_pagos(prior_pagos.get(c.id, []))
+        refs_pend          = refs_map.get(c.id, [])
+
         alquiler_sug = float(c.monto_inicial or (prop.precio_alquiler if prop else 0) or 0)
-        tasas_sug = float((prop.tasa_municipal if prop else 0) or 0) + float((prop.impuesto_inmobiliario if prop else 0) or 0)
+        tasas_sug    = float((prop.tasa_municipal if prop else 0) or 0) + float((prop.impuesto_inmobiliario if prop else 0) or 0)
         expensas_sug = float((prop.expensas if prop else 0) or 0)
 
-        # Conceptos pendientes que vienen arrastrados de períodos anteriores.
-        # Buscamos en TODOS los pagos previos del contrato los items que se
-        # marcaron como `pendiente` y todavía no se cobraron ni pagaron en un
-        # período posterior. Se devuelven al frontend para precargar el modal.
-        conceptos_pendientes = _conceptos_pendientes_arrastrados(db, c.id, mes)
-
-        # Refacciones pendientes a cargo del inquilino: se descuentan
-        # automáticamente del próximo cobro. Mandamos la lista para que el
-        # frontend muestre el detalle y precargue el descuento.
-        refs_pend = (
-            db.query(models.Refaccion)
-            .filter(
-                models.Refaccion.contrato_id == c.id,
-                models.Refaccion.pagador == models.RefaccionPagador.inquilino,
-                models.Refaccion.estado == models.RefaccionEstado.pendiente,
-            )
-            .order_by(models.Refaccion.fecha.asc())
-            .all()
-        )
         refs_pend_data = [
             {"id": r.id, "fecha": r.fecha.isoformat() if r.fecha else None,
              "descripcion": r.descripcion, "monto": r.monto}
@@ -150,44 +214,43 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
         ]
         refs_total = sum((r.monto or 0) for r in refs_pend)
 
-        # Esperado total: si no hay pago, calculamos por contrato + costos asociados
         if pago:
-            estado = pago.estado.value if hasattr(pago.estado, "value") else pago.estado
+            estado     = pago.estado.value if hasattr(pago.estado, "value") else pago.estado
             monto_total = pago.monto_total or 0
-            fecha_venc = pago.fecha_vencimiento.isoformat() if pago.fecha_vencimiento else None
-            fecha_pago = pago.fecha_pago.isoformat() if pago.fecha_pago else None
+            fecha_venc  = pago.fecha_vencimiento.isoformat() if pago.fecha_vencimiento else None
+            fecha_pago  = pago.fecha_pago.isoformat() if pago.fecha_pago else None
         else:
-            estado = "pendiente"
+            estado      = "pendiente"
             monto_total = round(alquiler_sug + expensas_sug + tasas_sug, 2)
-            fecha_venc = None
-            fecha_pago = None
+            fecha_venc  = None
+            fecha_pago  = None
 
         result.append({
-            "pago_id": pago.id if pago else None,
-            "contrato_id": c.id,
-            "contrato_codigo": c.codigo or f"#{c.id}",
-            "propiedad_id": prop.id if prop else None,
-            "propiedad": prop.direccion if prop else "",
-            "propiedad_ciudad": prop.ciudad if prop else "",
-            "inquilino_id": inq.id if inq else None,
-            "inquilino": _nombre_cliente(inq) or "Sin inquilino",
-            "inquilino_email": inq.email if inq else None,
-            "inquilino_telefono": inq.telefono if inq else None,
-            "propietario_id": propietario.id if propietario else None,
-            "propietario": _nombre_cliente(propietario) or "Sin propietario",
-            "propietario_email": propietario.email if propietario else None,
-            "comision_porc": c.comision_porc or 0,
-            "monto_total": monto_total,
-            "monto_alquiler_sug": round(alquiler_sug, 2),
-            "monto_expensas_sug": round(expensas_sug, 2),
-            "monto_tasas_sug": round(tasas_sug, 2),
-            "conceptos_pendientes": conceptos_pendientes,
-            "refacciones_pendientes": refs_pend_data,
+            "pago_id":                  pago.id if pago else None,
+            "contrato_id":              c.id,
+            "contrato_codigo":          c.codigo or f"#{c.id}",
+            "propiedad_id":             prop.id if prop else None,
+            "propiedad":                prop.direccion if prop else "",
+            "propiedad_ciudad":         prop.ciudad if prop else "",
+            "inquilino_id":             inq.id if inq else None,
+            "inquilino":                _nombre_cliente(inq) or "Sin inquilino",
+            "inquilino_email":          inq.email if inq else None,
+            "inquilino_telefono":       inq.telefono if inq else None,
+            "propietario_id":           propietario.id if propietario else None,
+            "propietario":              _nombre_cliente(propietario) or "Sin propietario",
+            "propietario_email":        propietario.email if propietario else None,
+            "comision_porc":            c.comision_porc or 0,
+            "monto_total":              monto_total,
+            "monto_alquiler_sug":       round(alquiler_sug, 2),
+            "monto_expensas_sug":       round(expensas_sug, 2),
+            "monto_tasas_sug":          round(tasas_sug, 2),
+            "conceptos_pendientes":     conceptos_pendientes,
+            "refacciones_pendientes":   refs_pend_data,
             "refacciones_descuento_sug": round(refs_total, 2),
-            "fecha_vencimiento": fecha_venc,
-            "fecha_pago": fecha_pago,
-            "estado": estado,
-            "periodo": mes,
+            "fecha_vencimiento":        fecha_venc,
+            "fecha_pago":               fecha_pago,
+            "estado":                   estado,
+            "periodo":                  mes,
         })
 
     return result

@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from typing import List, Optional
 from pydantic import BaseModel
 
@@ -129,9 +129,26 @@ def _scope(db: Session, user):
 
 
 @router.get("/", response_model=List[schemas.PropiedadOut])
-def listar(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    items = _scope(db, user).order_by(models.Propiedad.id.desc()).all()
-    return [_to_out(p) for p in items]
+def listar(
+    limit: Optional[int] = Query(None, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    # Eager-load propietario (1 JOIN) y la pivote M2M propietarios + sus clientes
+    # (1 subquery adicional via selectinload). Evita el N+1 que se producía al
+    # acceder a p.propietario y pp.cliente desde _to_out() con lazy loading.
+    q = (
+        _scope(db, user)
+        .options(
+            joinedload(models.Propiedad.propietario),
+            selectinload(models.Propiedad.propietarios)
+            .joinedload(models.PropiedadPropietario.cliente),
+        )
+        .order_by(models.Propiedad.id.desc())
+    )
+    if limit:
+        q = q.limit(limit)
+    return [_to_out(p) for p in q.all()]
 
 
 @router.post("/", response_model=schemas.PropiedadOut)

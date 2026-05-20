@@ -1,8 +1,8 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body, Query
 from fastapi.responses import Response, RedirectResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.database import get_db
 from app.security import get_current_user
@@ -49,7 +49,8 @@ def _generar_codigo(db: Session, is_demo: bool) -> str:
 @router.get("/", response_model=List[schemas.ContratoOut])
 def listar(
     incluir_archivados: bool = False,
-    propietario_id: int | None = None,
+    propietario_id: Optional[int] = None,
+    limit: Optional[int] = Query(None, ge=1, le=1000),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -70,7 +71,10 @@ def listar(
             q = q.filter(models.Contrato.propiedad_id.in_(prop_ids))
         else:
             return []
-    return q.order_by(models.Contrato.id.desc()).all()
+    q = q.order_by(models.Contrato.id.desc())
+    if limit:
+        q = q.limit(limit)
+    return q.all()
 
 
 @router.post("/", response_model=schemas.ContratoOut)
