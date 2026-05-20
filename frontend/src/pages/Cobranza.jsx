@@ -217,10 +217,10 @@ function Stat({ label, value, color = '' }) {
 /**
  * Tabla de cobro al inquilino.
  *
- * Modelo por fila: { label, paga, pagado, a_cobrar, fijo?, _arrastre? }
- *   - paga: 'inquilino' | 'propietario' — quién es responsable de ese ítem.
- *   - pagado: monto que el inquilino YA pagó (directo o adelantado).
- *   - a_cobrar: monto que se le cobra al inquilino AHORA con el alquiler.
+ * Modelo por fila: { label, monto, ya_pagado, fijo?, _arrastre? }
+ *   - monto:     importe del concepto.
+ *   - ya_pagado: true  → el inquilino ya lo pagó directamente (no se cobra ahora).
+ *                false → se cobra al inquilino en este período.
  *
  * 3 filas fijas: Alquiler, Expensas, Tasas municipales (no se pueden eliminar).
  * Se pueden agregar conceptos extra (Luz, Gas, Agua, Internet, ABL, Seguro, etc.)
@@ -241,66 +241,73 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
       </div>
 
       {/* Header de columnas */}
-      <div className="grid grid-cols-[1fr_115px_100px_100px_28px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
+      <div className="grid grid-cols-[1fr_110px_auto_28px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
         <span>Concepto</span>
-        <span>Quién paga</span>
-        <span className="text-right">Pagado</span>
-        <span className="text-right">A cobrar</span>
+        <span className="text-right">Monto</span>
+        <span className="text-center">¿Ya pagado?</span>
         <span></span>
       </div>
 
       {/* Filas */}
       <div className="space-y-1.5">
-        {(conceptos || []).map((c, i) => {
-          const propietario = c.paga === 'propietario'
-          return (
-            <div key={i}
-              className={`grid grid-cols-[1fr_115px_100px_100px_28px] gap-2 items-center p-2 rounded-xl border ${
-                c._arrastre
-                  ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300/50 dark:border-amber-700/40'
-                  : propietario
-                    ? 'bg-[#FAF6EE] dark:bg-[#1A1612] border-[#B8893A]/30'
-                    : 'bg-neutral-50 dark:bg-[#1A1A1A] border-border dark:border-[#2A2A2A]'
-              }`}
-              title={c._arrastre ? `Arrastrado de ${c._arrastre} (quedó pendiente)` : undefined}>
-              {c.fijo ? (
-                <span className="text-[13px] font-medium px-1">{c.label}</span>
-              ) : (
-                <input type="text" placeholder="Ej: Luz"
-                  className="input !py-1.5 !px-2 text-[12px]"
-                  value={c.label || ''}
-                  onChange={e => onUpdate(i, 'label', e.target.value)} />
-              )}
-              <select
-                className={`input !py-1.5 !px-2 text-[11px] ${propietario ? '!border-[#B8893A]/60 !text-[#B8893A]' : ''}`}
-                value={c.paga || 'inquilino'}
-                onChange={e => onUpdate(i, 'paga', e.target.value)}>
-                <option value="inquilino">Inquilino</option>
-                <option value="propietario">Propietario</option>
-              </select>
-              <input type="number" placeholder="0"
-                className="input !py-1.5 !px-2 text-right tabular-nums text-[12px] disabled:opacity-40"
-                disabled={propietario}
-                value={c.pagado || ''}
-                onChange={e => onUpdate(i, 'pagado', e.target.value === '' ? 0 : Number(e.target.value))} />
-              <input type="number" placeholder="0"
-                className="input !py-1.5 !px-2 text-right tabular-nums text-[12px] disabled:opacity-40"
-                disabled={propietario}
-                value={c.a_cobrar || ''}
-                onChange={e => onUpdate(i, 'a_cobrar', e.target.value === '' ? 0 : Number(e.target.value))} />
-              {c.fijo ? (
-                <span />
-              ) : (
-                <button type="button"
-                  onClick={() => onRemove(i)}
-                  className="p-1 text-muted hover:text-danger rounded-lg"
-                  title="Quitar">
-                  <X size={13} />
-                </button>
-              )}
-            </div>
-          )
-        })}
+        {(conceptos || []).map((c, i) => (
+          <div key={i}
+            className={`grid grid-cols-[1fr_110px_auto_28px] gap-2 items-center p-2 rounded-xl border ${
+              c._arrastre
+                ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300/50 dark:border-amber-700/40'
+                : c.ya_pagado
+                  ? 'bg-green-50 dark:bg-green-900/10 border-green-300/40 dark:border-green-700/30'
+                  : 'bg-neutral-50 dark:bg-[#1A1A1A] border-border dark:border-[#2A2A2A]'
+            }`}
+            title={c._arrastre ? `Arrastrado de ${c._arrastre} (quedó pendiente)` : undefined}>
+
+            {/* Concepto */}
+            {c.fijo ? (
+              <span className="text-[13px] font-medium px-1">{c.label}</span>
+            ) : (
+              <input type="text" placeholder="Ej: Luz"
+                className="input !py-1.5 !px-2 text-[12px]"
+                value={c.label || ''}
+                onChange={e => onUpdate(i, 'label', e.target.value)} />
+            )}
+
+            {/* Monto */}
+            <input type="number" placeholder="0"
+              className="input !py-1.5 !px-2 text-right tabular-nums text-[12px]"
+              value={c.monto || ''}
+              onChange={e => onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))} />
+
+            {/* Toggle ¿Ya pagado? */}
+            <label className="flex items-center justify-center gap-1.5 cursor-pointer select-none">
+              <div
+                onClick={() => onUpdate(i, 'ya_pagado', !c.ya_pagado)}
+                className={`relative w-9 h-5 rounded-full transition-colors ${
+                  c.ya_pagado ? 'bg-green-500 dark:bg-green-600' : 'bg-gray-200 dark:bg-gray-700'
+                }`}>
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                  c.ya_pagado ? 'translate-x-4' : 'translate-x-0'
+                }`} />
+              </div>
+              <span className={`text-[11px] font-medium w-14 ${
+                c.ya_pagado ? 'text-green-600 dark:text-green-400' : 'text-muted'
+              }`}>
+                {c.ya_pagado ? 'Pagado' : 'A cobrar'}
+              </span>
+            </label>
+
+            {/* Quitar (sólo extras) */}
+            {c.fijo ? (
+              <span />
+            ) : (
+              <button type="button"
+                onClick={() => onRemove(i)}
+                className="p-1 text-muted hover:text-danger rounded-lg"
+                title="Quitar">
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        ))}
       </div>
 
       {/* Botones para agregar */}
@@ -308,13 +315,13 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
         <span className="text-[10px] text-muted uppercase tracking-widest mt-1.5 mr-1">Agregar:</span>
         {disponibles.map(s => (
           <button key={s} type="button"
-            onClick={() => onAdd({ label: s, paga: 'inquilino', pagado: 0, a_cobrar: 0 })}
+            onClick={() => onAdd({ label: s, monto: 0, ya_pagado: false })}
             className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition">
             + {s}
           </button>
         ))}
         <button type="button"
-          onClick={() => onAdd({ label: '', paga: 'inquilino', pagado: 0, a_cobrar: 0 })}
+          onClick={() => onAdd({ label: '', monto: 0, ya_pagado: false })}
           className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-dashed border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition">
           + Otro…
         </button>
@@ -360,18 +367,14 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     fecha_pago: new Date().toISOString().slice(0, 10),
     notas: '',
     conceptos: [
-      { label: 'Alquiler', fijo: true, paga: 'inquilino', pagado: 0,
-        a_cobrar: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0 },
-      { label: 'Expensas', fijo: true, paga: 'inquilino', pagado: 0,
-        a_cobrar: extraSug('Expensas', item.monto_expensas_sug) },
-      { label: 'Tasas municipales', fijo: true, paga: 'inquilino', pagado: 0,
-        a_cobrar: extraSug('Tasas municipales', item.monto_tasas_sug) },
+      { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, ya_pagado: false },
+      { label: 'Expensas',          fijo: true, monto: extraSug('Expensas', item.monto_expensas_sug),               ya_pagado: false },
+      { label: 'Tasas municipales', fijo: true, monto: extraSug('Tasas municipales', item.monto_tasas_sug),          ya_pagado: false },
       // Arrastres de OTROS conceptos (no Expensas / Tasas que ya están arriba)
       ...pendientesArrastre
         .filter(p => !CONCEPTOS_FIJOS.some(f => f.toLowerCase() === p.label.toLowerCase()))
         .map(p => ({
-          label: p.label, paga: 'inquilino', pagado: 0,
-          a_cobrar: Number(p.monto) || 0, _arrastre: p.desde_periodo,
+          label: p.label, monto: Number(p.monto) || 0, ya_pagado: false, _arrastre: p.desde_periodo,
         })),
     ],
   })
@@ -394,11 +397,11 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     setForm(f => ({ ...f, conceptos: [...f.conceptos, preset] }))
   }
 
-  // Total a cobrar al inquilino: suma de `a_cobrar` donde paga=inquilino,
+  // Total a cobrar al inquilino: suma de montos donde ya_pagado=false,
   // menos descuento de refacciones.
   const aCobrarInq = (form.conceptos || [])
-    .filter(c => (c.paga || 'inquilino') === 'inquilino')
-    .reduce((s, c) => s + (Number(c.a_cobrar) || 0), 0)
+    .filter(c => !c.ya_pagado)
+    .reduce((s, c) => s + (Number(c.monto) || 0), 0)
   const total = Math.max(0, aCobrarInq - descuentoRefs)
 
   const submit = async (e) => {
@@ -406,28 +409,19 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     setLoading(true); setErr('')
     try {
       // Mapeo al backend:
-      // - El alquiler va en `monto_alquiler` (pagado + a_cobrar de la fila Alquiler).
-      // - Cada otra fila se traduce en hasta 2 conceptos:
-      //     pagado>0  → estado='pagado_directo'
-      //     a_cobrar>0→ estado='cobrar'
-      // - Si paga=propietario, el monto va como `pagado_directo` informativo
-      //   (no se cobra al inquilino).
-      const filaAlquiler = form.conceptos.find(c => c.label === 'Alquiler') || { pagado: 0, a_cobrar: 0 }
-      const montoAlquilerTotal = (Number(filaAlquiler.pagado) || 0) + (Number(filaAlquiler.a_cobrar) || 0)
+      // - El alquiler va en `monto_alquiler` (siempre el monto de esa fila).
+      // - Cada otra fila: ya_pagado=true → estado='pagado_directo' (ya lo pagó el
+      //   inquilino directamente); ya_pagado=false → estado='cobrar' (se cobra ahora).
+      const filaAlquiler = form.conceptos.find(c => c.label === 'Alquiler') || { monto: 0 }
+      const montoAlquilerTotal = Number(filaAlquiler.monto) || 0
 
       const conceptos = []
       for (const c of form.conceptos) {
         if (c.label === 'Alquiler' || !c.label?.trim()) continue
         const label = c.label.trim()
-        const pagado = Number(c.pagado) || 0
-        const aCobrar = Number(c.a_cobrar) || 0
-        if (c.paga === 'propietario') {
-          const monto = pagado + aCobrar
-          if (monto > 0) conceptos.push({ label, monto, estado: 'pagado_directo' })
-          continue
-        }
-        if (pagado > 0) conceptos.push({ label, monto: pagado, estado: 'pagado_directo' })
-        if (aCobrar > 0) conceptos.push({ label, monto: aCobrar, estado: 'cobrar' })
+        const monto = Number(c.monto) || 0
+        if (monto <= 0) continue
+        conceptos.push({ label, monto, estado: c.ya_pagado ? 'pagado_directo' : 'cobrar' })
       }
 
       const payload = {
@@ -520,16 +514,29 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
 
           {/* Total a cobrar — único bloque visible al operador. Comisión y neto
               al propietario se calculan en backend y aparecen sólo en el PDF. */}
-          <div className="rounded-2xl bg-[#0A0A0A] text-white dark:bg-white dark:text-[#0A0A0A] p-5 flex items-center justify-between">
-            <div>
-              <p className="text-[10px] uppercase tracking-widest opacity-60">Total a cobrar al inquilino</p>
-              {descuentoRefs > 0 && (
-                <p className="text-[11px] opacity-60 mt-0.5">
-                  {fmtMoney(aCobrarInq)} − {fmtMoney(descuentoRefs)} refacciones
+          <div className="rounded-2xl bg-[#0A0A0A] text-white dark:bg-white dark:text-[#0A0A0A] p-5">
+            {/* Resumen de ya pagados */}
+            {(() => {
+              const yaPagado = (form.conceptos || [])
+                .filter(c => c.ya_pagado && (Number(c.monto) || 0) > 0)
+                .reduce((s, c) => s + (Number(c.monto) || 0), 0)
+              return yaPagado > 0 ? (
+                <p className="text-[11px] opacity-50 mb-2 tabular-nums">
+                  Ya pagado directamente: {fmtMoney(yaPagado)}
                 </p>
-              )}
+              ) : null
+            })()}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest opacity-60">Total a cobrar al inquilino</p>
+                {descuentoRefs > 0 && (
+                  <p className="text-[11px] opacity-60 mt-0.5">
+                    {fmtMoney(aCobrarInq)} − {fmtMoney(descuentoRefs)} refacciones
+                  </p>
+                )}
+              </div>
+              <span className="text-3xl font-bold tabular-nums">{fmtMoney(total)}</span>
             </div>
-            <span className="text-3xl font-bold tabular-nums">{fmtMoney(total)}</span>
           </div>
 
           <div className="text-[11px] text-muted bg-[#FAF8F3] dark:bg-[#141414] border border-[#E5E5E5] dark:border-[#2A2A2A] rounded-xl p-3 flex gap-2">
@@ -548,7 +555,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
 
           <div className="flex gap-3 pt-1">
             <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
-            <button className="btn-primary flex-1" disabled={loading || total <= 0}>
+            <button className="btn-primary flex-1" disabled={loading || (form.conceptos || []).every(c => (Number(c.monto) || 0) === 0)}>
               {loading ? 'Procesando…' : 'Confirmar y emitir comprobantes'}
             </button>
           </div>
