@@ -465,11 +465,17 @@ function ItemLiquidacion({ item, onMarcar, onRevertir }) {
 
 
 function ModalMarcar({ pago, onClose, onSaved }) {
+  const _fmtMonto = (n) =>
+    Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const _parseMonto = (str) =>
+    parseFloat(String(str).replace(/\./g, '').replace(',', '.')) || 0
+
   const [form, setForm] = useState({
     fecha: new Date().toISOString().slice(0, 10),
     monto: pago.neto_a_pagar,
     notas: '',
   })
+  const [montoDisplay, setMontoDisplay] = useState(_fmtMonto(pago.neto_a_pagar))
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
@@ -517,7 +523,7 @@ function ModalMarcar({ pago, onClose, onSaved }) {
     label: 'Alquiler',
     pagado: totalCobradoAlquiler,         // el inquilino lo pagó
     a_rendir: totalCobradoAlquiler - comision,
-    nota: pago.comision_porc ? `cobramos ${pago.comision_porc}% comisión` : null,
+    nota: pago.comision_porc ? `comisión ${pago.comision_porc}% = ${fmt(comision)}` : null,
   })
   // Agrupamos por label
   const grupos = {}
@@ -640,9 +646,14 @@ function ModalMarcar({ pago, onClose, onSaved }) {
             </div>
             <div>
               <label className="label">Monto entregado $</label>
-              <input type="number" className="input"
-                value={form.monto}
-                onChange={e => setForm({ ...form, monto: e.target.value })} />
+              <input type="text" inputMode="decimal" className="input"
+                value={montoDisplay}
+                onChange={e => {
+                  setMontoDisplay(e.target.value)
+                  setForm({ ...form, monto: _parseMonto(e.target.value) })
+                }}
+                onBlur={() => setMontoDisplay(_fmtMonto(form.monto))}
+                onFocus={e => e.target.select()} />
             </div>
           </div>
 

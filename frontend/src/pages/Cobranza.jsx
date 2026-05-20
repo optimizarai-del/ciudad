@@ -369,7 +369,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     conceptos: [
       { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, ya_pagado: false },
       { label: 'Expensas',          fijo: true, monto: extraSug('Expensas', item.monto_expensas_sug),               ya_pagado: false },
-      { label: 'Tasas municipales', fijo: true, monto: extraSug('Tasas municipales', item.monto_tasas_sug),          ya_pagado: false },
+      { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug),          ya_pagado: false },
       // Arrastres de OTROS conceptos (no Expensas / Tasas que ya están arriba)
       ...pendientesArrastre
         .filter(p => !CONCEPTOS_FIJOS.some(f => f.toLowerCase() === p.label.toLowerCase()))
@@ -383,6 +383,24 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
 
   const setFecha = (val) => setForm(f => ({ ...f, fecha_pago: val }))
   const setNotas = (val) => setForm(f => ({ ...f, notas: val }))
+
+  // Botón rápido "Municipales" en el header del modal
+  const tieneMunicipales = form.conceptos.some(c => c.label === 'Tasas municipales')
+  const toggleMunicipales = () => {
+    if (tieneMunicipales) {
+      setForm(f => ({ ...f, conceptos: f.conceptos.filter(c => c.label !== 'Tasas municipales') }))
+    } else {
+      setForm(f => {
+        // Reinsertar después de Expensas (posición 2) o al final si no hay Expensas
+        const idx = f.conceptos.findIndex(c => c.label === 'Expensas')
+        const pos = idx >= 0 ? idx + 1 : 2
+        const nuevo = { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug), ya_pagado: false }
+        const arr = [...f.conceptos]
+        arr.splice(pos, 0, nuevo)
+        return { ...f, conceptos: arr }
+      })
+    }
+  }
 
   const updateConcepto = (idx, campo, valor) => {
     setForm(f => ({
@@ -452,7 +470,18 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
             <p className="text-[12px] text-[#737373]">{item.propiedad} · {item.contrato_codigo}</p>
             <p className="text-[12px] text-[#737373]">Inquilino: {item.inquilino}</p>
           </div>
-          <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={toggleMunicipales}
+              title={tieneMunicipales ? 'Quitar tasas municipales' : 'Agregar tasas municipales'}
+              className={`text-[11px] px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                tieneMunicipales
+                  ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
+                  : 'bg-white dark:bg-[#1A1A1A] border-border dark:border-[#2A2A2A] text-muted hover:text-primary dark:hover:text-white'
+              }`}>
+              {tieneMunicipales ? '✓' : '+'} Municipales
+            </button>
+            <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
+          </div>
         </div>
 
         <form onSubmit={submit} className="space-y-3">
