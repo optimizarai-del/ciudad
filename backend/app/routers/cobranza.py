@@ -232,6 +232,7 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
             "propiedad_id":             prop.id if prop else None,
             "propiedad":                prop.direccion if prop else "",
             "propiedad_ciudad":         prop.ciudad if prop else "",
+            "numero_referencia":        prop.numero_referencia if prop else None,
             "inquilino_id":             inq.id if inq else None,
             "inquilino":                _nombre_cliente(inq) or "Sin inquilino",
             "inquilino_email":          inq.email if inq else None,

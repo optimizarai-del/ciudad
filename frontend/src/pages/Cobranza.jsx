@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Layout from '../components/Layout/Layout'
 import SearchBar, { match } from '../components/SearchBar'
 import api from '../utils/api'
+import ModalTasaMSR from '../components/ModalTasaMSR'
 import {
   CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight,
   Phone, Mail, X, FileText, Download, Send, AlertTriangle, Wrench, Landmark,
@@ -384,23 +385,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
   const setFecha = (val) => setForm(f => ({ ...f, fecha_pago: val }))
   const setNotas = (val) => setForm(f => ({ ...f, notas: val }))
 
-  // Botón rápido "Municipales" en el header del modal
-  const tieneMunicipales = form.conceptos.some(c => c.label === 'Tasas municipales')
-  const toggleMunicipales = () => {
-    if (tieneMunicipales) {
-      setForm(f => ({ ...f, conceptos: f.conceptos.filter(c => c.label !== 'Tasas municipales') }))
-    } else {
-      setForm(f => {
-        // Reinsertar después de Expensas (posición 2) o al final si no hay Expensas
-        const idx = f.conceptos.findIndex(c => c.label === 'Expensas')
-        const pos = idx >= 0 ? idx + 1 : 2
-        const nuevo = { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug), ya_pagado: false }
-        const arr = [...f.conceptos]
-        arr.splice(pos, 0, nuevo)
-        return { ...f, conceptos: arr }
-      })
-    }
-  }
+  const [msrOpen, setMsrOpen] = useState(false)
 
   const updateConcepto = (idx, campo, valor) => {
     setForm(f => ({
@@ -468,21 +453,32 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
           <div>
             <h2 className="hero-title text-xl sm:text-2xl mb-0.5">Cobrar al inquilino</h2>
             <p className="text-[12px] text-[#737373]">{item.propiedad} · {item.contrato_codigo}</p>
+            {item.numero_referencia && (
+              <p className="text-[11px] text-muted/70">
+                Ref. municipal: <span className="font-mono font-semibold">{item.numero_referencia}</span>
+              </p>
+            )}
             <p className="text-[12px] text-[#737373]">Inquilino: {item.inquilino}</p>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={toggleMunicipales}
-              title={tieneMunicipales ? 'Quitar tasas municipales' : 'Agregar tasas municipales'}
-              className={`text-[11px] px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                tieneMunicipales
-                  ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
-                  : 'bg-white dark:bg-[#1A1A1A] border-border dark:border-[#2A2A2A] text-muted hover:text-primary dark:hover:text-white'
-              }`}>
-              {tieneMunicipales ? '✓' : '+'} Municipales
+            <button type="button"
+              onClick={() => setMsrOpen(true)}
+              disabled={!item.numero_referencia}
+              title={item.numero_referencia ? 'Consultar tasas municipales (MSR)' : 'Cargá el Nº de referencia en la propiedad para usar este botón'}
+              className="btn-ghost p-2 disabled:opacity-40 disabled:cursor-not-allowed">
+              <Landmark size={16} />
             </button>
             <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
           </div>
         </div>
+
+        {msrOpen && (
+          <ModalTasaMSR
+            propiedad={{ id: item.propiedad_id, numero_referencia: item.numero_referencia, direccion: item.propiedad }}
+            onClose={() => setMsrOpen(false)}
+            onActualizado={() => setMsrOpen(false)}
+          />
+        )}
 
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
