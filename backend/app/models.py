@@ -300,6 +300,10 @@ class Pago(Base):
     monto_municipal = Column(Float, default=0)
     monto_otros = Column(Float, default=0)
     monto_total = Column(Float, default=0)
+    # Parte del pago abonada por transferencia bancaria — se resta del total
+    # que se cobra en caja, pero la liquidación al propietario sigue siendo
+    # sobre el total cobrado (transferencia + caja).
+    monto_pagado_transferencia = Column(Float, default=0)
     estado = Column(SQLEnum(PagoEstado), default=PagoEstado.pendiente)
     notas = Column(Text)
     # JSON con detalle granular: [{"label": "Luz", "monto": 15000, "paga": "inquilino"|"propietario"}, ...]

@@ -228,7 +228,7 @@ function Stat({ label, value, color = '' }) {
  */
 const CONCEPTOS_FIJOS = ['Alquiler', 'Expensas', 'Tasas municipales']
 
-function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
+function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd, montoTransferencia, setMontoTransferencia }) {
   const SUGERENCIAS = [
     'Luz', 'Gas', 'Agua', 'Internet', 'ABL', 'Seguro', 'Servicios varios',
   ]
@@ -295,11 +295,20 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
                 </div>
               )}
 
-              {/* Monto */}
+              {/* Monto — Alquiler es fijo (viene del contrato y se actualiza por ICL/IPC) */}
               <input type="number" placeholder="0"
-                className="input !py-1.5 !px-2 text-right tabular-nums text-[12px]"
+                readOnly={c.label === 'Alquiler'}
+                title={c.label === 'Alquiler'
+                  ? 'El alquiler es fijo y se actualiza automáticamente según el índice del contrato'
+                  : undefined}
+                className={`input !py-1.5 !px-2 text-right tabular-nums text-[12px] ${
+                  c.label === 'Alquiler' ? '!cursor-default !bg-neutral-100 dark:!bg-[#1A1A1A]' : ''
+                }`}
                 value={c.monto || ''}
-                onChange={e => onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))} />
+                onChange={e => {
+                  if (c.label === 'Alquiler') return  // no editable
+                  onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))
+                }} />
 
               {/* Radio "Pago inquilino" — el inquilino lo pagó directo */}
               <div className="flex justify-center">
@@ -360,6 +369,30 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
             </div>
           )
         })}
+
+        {/* Fila especial: pago por transferencia. Se resta del total a cobrar
+            en caja, pero el total cobrado al inquilino (para liquidar al
+            propietario) sigue siendo la suma completa. */}
+        <div className="grid grid-cols-[1fr_90px_70px_70px_110px_24px] gap-2 items-center p-2 rounded-xl border border-blue-200/60 dark:border-blue-900/40 bg-blue-50/40 dark:bg-blue-900/10">
+          <div className="min-w-0 px-1">
+            <p className="text-[13px] font-medium text-blue-900 dark:text-blue-200">Pago con transferencia</p>
+            <p className="text-[10px] text-blue-600/80 dark:text-blue-400/70">
+              Se descuenta del cobro en caja
+            </p>
+          </div>
+          <input type="number" placeholder="0"
+            className="input !py-1.5 !px-2 text-right tabular-nums text-[12px]"
+            value={montoTransferencia || ''}
+            onChange={e => setMontoTransferencia(e.target.value === '' ? 0 : Number(e.target.value))} />
+          <span />
+          <span />
+          <div className="text-right text-[13px] font-semibold tabular-nums text-blue-700 dark:text-blue-300">
+            {montoTransferencia > 0
+              ? `− $${Number(montoTransferencia).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : <span className="text-muted/60">—</span>}
+          </div>
+          <span />
+        </div>
       </div>
 
       {/* Botones para agregar */}
@@ -437,6 +470,10 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
   const setNotas = (val) => setForm(f => ({ ...f, notas: val }))
 
   const [msrOpen, setMsrOpen] = useState(false)
+  // Parte abonada por transferencia: se resta del cobro en caja pero NO de
+  // lo que se le liquida al propietario (el total cobrado al inquilino sigue
+  // siendo la suma completa de conceptos).
+  const [montoTransferencia, setMontoTransferencia] = useState(0)
 
   const updateConcepto = (idx, campo, valor) => {
     setForm(f => ({
@@ -452,11 +489,13 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
   }
 
   // Total a cobrar al inquilino: suma de montos donde estado='cobrar',
-  // menos descuento de refacciones. Los 'pagado' se asientan pero no se cobran.
+  // menos descuento de refacciones y menos lo pagado por transferencia.
+  // Los 'pagado' (directo a un ente) no se cobran ni se asientan.
   const aCobrarInq = (form.conceptos || [])
     .filter(c => c.estado === 'cobrar')
     .reduce((s, c) => s + (Number(c.monto) || 0), 0)
-  const total = Math.max(0, aCobrarInq - descuentoRefs)
+  const transferencia = Number(montoTransferencia) || 0
+  const total = Math.max(0, aCobrarInq - descuentoRefs - transferencia)
 
   const submit = async (e) => {
     e.preventDefault()
@@ -482,6 +521,12 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
         conceptos.push({ label, monto, estado: estadoBackend })
       }
 
+      // monto_total = lo que efectivamente pagó el inquilino por el período
+      // (sin restar la transferencia, que es solo el método de cobro).
+      // El total que se cobra en caja AHORA es `total = monto_total − transferencia`,
+      // pero al propietario hay que liquidarle sobre el monto_total completo.
+      const montoTotalPeriodo = Math.max(0, aCobrarInq - descuentoRefs)
+
       const payload = {
         periodo: mes,
         fecha_pago: form.fecha_pago || null,
@@ -489,7 +534,8 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
         conceptos,
         monto_descuento_refacciones: descuentoRefs,
         refacciones_aplicadas: Array.from(refsSelected),
-        monto_total: total,
+        monto_pagado_transferencia: transferencia,
+        monto_total: montoTotalPeriodo,
         notas: form.notas || null,
       }
       const r = await api.post(`/api/cobranza/${item.contrato_id}/registrar-pago`, payload)
@@ -548,12 +594,14 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* Tabla de conceptos con columnas Pagado / A cobrar */}
+          {/* Tabla de conceptos con columnas Pago inquilino / Pago propietario */}
           <TablaConceptos
             conceptos={form.conceptos}
             onUpdate={updateConcepto}
             onRemove={eliminarConcepto}
             onAdd={agregarConcepto}
+            montoTransferencia={montoTransferencia}
+            setMontoTransferencia={setMontoTransferencia}
           />
 
           <div>
@@ -597,10 +645,14 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
           <div className="rounded-2xl bg-[#0A0A0A] text-white dark:bg-white dark:text-[#0A0A0A] p-5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] uppercase tracking-widest opacity-60">Total a cobrar al inquilino</p>
-                {descuentoRefs > 0 && (
-                  <p className="text-[11px] opacity-60 mt-0.5">
-                    {fmtMoney(aCobrarInq)} − {fmtMoney(descuentoRefs)} refacciones
+                <p className="text-[10px] uppercase tracking-widest opacity-60">
+                  {transferencia > 0 ? 'A cobrar en caja' : 'Total a cobrar al inquilino'}
+                </p>
+                {(descuentoRefs > 0 || transferencia > 0) && (
+                  <p className="text-[11px] opacity-60 mt-0.5 tabular-nums">
+                    {fmtMoney(aCobrarInq)}
+                    {descuentoRefs > 0 && <> − {fmtMoney(descuentoRefs)} refacciones</>}
+                    {transferencia > 0 && <> − {fmtMoney(transferencia)} transferencia</>}
                   </p>
                 )}
               </div>

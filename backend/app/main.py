@@ -207,6 +207,16 @@ def _migrar_storage_path():
                     print(f"[migrar] contratos.{col}: {e}")
                     db.rollback()
 
+        # pagos: monto_pagado_transferencia (parte abonada por transferencia)
+        cols_pagos = {c["name"] for c in ins.get_columns("pagos", schema=schema)}
+        if "monto_pagado_transferencia" not in cols_pagos:
+            try:
+                db.execute(text(f"ALTER TABLE {qual}pagos ADD COLUMN monto_pagado_transferencia FLOAT DEFAULT 0"))
+                db.commit()
+            except Exception as e:
+                print(f"[migrar] pagos.monto_pagado_transferencia: {e}")
+                db.rollback()
+
         # clientes: tipo_documento y nacionalidad (para extracción IA)
         cols_cli = {c["name"] for c in ins.get_columns("clientes", schema=schema)}
         nuevas_cols_cliente = [

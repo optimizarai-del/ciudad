@@ -348,6 +348,7 @@ class RegistrarPagoIn(BaseModel):
     conceptos: list[dict] = []
     monto_descuento_refacciones: float = 0     # se resta del total
     refacciones_aplicadas: list[int] = []       # IDs a marcar como aplicadas
+    monto_pagado_transferencia: float = 0      # parte abonada por transferencia (se resta del cobro en caja)
     monto_total: Optional[float] = None
     notas: Optional[str] = None
 
@@ -518,6 +519,7 @@ def _registrar_pago_impl(
     pago.monto_municipal = sumas_inq["municipal"]
     pago.monto_otros = sumas_inq["otros"]
     pago.monto_total = monto_total
+    pago.monto_pagado_transferencia = float(data.monto_pagado_transferencia or 0)
     pago.estado = models.PagoEstado.pagado
     pago.notas = data.notas
     # Guardar el JSON granular (incluye quién paga cada uno)
