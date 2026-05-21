@@ -41,3 +41,8 @@ backend/.env.local
 backend/.env.production
 frontend/.env
 frontend/.env.local
+
+# Locales — no subir al repo
+.claude/
+ciudad.db
+*.db
