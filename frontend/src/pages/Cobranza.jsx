@@ -335,8 +335,14 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
                 </button>
               </div>
 
-              {/* A cobrar — monto formateado en negro, siempre visible */}
-              <div className="text-right text-[13px] font-semibold tabular-nums text-[#0A0A0A] dark:text-white">
+              {/* A cobrar — monto formateado. Tachado si el inquilino ya pagó directo. */}
+              <div className={`text-right text-[13px] font-semibold tabular-nums ${
+                estado === 'pagado'
+                  ? 'text-muted/60 line-through'
+                  : estado === 'cobrar'
+                    ? 'text-[#0A0A0A] dark:text-white'
+                    : 'text-muted/70'
+              }`}>
                 {monto > 0 ? montoFmt : <span className="text-muted/60">—</span>}
               </div>
 
