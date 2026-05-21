@@ -594,6 +594,29 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
           />
         )}
 
+        {/* Banner de ajuste aplicado al alquiler — se muestra si el contrato
+            tiene ajustes registrados por IPC/ICL/fijo */}
+        {item.ultimo_ajuste && (
+          <div className="mb-4 rounded-xl bg-blue-50/70 dark:bg-blue-900/15 border border-blue-200/60 dark:border-blue-900/40 px-4 py-3 flex items-start gap-3">
+            <span className="text-lg leading-none mt-0.5">📈</span>
+            <div className="flex-1 text-[12px] text-blue-900 dark:text-blue-200">
+              <p className="font-semibold">
+                Alquiler actualizado por {String(item.ultimo_ajuste.indice_usado || '').toUpperCase()}
+                {item.ultimo_ajuste.fecha && (
+                  <> el {new Date(item.ultimo_ajuste.fecha).toLocaleDateString('es-AR')}</>
+                )}
+              </p>
+              <p className="text-blue-700/80 dark:text-blue-300/80 mt-0.5">
+                {fmtMoney(item.ultimo_ajuste.monto_anterior)} → <strong>{fmtMoney(item.ultimo_ajuste.monto_nuevo)}</strong>
+                {' '}(+{Number(item.ultimo_ajuste.porcentaje).toLocaleString('es-AR', { maximumFractionDigits: 2 })}%)
+                {item.ajustes_aplicados > 1 && (
+                  <> · {item.ajustes_aplicados} ajustes acumulados desde {fmtMoney(item.monto_alquiler_base)} inicial</>
+                )}
+              </p>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>

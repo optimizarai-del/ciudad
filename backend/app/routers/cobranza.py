@@ -84,6 +84,28 @@ def _legacy_paga_to_estado(paga: str | None) -> str:
     return "cobrar"
 
 
+def _indice_str_safe(c: models.Contrato) -> str:
+    v = c.indice_ajuste
+    if v is None:
+        return "sin_ajuste"
+    return v.value if hasattr(v, "value") else str(v)
+
+
+def _last_ajuste_info(c: models.Contrato) -> dict | None:
+    """Devuelve los datos del último ajuste registrado, o None si no hay."""
+    ajustes = list(c.ajustes or [])
+    if not ajustes:
+        return None
+    ultimo = max(ajustes, key=lambda a: (a.fecha or None, a.id))
+    return {
+        "fecha":          ultimo.fecha.isoformat() if ultimo.fecha else None,
+        "porcentaje":     float(ultimo.porcentaje or 0),
+        "monto_anterior": float(ultimo.monto_anterior or 0),
+        "monto_nuevo":    float(ultimo.monto_nuevo or 0),
+        "indice_usado":   ultimo.indice_usado,
+    }
+
+
 def _nombre_cliente(c: models.Cliente | None) -> str:
     if not c:
         return ""
@@ -127,6 +149,20 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
 
     if not contratos:
         return []
+
+    # ── Aplicar ajustes pendientes (lazy) ────────────────────────────────────
+    # Cada vez que se carga el mes de cobranza, revisamos si algún contrato
+    # tiene ajustes pendientes según su índice (IPC/ICL/fijo) y periodicidad,
+    # y los aplicamos antes de armar el listado. Así el monto sugerido del
+    # alquiler siempre refleja el valor ajustado al período actual.
+    try:
+        from app.services.ajuste_contratos import aplicar_ajustes_pendientes_bulk
+        creados = aplicar_ajustes_pendientes_bulk(db, contratos)
+        if creados:
+            db.commit()
+    except Exception as e:
+        print(f"[cobranza] aplicar_ajustes_pendientes_bulk falló: {e}")
+        db.rollback()
 
     cids = [c.id for c in contratos]
 
@@ -203,7 +239,10 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
         conceptos_pendientes = _conceptos_desde_pagos(prior_pagos.get(c.id, []))
         refs_pend          = refs_map.get(c.id, [])
 
-        alquiler_sug = float(c.monto_inicial or (prop.precio_alquiler if prop else 0) or 0)
+        # Monto vigente: último ajuste registrado, o monto_inicial si no hay
+        # ajustes. La lazy de arriba ya creó los que correspondan.
+        from app.services.ajuste_contratos import monto_vigente
+        alquiler_sug = monto_vigente(c) or float((prop.precio_alquiler if prop else 0) or 0)
         tasas_sug    = float((prop.tasa_municipal if prop else 0) or 0) + float((prop.impuesto_inmobiliario if prop else 0) or 0)
         expensas_sug = float((prop.expensas if prop else 0) or 0)
 
@@ -243,6 +282,10 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
             "comision_porc":            c.comision_porc or 0,
             "monto_total":              monto_total,
             "monto_alquiler_sug":       round(alquiler_sug, 2),
+            "monto_alquiler_base":      float(c.monto_inicial or 0),
+            "indice_ajuste":            _indice_str_safe(c),
+            "ajustes_aplicados":        len(c.ajustes or []),
+            "ultimo_ajuste":            _last_ajuste_info(c),
             "monto_expensas_sug":       round(expensas_sug, 2),
             "monto_tasas_sug":          round(tasas_sug, 2),
             "conceptos_pendientes":     conceptos_pendientes,
