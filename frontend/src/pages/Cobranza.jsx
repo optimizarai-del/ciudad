@@ -246,11 +246,12 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
       </div>
 
       {/* Header de columnas */}
-      <div className="grid grid-cols-[1fr_100px_58px_58px_24px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
+      <div className="grid grid-cols-[1fr_90px_70px_70px_110px_24px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
         <span>Concepto</span>
         <span className="text-right">Monto</span>
-        <span className="text-center">Pagado</span>
-        <span className="text-center">A cobrar</span>
+        <span className="text-center">Pago inquilino</span>
+        <span className="text-center">Pago propietario</span>
+        <span className="text-right">A cobrar</span>
         <span></span>
       </div>
 
@@ -258,17 +259,16 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
       <div className="space-y-1.5">
         {(conceptos || []).map((c, i) => {
           const estado = c.estado || null     // 'pagado' | 'cobrar' | null
-          const activo = estado !== null
+          const monto = Number(c.monto) || 0
+          const montoFmt = '$' + monto.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
           return (
             <div key={i}
-              className={`grid grid-cols-[1fr_100px_58px_58px_24px] gap-2 items-center p-2 rounded-xl border transition-all ${
+              className={`grid grid-cols-[1fr_90px_70px_70px_110px_24px] gap-2 items-center p-2 rounded-xl border transition-all ${
                 c._arrastre
                   ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300/50 dark:border-amber-700/40'
-                  : estado === 'cobrar'
-                    ? 'bg-neutral-50 dark:bg-[#1A1A1A] border-[#0A0A0A]/30 dark:border-white/30'
-                    : estado === 'pagado'
-                      ? 'bg-green-50/60 dark:bg-green-900/10 border-green-300/40 dark:border-green-700/30'
-                      : 'bg-white dark:bg-[#0F0F0F] border-border/40 dark:border-[#1E1E1E] opacity-50'
+                  : estado !== null
+                    ? 'bg-green-50/60 dark:bg-green-900/10 border-green-300/50 dark:border-green-700/30'
+                    : 'bg-white dark:bg-[#0F0F0F] border-border/40 dark:border-[#1E1E1E] opacity-60'
               }`}
               title={c._arrastre ? `Arrastrado de ${c._arrastre} (quedó pendiente)` : undefined}>
 
@@ -301,32 +301,43 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
                 value={c.monto || ''}
                 onChange={e => onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))} />
 
-              {/* Checkbox "Pagado" — el inquilino lo abonó directo (no se cobra acá) */}
+              {/* Radio "Pago inquilino" — el inquilino lo pagó directo */}
               <div className="flex justify-center">
                 <button type="button"
                   onClick={() => setEstado(i, estado === 'pagado' ? null : 'pagado')}
-                  title="El inquilino ya lo pagó directo (no se le rinde al propietario)"
+                  title="El inquilino ya lo pagó directo al ente (no se cobra acá ni se rinde al propietario)"
+                  disabled={estado === 'cobrar'}
                   className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
                     estado === 'pagado'
                       ? 'bg-green-500 border-green-500 text-white'
-                      : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
+                      : estado === 'cobrar'
+                        ? 'border-neutral-300 dark:border-[#2A2A2A] bg-white dark:bg-[#0A0A0A] opacity-40 cursor-not-allowed'
+                        : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
                   }`}>
                   {estado === 'pagado' && <Check size={12} />}
                 </button>
               </div>
 
-              {/* Checkbox "A cobrar" — la inmobiliaria lo cobra y lo rinde al propietario */}
+              {/* Radio "Pago a propietario" — la inmobiliaria lo cobra y lo rinde al propietario */}
               <div className="flex justify-center">
                 <button type="button"
                   onClick={() => setEstado(i, estado === 'cobrar' ? null : 'cobrar')}
-                  title="Lo cobra la inmobiliaria y se le rinde al propietario"
+                  title="Lo cobra la inmobiliaria y se le rinde íntegro al propietario"
+                  disabled={estado === 'pagado'}
                   className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
                     estado === 'cobrar'
-                      ? 'bg-[#0A0A0A] dark:bg-white border-[#0A0A0A] dark:border-white text-white dark:text-[#0A0A0A]'
-                      : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
+                      ? 'bg-green-500 border-green-500 text-white'
+                      : estado === 'pagado'
+                        ? 'border-neutral-300 dark:border-[#2A2A2A] bg-white dark:bg-[#0A0A0A] opacity-40 cursor-not-allowed'
+                        : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
                   }`}>
                   {estado === 'cobrar' && <Check size={12} />}
                 </button>
+              </div>
+
+              {/* A cobrar — monto formateado en negro, siempre visible */}
+              <div className="text-right text-[13px] font-semibold tabular-nums text-[#0A0A0A] dark:text-white">
+                {monto > 0 ? montoFmt : <span className="text-muted/60">—</span>}
               </div>
 
               {/* Quitar (sólo extras) */}
