@@ -5,6 +5,7 @@ import SearchBar, { match } from '../components/SearchBar'
 import AdjuntosModal from '../components/AdjuntosModal'
 import ModalTasaMSR from '../components/ModalTasaMSR'
 import ProgresoContrato from '../components/ProgresoContrato'
+import ViewToggle, { useVistaPersistida } from '../components/ViewToggle'
 import api from '../utils/api'
 
 const TIPOS = ['departamento','casa','local','oficina','galpon','campo']
@@ -51,6 +52,7 @@ export default function Propiedades() {
   const [busqueda, setBusqueda] = useState('')
   const [adjPropiedad, setAdjPropiedad] = useState(null)
   const [tasaMSR, setTasaMSR] = useState(null)  // {propiedad, modo: 'consultar'|'ver'}
+  const [vista, setVista] = useVistaPersistida('propiedades', 'cards')
   // Mapa propiedad_id → contrato vigente (para mostrar barra de progreso).
   const [contratoPorProp, setContratoPorProp] = useState({})
 
@@ -154,9 +156,12 @@ export default function Propiedades() {
               <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Propiedades</h1>
               <p className="hero-sub">Inmuebles en alquiler — gestión, propietarios y disponibilidad.</p>
             </div>
-            <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
-              <Plus size={14} /> Nueva propiedad
-            </button>
+            <div className="flex items-center gap-2">
+              <ViewToggle vista={vista} onChange={setVista} />
+              <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
+                <Plus size={14} /> Nueva propiedad
+              </button>
+            </div>
           </div>
         </header>
 
@@ -209,6 +214,17 @@ export default function Propiedades() {
               <Plus size={14} /> Agregar primera propiedad
             </button>
           </div>
+        ) : vista === 'tabla' ? (
+          <TablaPropiedades
+            items={filtered}
+            contratoPorProp={contratoPorProp}
+            onEditar={p => { setEditing(p); setOpen(true) }}
+            onAdjuntos={setAdjPropiedad}
+            onFicha={p => descargarFicha(p)}
+            onTasaConsultar={p => setTasaMSR({ propiedad: p, modo: 'consultar' })}
+            onTasaVer={p => setTasaMSR({ propiedad: p, modo: 'ver' })}
+            onEliminar={p => del(p.id)}
+          />
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map(p => (
@@ -468,6 +484,102 @@ function FilterPill({ active, onClick, label }) {
         ${active ? 'bg-primary text-white dark:bg-white dark:text-primary' : 'bg-white dark:bg-[#141414] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#1A1A1A]'}`}>
       {label}
     </button>
+  )
+}
+
+
+/**
+ * Vista de tabla compacta para Propiedades.
+ * Misma data que las cards pero como filas — mejor cuando hay muchas.
+ */
+function TablaPropiedades({ items, contratoPorProp, onEditar, onAdjuntos, onFicha, onTasaConsultar, onTasaVer, onEliminar }) {
+  return (
+    <div className="card overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12px]">
+          <thead>
+            <tr className="bg-neutral-50 dark:bg-[#141414] text-muted uppercase tracking-wider text-[10px]">
+              <th className="text-left px-4 py-3 font-semibold">Dirección</th>
+              <th className="text-left px-3 py-3 font-semibold">Tipo</th>
+              <th className="text-left px-3 py-3 font-semibold">Ciudad</th>
+              <th className="text-left px-3 py-3 font-semibold">Propietario</th>
+              <th className="text-right px-3 py-3 font-semibold">Alquiler</th>
+              <th className="text-center px-3 py-3 font-semibold">Estado</th>
+              <th className="text-center px-3 py-3 font-semibold">Contrato</th>
+              <th className="text-right px-4 py-3 font-semibold">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((p, i) => {
+              const propietarioLbl = p.propietarios_lista?.length > 1
+                ? `${p.propietarios_lista.length} propietarios`
+                : (p.propietario_nombre || '—')
+              return (
+                <tr key={p.id}
+                  className={`border-t border-border dark:border-[#1E1E1E] hover:bg-neutral-50/50 dark:hover:bg-[#181818] transition-colors ${
+                    i % 2 === 1 ? 'bg-neutral-50/30 dark:bg-[#0F0F0F]' : ''
+                  }`}>
+                  <td className="px-4 py-3 cursor-pointer" onClick={() => onEditar(p)}>
+                    <p className="font-medium truncate max-w-[260px]">{p.direccion}</p>
+                    {p.numero_referencia && (
+                      <p className="text-[10px] text-muted mt-0.5 flex items-center gap-1">
+                        <Landmark size={9} />
+                        <span className="font-mono">{p.numero_referencia}</span>
+                      </p>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 capitalize">{TIPO_LABEL[p.tipo] || p.tipo}</td>
+                  <td className="px-3 py-3 truncate max-w-[140px]">{p.ciudad || '—'}</td>
+                  <td className="px-3 py-3 truncate max-w-[180px]">{propietarioLbl}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    {p.precio_alquiler > 0 ? `$${p.precio_alquiler.toLocaleString('es-AR')}` : '—'}
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    <span className={ESTADO_CHIP[p.estado] || 'chip-muted'}>{p.estado}</span>
+                  </td>
+                  <td className="px-3 py-3">
+                    {contratoPorProp[p.id] ? (
+                      <ProgresoContrato
+                        inicio={contratoPorProp[p.id].fecha_inicio}
+                        fin={contratoPorProp[p.id].fecha_fin}
+                        estado={contratoPorProp[p.id].estado}
+                      />
+                    ) : <span className="text-muted/60">—</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-1">
+                      <button className="btn-ghost p-1.5" title="Editar" onClick={() => onEditar(p)}>
+                        <Pencil size={12} />
+                      </button>
+                      <button className="btn-ghost p-1.5" title="Fotos y documentos" onClick={() => onAdjuntos(p)}>
+                        <ImageIcon size={12} />
+                      </button>
+                      <button className="btn-ghost p-1.5" title="Descargar ficha PDF" onClick={() => onFicha(p)}>
+                        <FileDown size={12} />
+                      </button>
+                      <button className="btn-ghost p-1.5" disabled={!p.numero_referencia}
+                        title={p.numero_referencia ? "Buscar tasa en MSR" : "Cargá el padrón para usar este botón"}
+                        onClick={() => onTasaConsultar(p)}>
+                        <Landmark size={12} />
+                      </button>
+                      {p.tasa_consultada_at && (
+                        <button className="btn-ghost p-1.5" title="Ver última consulta de deuda"
+                          onClick={() => onTasaVer(p)}>
+                          <Eye size={12} />
+                        </button>
+                      )}
+                      <button className="btn-danger p-1.5" title="Eliminar" onClick={() => onEliminar(p)}>
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
 
