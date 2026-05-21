@@ -55,7 +55,7 @@ export default function Finanzas() {
         <div className="card p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-sm font-semibold">Cobranza histórica · últimos 12 meses</p>
+              <p className="text-sm font-semibold">Cobros históricos · últimos 12 meses</p>
               <p className="text-[11px] text-muted dark:text-gray-500 mt-0.5">Cobrado en verde · pendiente en ámbar · vencido en rojo</p>
             </div>
             <BarChart3 size={18} className="text-muted" />

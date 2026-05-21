@@ -181,7 +181,7 @@ export default function Equipo() {
                   // [admin, gerencia, alquileres, ventas, agente_ia]
                   { label: 'Propiedades',     perms: [true,  true,  true,  true,  false] },
                   { label: 'Contratos',       perms: [true,  true,  true,  false, false] },
-                  { label: 'Cobranza',        perms: [true,  true,  true,  false, false] },
+                  { label: 'Cobros',          perms: [true,  true,  true,  false, false] },
                   { label: 'Liquidaciones',   perms: [true,  true,  true,  false, false] },
                   { label: 'Clientes',        perms: [true,  true,  true,  true,  false] },
                   { label: 'Calculadora',     perms: [true,  true,  true,  true,  true ] },

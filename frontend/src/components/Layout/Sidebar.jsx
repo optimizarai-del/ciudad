@@ -63,7 +63,7 @@ export default function Sidebar({ onNavigate }) {
           <NavItem to="/alquileres/dashboard"  icon={LayoutDashboard} label="Dashboard" />
           <NavItem to="/alquileres/propiedades" icon={Home}           label="Propiedades" />
           <NavItem to="/alquileres/contratos"   icon={FileText}       label="Contratos" />
-          <NavItem to="/alquileres/cobranza"       icon={CreditCard}     label="Cobranza" />
+          <NavItem to="/alquileres/cobranza"       icon={CreditCard}     label="Cobros" />
           <NavItem to="/alquileres/liquidaciones"  icon={Receipt}        label="Liquidaciones" />
           <NavItem to="/alquileres/tasas"          icon={Landmark}       label="Tasas municipales" />
           <NavItem to="/alquileres/refacciones"    icon={Wrench}         label="Refacciones" />

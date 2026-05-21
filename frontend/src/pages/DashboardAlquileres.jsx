@@ -123,7 +123,7 @@ export default function DashboardAlquileres() {
         {cobranza && cobranza.total_esperado > 0 && (
           <div className="card p-5">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-semibold">Cobranza del mes</p>
+              <p className="text-sm font-semibold">Cobros del mes</p>
               <p className="text-sm text-gray-400 dark:text-gray-500">${Math.round(cobranza.total_esperado/1000).toLocaleString('es-AR')}K total</p>
             </div>
             <div className="h-3 bg-gray-100 dark:bg-[#1E1E1E] rounded-full overflow-hidden">

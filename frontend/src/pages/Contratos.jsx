@@ -545,9 +545,9 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
               </select>
               <p className="text-[11px] text-muted mt-1">
                 {form.estado === 'vigente'
-                  ? '✓ Aparecerá en Cobranza para gestionar pagos.'
+                  ? '✓ Aparecerá en Cobros para gestionar pagos.'
                   : form.estado === 'borrador'
-                  ? '⚠ Como borrador NO aparece en Cobranza. Cambialo a "vigente" cuando se firme.'
+                  ? '⚠ Como borrador NO aparece en Cobros. Cambialo a "vigente" cuando se firme.'
                   : form.estado === 'vencido'
                   ? 'Cerrado por vencimiento. No genera nuevos cobros.'
                   : form.estado === 'rescindido'

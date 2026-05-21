@@ -71,7 +71,7 @@ export default function Cobranza() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <p className="text-xs font-semibold tracking-widest text-gray-400 dark:text-gray-500 uppercase mb-1">Alquileres</p>
-            <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Cobranza</h1>
+            <h1 className="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-3">Cobros</h1>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {/* Atajo a la web de la muni para consultar la deuda municipal en vivo */}

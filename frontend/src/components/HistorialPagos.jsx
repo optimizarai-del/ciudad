@@ -81,7 +81,7 @@ export default function HistorialPagos({ contrato, onClose }) {
             <Info size={14} className="text-blue-600 dark:text-blue-300 shrink-0 mt-0.5" />
             <p className="text-[12px] text-blue-700 dark:text-blue-200 leading-snug">
               Esta vista es <strong>solo lectura</strong>. Los pagos se registran desde
-              el módulo <strong>Cobranza</strong> con el botón <em>Registrar pago</em>.
+              el módulo <strong>Cobros</strong> con el botón <em>Registrar pago</em>.
             </p>
           </div>
         </div>
@@ -106,7 +106,7 @@ export default function HistorialPagos({ contrato, onClose }) {
                 Aún no hay pagos registrados para este contrato.
               </p>
               <p className="text-[#737373] dark:text-[#7A7A7A] text-[12px] mt-1">
-                Los pagos se registran desde el módulo <strong>Cobranza</strong>.
+                Los pagos se registran desde el módulo <strong>Cobros</strong>.
               </p>
             </div>
           ) : (

@@ -339,7 +339,7 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
             <p className="font-medium">Generar pagos pendientes desde hoy hasta el fin del contrato</p>
             <p className="text-muted mt-0.5">
               Se crea un Pago en estado <em>pendiente</em> por cada mes con vencimiento
-              el día {datos.dia_vencimiento_pago || 10}. Después podés cobrarlos desde el área de Cobranzas.
+              el día {datos.dia_vencimiento_pago || 10}. Después podés cobrarlos desde el área de Cobros.
             </p>
           </div>
         </label>
