@@ -188,6 +188,39 @@ def _migrar_storage_path():
             db.execute(text(f"ALTER TABLE {qual}contratos ADD COLUMN archivo_subido_at TIMESTAMP"))
             db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_contratos_archivo_path ON {qual}contratos(archivo_path)"))
             db.commit()
+            cols_k = {c["name"] for c in ins.get_columns("contratos", schema=schema)}
+
+        # contratos: campos para importación IA (mora, días de pago, policies, inventario)
+        nuevas_cols_contrato = [
+            ("mora_diaria_porc", "FLOAT DEFAULT 0"),
+            ("dia_inicio_pago", "INTEGER DEFAULT 1"),
+            ("dia_vencimiento_pago", "INTEGER DEFAULT 10"),
+            ("policies", "TEXT"),
+            ("inventario", "TEXT"),
+        ]
+        for col, ddl in nuevas_cols_contrato:
+            if col not in cols_k:
+                try:
+                    db.execute(text(f"ALTER TABLE {qual}contratos ADD COLUMN {col} {ddl}"))
+                    db.commit()
+                except Exception as e:
+                    print(f"[migrar] contratos.{col}: {e}")
+                    db.rollback()
+
+        # clientes: tipo_documento y nacionalidad (para extracción IA)
+        cols_cli = {c["name"] for c in ins.get_columns("clientes", schema=schema)}
+        nuevas_cols_cliente = [
+            ("tipo_documento", "VARCHAR"),
+            ("nacionalidad", "VARCHAR"),
+        ]
+        for col, ddl in nuevas_cols_cliente:
+            if col not in cols_cli:
+                try:
+                    db.execute(text(f"ALTER TABLE {qual}clientes ADD COLUMN {col} {ddl}"))
+                    db.commit()
+                except Exception as e:
+                    print(f"[migrar] clientes.{col}: {e}")
+                    db.rollback()
 
         # Agregar valores al enum propiedadtipo si Postgres no los tiene.
         # ALTER TYPE ADD VALUE no puede correr dentro de una transacción;

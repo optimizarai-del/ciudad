@@ -410,29 +410,39 @@ def borrar_archivo(id: int, db: Session = Depends(get_db), user=Depends(get_curr
 MAX_PDF_IMPORT_BYTES = 15 * 1024 * 1024   # 15 MB; PDFs muy grandes hacen explotar costo del LLM
 
 
+_EXT_VALIDAS = (".pdf", ".doc", ".docx", ".txt")
+
+
 @router.post("/importar-pdf-preview")
 async def importar_pdf_preview(
     archivo: UploadFile = File(...),
     user=Depends(get_current_user),
 ):
-    """Recibe un PDF, lo pasa por la IA y devuelve los datos extraídos
-    SIN guardar nada. El frontend muestra esos datos como preview editable;
-    cuando el usuario confirma, se llama /importar-pdf-confirmar.
+    """Recibe un contrato en formato PDF / DOC / DOCX / TXT, lo pasa por la
+    IA y devuelve los datos extraídos SIN guardar nada. El frontend muestra
+    esos datos como preview editable; cuando el usuario confirma, se llama
+    /importar-pdf-confirmar.
     """
-    if archivo.content_type and "pdf" not in archivo.content_type.lower():
-        raise HTTPException(400, "El archivo debe ser un PDF.")
+    fn = (archivo.filename or "").lower()
+    if not any(fn.endswith(ext) for ext in _EXT_VALIDAS):
+        raise HTTPException(
+            400,
+            f"Formato no soportado. Aceptados: {', '.join(_EXT_VALIDAS)}",
+        )
     raw = await archivo.read()
     if len(raw) > MAX_PDF_IMPORT_BYTES:
-        raise HTTPException(413, f"PDF demasiado grande (máx {MAX_PDF_IMPORT_BYTES // 1024 // 1024} MB).")
+        raise HTTPException(413, f"Archivo demasiado grande (máx {MAX_PDF_IMPORT_BYTES // 1024 // 1024} MB).")
     if len(raw) < 100:
         raise HTTPException(400, "El archivo parece vacío o corrupto.")
     try:
-        datos = contrato_import.parsear_contrato_pdf(raw, filename=archivo.filename or "contrato.pdf")
+        datos = contrato_import.parsear_contrato_archivo(
+            raw, filename=archivo.filename or "contrato",
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
         print(f"[importar-pdf-preview] {type(e).__name__}: {e}")
-        raise HTTPException(502, f"La IA no pudo procesar el PDF: {type(e).__name__}: {str(e)[:200]}")
+        raise HTTPException(502, f"La IA no pudo procesar el archivo: {type(e).__name__}: {str(e)[:200]}")
     return {"ok": True, "datos": datos}
 
 

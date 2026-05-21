@@ -79,10 +79,10 @@ export default function ImportarContratoPDF({ onClose, onSaved }) {
           <div>
             <h2 className="hero-title text-xl sm:text-2xl mb-0.5 flex items-center gap-2">
               <Sparkles size={20} className="text-[#B8893A]" />
-              Importar contrato desde PDF
+              Importar contrato
             </h2>
             <p className="text-[12px] text-muted">
-              La IA extrae propietario, inquilino, propiedad y datos del contrato.
+              Aceptamos PDF, DOC y DOCX. La IA extrae propietario(s), inquilino, garantes, propiedad y todos los datos del contrato.
             </p>
           </div>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
@@ -141,11 +141,11 @@ function UploadStep({ file, setFile, loading, err, onUpload }) {
             </>
           ) : (
             <>
-              <p className="font-semibold text-[14px]">Elegir contrato en PDF</p>
-              <p className="text-[11px] text-muted">Máximo 15 MB. Idealmente texto seleccionable.</p>
+              <p className="font-semibold text-[14px]">Elegir contrato (PDF, DOC o DOCX)</p>
+              <p className="text-[11px] text-muted">Máximo 15 MB. Idealmente con texto seleccionable.</p>
             </>
           )}
-          <input type="file" accept="application/pdf,.pdf" className="hidden"
+          <input type="file" accept="application/pdf,.pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden"
             onChange={e => setFile(e.target.files?.[0] || null)} />
         </div>
       </label>
@@ -222,11 +222,21 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
           <Field label="Nombre" value={datos.inquilino?.nombre} onChange={v => setNested('inquilino.nombre', v)} />
           <Field label="Apellido" value={datos.inquilino?.apellido} onChange={v => setNested('inquilino.apellido', v)} />
           <Field label="Razón social" value={datos.inquilino?.razon_social} onChange={v => setNested('inquilino.razon_social', v)} />
-          <Field label="DNI / CUIT" value={datos.inquilino?.documento} onChange={v => setNested('inquilino.documento', v)} />
+          <Field label="Documento" value={datos.inquilino?.documento} onChange={v => setNested('inquilino.documento', v)} placeholder="12.345.678 o 20-12345678-3" />
+          <div>
+            <label className="label">Tipo de documento</label>
+            <select className="input" value={datos.inquilino?.tipo_documento || 'DNI'} onChange={e => setNested('inquilino.tipo_documento', e.target.value)}>
+              {['DNI','CUIT','CUIL','Pasaporte','LE','LC','Otro'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <Field label="Nacionalidad" value={datos.inquilino?.nacionalidad} onChange={v => setNested('inquilino.nacionalidad', v)} />
           <Field label="Email" value={datos.inquilino?.email} onChange={v => setNested('inquilino.email', v)} type="email" />
           <Field label="Teléfono" value={datos.inquilino?.telefono} onChange={v => setNested('inquilino.telefono', v)} />
         </div>
       </Seccion>
+
+      {/* Co-firmantes / Garantes */}
+      <CoFirmantesSection datos={datos} setNested={setNested} />
 
       {/* Propiedad */}
       <Seccion titulo="Propiedad">
@@ -278,6 +288,9 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
           <Field label="Periodicidad (meses)" type="number" value={datos.periodicidad_meses} onChange={v => setNested('periodicidad_meses', v)} />
           <Field label="% fijo (si aplica)" type="number" value={datos.porcentaje_fijo} onChange={v => setNested('porcentaje_fijo', v)} />
           <Field label="Comisión %" type="number" value={datos.comision_porc} onChange={v => setNested('comision_porc', v)} />
+          <Field label="Mora diaria %" type="number" value={datos.mora_diaria_porc} onChange={v => setNested('mora_diaria_porc', v)} placeholder="ej: 1" />
+          <Field label="Día desde el que se paga" type="number" value={datos.dia_inicio_pago} onChange={v => setNested('dia_inicio_pago', v)} placeholder="1" />
+          <Field label="Día vto. sin punición" type="number" value={datos.dia_vencimiento_pago} onChange={v => setNested('dia_vencimiento_pago', v)} placeholder="10" />
         </div>
         <div className="mt-3">
           <label className="label">Notas</label>
@@ -288,6 +301,48 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
             onChange={e => setNested('notas', e.target.value)}
           />
         </div>
+      </Seccion>
+
+      {/* Políticas: quién paga qué */}
+      <Seccion titulo="¿Quién paga cada concepto?">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <PolicySelect label="Tasas municipales" path="policies.tasas_municipales_a_cargo" datos={datos} setNested={setNested} />
+          <PolicySelect label="Expensas"          path="policies.expensas_a_cargo"          datos={datos} setNested={setNested} />
+          <PolicySelect label="Impuesto inmobiliario" path="policies.impuesto_inmobiliario" datos={datos} setNested={setNested} />
+          <PolicySelect label="Servicios (luz/gas/agua/internet)" path="policies.servicios_a_cargo" datos={datos} setNested={setNested} />
+          <BooleanSelect label="Seguro obligatorio" path="policies.seguro_obligatorio" datos={datos} setNested={setNested} />
+          <BooleanSelect label="Mascotas permitidas" path="policies.mascotas_permitidas" datos={datos} setNested={setNested} nullable />
+        </div>
+      </Seccion>
+
+      {/* Inventario */}
+      {(datos.inventario || datos.inventario === '') && (
+        <Seccion titulo="Inventario de bienes muebles">
+          <textarea
+            className="input resize-none"
+            rows={3}
+            placeholder="Listado de muebles, electrodomésticos, luminarias…"
+            value={datos.inventario ?? ''}
+            onChange={e => setNested('inventario', e.target.value)}
+          />
+        </Seccion>
+      )}
+
+      {/* Pagos futuros */}
+      <Seccion titulo="Pagos del período">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox"
+            checked={datos.generar_pagos_futuros !== false}
+            onChange={e => setNested('generar_pagos_futuros', e.target.checked)}
+            className="mt-0.5" />
+          <div className="text-[12px]">
+            <p className="font-medium">Generar pagos pendientes desde hoy hasta el fin del contrato</p>
+            <p className="text-muted mt-0.5">
+              Se crea un Pago en estado <em>pendiente</em> por cada mes con vencimiento
+              el día {datos.dia_vencimiento_pago || 10}. Después podés cobrarlos desde el área de Cobranzas.
+            </p>
+          </div>
+        </label>
       </Seccion>
 
       {err && (
@@ -378,9 +433,22 @@ function PropietariosSection({ datos, setNested }) {
                   onChange={e => updateAt(idx, 'razon_social', e.target.value)} />
               </div>
               <div>
-                <label className="label">DNI / CUIT</label>
+                <label className="label">Documento</label>
                 <input className="input" value={p.documento || ''}
+                  placeholder="12.345.678 o 20-12345678-3"
                   onChange={e => updateAt(idx, 'documento', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Tipo doc.</label>
+                <select className="input" value={p.tipo_documento || 'DNI'}
+                  onChange={e => updateAt(idx, 'tipo_documento', e.target.value)}>
+                  {['DNI','CUIT','CUIL','Pasaporte','LE','LC','Otro'].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Nacionalidad</label>
+                <input className="input" value={p.nacionalidad || ''}
+                  onChange={e => updateAt(idx, 'nacionalidad', e.target.value)} />
               </div>
               <div>
                 <label className="label">Email</label>
@@ -422,6 +490,143 @@ function Seccion({ titulo, children }) {
   )
 }
 
+
+function PolicySelect({ label, path, datos, setNested }) {
+  // Lee el valor anidado siguiendo el path "a.b.c"
+  const get = (o, p) => p.split('.').reduce((x, k) => (x ? x[k] : undefined), o)
+  const value = get(datos, path) ?? ''
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <select className="input" value={value}
+        onChange={e => setNested(path, e.target.value || null)}>
+        <option value="">— sin especificar —</option>
+        <option value="inquilino">Inquilino</option>
+        <option value="propietario">Propietario</option>
+      </select>
+    </div>
+  )
+}
+
+
+function BooleanSelect({ label, path, datos, setNested, nullable }) {
+  const get = (o, p) => p.split('.').reduce((x, k) => (x ? x[k] : undefined), o)
+  const value = get(datos, path)
+  const sval = value === true ? 'si' : value === false ? 'no' : ''
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <select className="input" value={sval}
+        onChange={e => {
+          const v = e.target.value
+          setNested(path, v === 'si' ? true : v === 'no' ? false : null)
+        }}>
+        {nullable && <option value="">— sin especificar —</option>}
+        <option value="si">Sí</option>
+        <option value="no">No</option>
+      </select>
+    </div>
+  )
+}
+
+
+/**
+ * Sección de garantes / co-firmantes detectados en el contrato.
+ * Aparece sólo si la IA detectó alguno; si no, se puede agregar manualmente.
+ */
+function CoFirmantesSection({ datos, setNested }) {
+  const lista = datos.co_firmantes || []
+  const updateAt = (idx, field, value) => {
+    const copy = lista.map((p, i) => i === idx ? { ...p, [field]: value === '' ? null : value } : p)
+    setNested('co_firmantes', copy)
+  }
+  const eliminar = (idx) => setNested('co_firmantes', lista.filter((_, i) => i !== idx))
+  const agregar = () => setNested('co_firmantes', [
+    ...lista,
+    { nombre: '', apellido: '', documento: null, tipo_documento: 'DNI',
+      nacionalidad: null, email: null, telefono: null },
+  ])
+
+  if (lista.length === 0) {
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">
+            Garantes / Co-firmantes
+          </p>
+          <button type="button" onClick={agregar}
+            className="text-[11px] text-primary dark:text-white hover:underline font-medium">
+            + Agregar garante
+          </button>
+        </div>
+        <p className="text-[11px] text-muted italic">
+          La IA no detectó garantes en el contrato. Si los hay, agregalos manualmente.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">
+          Garantes / Co-firmantes <span className="text-muted/70 font-normal lowercase tracking-normal">({lista.length})</span>
+        </p>
+        <button type="button" onClick={agregar}
+          className="text-[11px] text-primary dark:text-white hover:underline font-medium">
+          + Agregar
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {lista.map((p, idx) => (
+          <div key={idx} className="rounded-2xl bg-neutral-50 dark:bg-[#141414] border border-border dark:border-[#2A2A2A] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[12px] font-semibold">Garante #{idx + 1}</p>
+              <button type="button" onClick={() => eliminar(idx)}
+                className="text-[11px] text-danger hover:underline">Quitar</button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Nombre</label>
+                <input className="input" value={p.nombre || ''}
+                  onChange={e => updateAt(idx, 'nombre', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Apellido</label>
+                <input className="input" value={p.apellido || ''}
+                  onChange={e => updateAt(idx, 'apellido', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Documento</label>
+                <input className="input" value={p.documento || ''}
+                  onChange={e => updateAt(idx, 'documento', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Tipo doc.</label>
+                <select className="input" value={p.tipo_documento || 'DNI'}
+                  onChange={e => updateAt(idx, 'tipo_documento', e.target.value)}>
+                  {['DNI','CUIT','CUIL','Pasaporte','LE','LC','Otro'].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input className="input" type="email" value={p.email || ''}
+                  onChange={e => updateAt(idx, 'email', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Teléfono</label>
+                <input className="input" value={p.telefono || ''}
+                  onChange={e => updateAt(idx, 'telefono', e.target.value)} />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function DoneStep({ resumen, onClose }) {
   const Row = ({ label, info }) => (
     <div className="flex items-center justify-between py-2 border-b border-border last:border-0 text-[13px]">
@@ -449,12 +654,22 @@ function DoneStep({ resumen, onClose }) {
             info={p}
           />
         ))}
-        {/* Compat con respuesta vieja */}
         {!resumen.propietarios && resumen.propietario && (
           <Row label="Propietario" info={resumen.propietario} />
         )}
         {resumen.inquilino?.id && <Row label="Inquilino" info={resumen.inquilino} />}
+        {(resumen.co_firmantes || []).map((cf, i) => (
+          <Row key={cf.id || i} label={`Garante ${i + 1}`} info={cf} />
+        ))}
         <Row label="Propiedad" info={resumen.propiedad} />
+        {resumen.pagos_generados > 0 && (
+          <div className="flex items-center justify-between py-2 text-[13px]">
+            <span className="text-muted">Pagos futuros generados</span>
+            <span className="font-medium text-[#B8893A]">
+              {resumen.pagos_generados} pendientes
+            </span>
+          </div>
+        )}
       </div>
 
       <button className="btn-primary w-full" onClick={onClose}>

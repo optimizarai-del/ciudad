@@ -18,3 +18,7 @@ reportlab>=4.0.0
 psycopg2-binary==2.9.9
 # Generación de contratos en .docx editables.
 python-docx==1.1.2
+# Importación de contratos desde DOC binario viejo (Word 97-2003).
+olefile>=0.46
+# Cálculo de relativedelta para generar pagos mensuales.
+python-dateutil>=2.8.0

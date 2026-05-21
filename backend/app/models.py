@@ -193,6 +193,11 @@ class Cliente(Base):
     apellido = Column(String)
     razon_social = Column(String)
     documento = Column(String, index=True)
+    # Tipo de documento (DNI / CUIT / CUIL / Pasaporte / LE / LC / Otro).
+    # Lo guardamos como texto libre porque cada contrato puede usar formatos
+    # distintos; el extractor IA lo levanta tal cual figura en el contrato.
+    tipo_documento = Column(String, nullable=True)
+    nacionalidad = Column(String, nullable=True)
     email = Column(String, index=True)
     telefono = Column(String)
     rol = Column(SQLEnum(ClienteRol), default=ClienteRol.inquilino)
@@ -228,6 +233,25 @@ class Contrato(Base):
 
     # Comisión
     comision_porc = Column(Float, default=0)
+
+    # Mora: punición diaria por atraso en el pago (típicamente 1% diario).
+    # Se aplica a partir de `dia_vencimiento_pago + 1`.
+    mora_diaria_porc = Column(Float, default=0)
+
+    # Día del mes en que abre y cierra la ventana de pago.
+    # Ej: contrato dice "del 1° al 7 de cada mes" → 1 y 7.
+    dia_inicio_pago = Column(Integer, default=1)
+    dia_vencimiento_pago = Column(Integer, default=10)
+
+    # Quién paga qué (JSON). Pre-marca los conceptos en el modal de cobranza.
+    # Ej: {"tasas_municipales":"inquilino","expensas":"inquilino",
+    #      "impuesto_inmobiliario":"propietario","servicios":"inquilino",
+    #      "seguro_obligatorio":true}
+    policies = Column(Text, nullable=True)
+
+    # Inventario de bienes muebles del inmueble (mueblería, electrodomésticos,
+    # luminarias, etc.) tal cual figura en el contrato. Texto largo.
+    inventario = Column(Text, nullable=True)
 
     notas = Column(Text)
     is_demo = Column(Boolean, default=False, nullable=False, index=True)
@@ -385,6 +409,29 @@ class PropiedadAdjunto(Base):
     blob_b64 = Column(Text, nullable=True)
     storage_path = Column(String, nullable=True, index=True)
     es_principal = Column(Boolean, default=False)  # foto destacada
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PagoAdjunto(Base):
+    """Comprobantes de pago (fotos de cupones, recibos, etc.) asociados a un
+    Pago concreto. Pueden estar ligados a un concepto específico de ese pago
+    (por ejemplo, foto del recibo de expensas) o ser genéricos al pago."""
+    __tablename__ = "pago_adjuntos"
+    id = Column(Integer, primary_key=True)
+    pago_id = Column(Integer, ForeignKey("pagos.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    pago = relationship("Pago")
+    # Si pertenece a un concepto específico (Expensas, Tasas municipales, etc).
+    # Coincide con detalle_conceptos[].label. Si es null, el comprobante es
+    # genérico del pago (p.ej. comprobante de transferencia al propietario).
+    concepto_label = Column(String, nullable=True, index=True)
+    nombre_archivo = Column(String, nullable=False)
+    mime = Column(String)
+    tamano_bytes = Column(Integer)
+    descripcion = Column(Text)
+    # Almacenamiento: mismo patrón que PropiedadAdjunto
+    blob_b64 = Column(Text, nullable=True)
+    storage_path = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
