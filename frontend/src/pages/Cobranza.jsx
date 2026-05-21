@@ -235,33 +235,40 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
   const yaUsados = new Set((conceptos || []).map(c => c.label?.toLowerCase()))
   const disponibles = SUGERENCIAS.filter(s => !yaUsados.has(s.toLowerCase()))
 
+  // Toggle mutex: clickear "pagado" o "cobrar" cancela el otro
+  const setEstado = (i, nuevo) => onUpdate(i, 'estado', nuevo)
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <label className="label !mb-0">Conceptos del cobro</label>
-        <span className="text-[10px] text-muted">Marcá lo que cobrás</span>
+        <span className="text-[10px] text-muted">Marcá quién paga cada cosa</span>
       </div>
 
       {/* Header de columnas */}
-      <div className="grid grid-cols-[1fr_110px_36px_28px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
+      <div className="grid grid-cols-[1fr_100px_58px_58px_24px] gap-2 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted font-semibold">
         <span>Concepto</span>
         <span className="text-right">Monto</span>
-        <span></span>
+        <span className="text-center">Pagado</span>
+        <span className="text-center">A cobrar</span>
         <span></span>
       </div>
 
       {/* Filas */}
       <div className="space-y-1.5">
         {(conceptos || []).map((c, i) => {
-          const incluido = c.incluido !== false
+          const estado = c.estado || null     // 'pagado' | 'cobrar' | null
+          const activo = estado !== null
           return (
             <div key={i}
-              className={`grid grid-cols-[1fr_110px_36px_28px] gap-2 items-center p-2 rounded-xl border transition-all ${
+              className={`grid grid-cols-[1fr_100px_58px_58px_24px] gap-2 items-center p-2 rounded-xl border transition-all ${
                 c._arrastre
                   ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300/50 dark:border-amber-700/40'
-                  : incluido
-                    ? 'bg-neutral-50 dark:bg-[#1A1A1A] border-border dark:border-[#2A2A2A]'
-                    : 'bg-white dark:bg-[#0F0F0F] border-border/40 dark:border-[#1E1E1E] opacity-45'
+                  : estado === 'cobrar'
+                    ? 'bg-neutral-50 dark:bg-[#1A1A1A] border-[#0A0A0A]/30 dark:border-white/30'
+                    : estado === 'pagado'
+                      ? 'bg-green-50/60 dark:bg-green-900/10 border-green-300/40 dark:border-green-700/30'
+                      : 'bg-white dark:bg-[#0F0F0F] border-border/40 dark:border-[#1E1E1E] opacity-50'
               }`}
               title={c._arrastre ? `Arrastrado de ${c._arrastre} (quedó pendiente)` : undefined}>
 
@@ -269,7 +276,7 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
               {c.fijo ? (
                 <div className="min-w-0 px-1">
                   <p className="text-[13px] font-medium">{c.label}</p>
-                  {c.label === 'Tasas municipales' && incluido && (
+                  {c.label === 'Tasas municipales' && estado === 'cobrar' && (
                     <p className="text-[10px] text-muted">100% al propietario</p>
                   )}
                   {c._arrastre && (
@@ -282,7 +289,7 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
                     className="input !py-1.5 !px-2 text-[12px]"
                     value={c.label || ''}
                     onChange={e => onUpdate(i, 'label', e.target.value)} />
-                  {c.label?.toLowerCase().includes('municipal') && incluido && (
+                  {c.label?.toLowerCase().includes('municipal') && estado === 'cobrar' && (
                     <p className="text-[10px] text-muted mt-0.5 px-1">100% al propietario</p>
                   )}
                 </div>
@@ -294,16 +301,33 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
                 value={c.monto || ''}
                 onChange={e => onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))} />
 
-              {/* Checkbox circular — borde negro resaltado */}
-              <button type="button"
-                onClick={() => onUpdate(i, 'incluido', !incluido)}
-                className={`w-8 h-8 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                  incluido
-                    ? 'bg-[#0A0A0A] dark:bg-white border-[#0A0A0A] dark:border-white text-white dark:text-[#0A0A0A]'
-                    : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
-                }`}>
-                {incluido && <Check size={13} />}
-              </button>
+              {/* Checkbox "Pagado" — el inquilino lo abonó directo (no se cobra acá) */}
+              <div className="flex justify-center">
+                <button type="button"
+                  onClick={() => setEstado(i, estado === 'pagado' ? null : 'pagado')}
+                  title="El inquilino ya lo pagó directo (no se le rinde al propietario)"
+                  className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                    estado === 'pagado'
+                      ? 'bg-green-500 border-green-500 text-white'
+                      : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
+                  }`}>
+                  {estado === 'pagado' && <Check size={12} />}
+                </button>
+              </div>
+
+              {/* Checkbox "A cobrar" — la inmobiliaria lo cobra y lo rinde al propietario */}
+              <div className="flex justify-center">
+                <button type="button"
+                  onClick={() => setEstado(i, estado === 'cobrar' ? null : 'cobrar')}
+                  title="Lo cobra la inmobiliaria y se le rinde al propietario"
+                  className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                    estado === 'cobrar'
+                      ? 'bg-[#0A0A0A] dark:bg-white border-[#0A0A0A] dark:border-white text-white dark:text-[#0A0A0A]'
+                      : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
+                  }`}>
+                  {estado === 'cobrar' && <Check size={12} />}
+                </button>
+              </div>
 
               {/* Quitar (sólo extras) */}
               {c.fijo ? (
@@ -326,13 +350,13 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd }) {
         <span className="text-[10px] text-muted uppercase tracking-widest mt-1.5 mr-1">Agregar:</span>
         {disponibles.map(s => (
           <button key={s} type="button"
-            onClick={() => onAdd({ label: s, monto: 0, incluido: false })}
+            onClick={() => onAdd({ label: s, monto: 0, estado: null })}
             className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition">
             + {s}
           </button>
         ))}
         <button type="button"
-          onClick={() => onAdd({ label: '', monto: 0, incluido: false })}
+          onClick={() => onAdd({ label: '', monto: 0, estado: null })}
           className="text-[11px] px-2.5 py-1 rounded-full bg-white dark:bg-[#1A1A1A] border border-dashed border-border dark:border-[#2A2A2A] text-muted hover:bg-neutral-50 dark:hover:bg-[#252525] hover:text-primary dark:hover:text-white transition">
           + Otro…
         </button>
@@ -378,14 +402,14 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     fecha_pago: new Date().toISOString().slice(0, 10),
     notas: '',
     conceptos: [
-      { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, incluido: false },
-      { label: 'Expensas',          fijo: true, monto: extraSug('Expensas', item.monto_expensas_sug),               incluido: false },
-      { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug),         incluido: false },
+      { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, estado: null },
+      { label: 'Expensas',          fijo: true, monto: extraSug('Expensas', item.monto_expensas_sug),               estado: null },
+      { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug),         estado: null },
       // Arrastres de OTROS conceptos (no Expensas / Tasas que ya están arriba)
       ...pendientesArrastre
         .filter(p => !CONCEPTOS_FIJOS.some(f => f.toLowerCase() === p.label.toLowerCase()))
         .map(p => ({
-          label: p.label, monto: Number(p.monto) || 0, incluido: false, _arrastre: p.desde_periodo,
+          label: p.label, monto: Number(p.monto) || 0, estado: null, _arrastre: p.desde_periodo,
         })),
     ],
   })
@@ -410,10 +434,10 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     setForm(f => ({ ...f, conceptos: [...f.conceptos, preset] }))
   }
 
-  // Total a cobrar al inquilino: suma de montos donde incluido=true,
-  // menos descuento de refacciones.
+  // Total a cobrar al inquilino: suma de montos donde estado='cobrar',
+  // menos descuento de refacciones. Los 'pagado' se asientan pero no se cobran.
   const aCobrarInq = (form.conceptos || [])
-    .filter(c => c.incluido !== false)
+    .filter(c => c.estado === 'cobrar')
     .reduce((s, c) => s + (Number(c.monto) || 0), 0)
   const total = Math.max(0, aCobrarInq - descuentoRefs)
 
@@ -422,21 +446,23 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     setLoading(true); setErr('')
     try {
       // Mapeo al backend:
-      // - El alquiler va en `monto_alquiler` (solo si está incluido).
-      // - Cada otra fila incluida → estado='cobrar'.
-      //   Tasas municipales cobradas pasan 100% al propietario sin comisión (pasa-mano).
-      // - Filas NO incluidas (desmarcadas) no se guardan en este pago.
-      const filaAlquiler = form.conceptos.find(c => c.label === 'Alquiler' && c.incluido !== false) || { monto: 0 }
+      // - Alquiler: va en monto_alquiler solo si estado='cobrar' (la inmobiliaria lo cobra)
+      // - Filas con estado='cobrar'  → backend: estado='cobrar' (se le rinde al propietario)
+      // - Filas con estado='pagado'  → backend: estado='pagado_directo'
+      //   (el inquilino lo pagó por su cuenta — informativo, NO se le rinde al propietario)
+      // - Filas con estado=null (sin marcar) → se ignoran (no van en este pago)
+      const filaAlquiler = form.conceptos.find(c => c.label === 'Alquiler' && c.estado === 'cobrar') || { monto: 0 }
       const montoAlquilerTotal = Number(filaAlquiler.monto) || 0
 
       const conceptos = []
       for (const c of form.conceptos) {
-        if (c.incluido === false) continue          // desmarcado: no va en este pago
+        if (!c.estado) continue                       // sin marcar: no va
         if (c.label === 'Alquiler' || !c.label?.trim()) continue
         const label = c.label.trim()
         const monto = Number(c.monto) || 0
         if (monto <= 0) continue
-        conceptos.push({ label, monto, estado: 'cobrar' })
+        const estadoBackend = c.estado === 'pagado' ? 'pagado_directo' : 'cobrar'
+        conceptos.push({ label, monto, estado: estadoBackend })
       }
 
       const payload = {
@@ -581,7 +607,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
 
           <div className="flex gap-3 pt-1">
             <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
-            <button className="btn-primary flex-1" disabled={loading || (form.conceptos || []).filter(c => c.incluido !== false).every(c => (Number(c.monto) || 0) === 0)}>
+            <button className="btn-primary flex-1" disabled={loading || (form.conceptos || []).filter(c => c.estado).every(c => (Number(c.monto) || 0) === 0)}>
               {loading ? 'Procesando…' : 'Confirmar y emitir comprobantes'}
             </button>
           </div>

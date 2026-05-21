@@ -581,8 +581,8 @@ def _registrar_pago_impl(
             "telefono": inquilino.telefono if inquilino else None,
         },
         "items": items_no_cero or [("Pago del período", monto_total)],
-        # Conceptos a cargo del propietario — informativo en el comprobante
-        "items_propietario": items_propietario_paga,
+        # Conceptos que el inquilino pagó directamente al ente (informativo)
+        "items_pagado_directo": items_pagado_directo,
         "total": monto_total,
     })
 
@@ -603,8 +603,8 @@ def _registrar_pago_impl(
         "inquilino": {"nombre_completo": nombre_inq},
         "items_cobrados": items_no_cero or [("Pago del período", monto_total)],
         "items_pasantes": items_pasantes,
-        # Conceptos que paga el propietario fuera de este pago (informativos)
-        "items_propietario": items_propietario_paga,
+        # Conceptos que el inquilino pagó directamente (figuran en pagado, no en rendir)
+        "items_pagado_directo": items_pagado_directo,
         "monto_alquiler": monto_alquiler,
         "monto_cobrado_total": monto_total,
         "comision_porc": comision_pct,

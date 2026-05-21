@@ -245,19 +245,20 @@ def generar_pdf_comprobante_inquilino(ctx: dict) -> bytes:
         ),
     ]
 
-    # Si hay conceptos que paga el propietario, los listamos como informativos
-    items_propietario = ctx.get("items_propietario") or []
-    if items_propietario:
+    # Conceptos que el inquilino abonó directamente (al consorcio, municipio, etc.)
+    # — informativo, no se cobran en la inmobiliaria.
+    items_pagado_directo = ctx.get("items_pagado_directo") or ctx.get("items_propietario") or []
+    if items_pagado_directo:
         story += [
             Spacer(1, 6 * mm),
-            Paragraph("A CARGO DEL PROPIETARIO (informativo)", sty["CiudadSection"]),
+            Paragraph("PAGADO DIRECTAMENTE POR USTED (informativo)", sty["CiudadSection"]),
             Paragraph(
-                "Los siguientes servicios y conceptos son responsabilidad del "
-                "propietario según las condiciones del contrato. No se incluyen "
-                "en el monto cobrado al inquilino:",
+                "Los siguientes conceptos figuran como abonados directamente por usted "
+                "al ente correspondiente (consorcio, municipio, etc.). No se cobraron "
+                "en la inmobiliaria — se asientan a modo informativo:",
                 sty["CiudadClause"],
             ),
-            _tabla_kv([(lbl, _money(monto)) for lbl, monto in items_propietario]),
+            _tabla_kv([(lbl, _money(monto)) for lbl, monto in items_pagado_directo]),
         ]
 
     story += [
@@ -340,6 +341,7 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
 
     items_cobrados = ctx.get("items_cobrados") or []
     items_pasantes = ctx.get("items_pasantes") or []
+    items_pagado_directo = ctx.get("items_pagado_directo") or ctx.get("items_propietario") or []
 
     # Desglose tipo modal de Liquidaciones:
     #   Concepto | Pagado (inquilino) | A rendir (al propietario)
@@ -349,6 +351,15 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
     desglose_rows = [{"label": "Alquiler", "pagado": alquiler, "a_rendir": alquiler}]
     for lbl, monto in items_pasantes:
         desglose_rows.append({"label": lbl, "pagado": monto, "a_rendir": monto})
+    # Conceptos que el inquilino abonó directamente: figuran como pagados pero
+    # NO se rinden al propietario (él no los recibió porque el inquilino los
+    # pagó al ente — consorcio, municipio, etc.).
+    for lbl, monto in items_pagado_directo:
+        desglose_rows.append({
+            "label": f"{lbl} (pagado directo por inquilino)",
+            "pagado": monto,
+            "a_rendir": 0,
+        })
     if comision_pct and comision > 0:
         desglose_rows.append({
             "label": f"Comisión adm. {comision_pct}% s/ alquiler",
@@ -369,18 +380,6 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
             incluye_a_rendir=True,
         ),
     ]
-
-    # Conceptos que paga directamente el propietario (no se cobraron al inquilino)
-    items_propietario = ctx.get("items_propietario") or []
-    if items_propietario:
-        story += [
-            Spacer(1, 6 * mm),
-            Paragraph(
-                "A su cargo (no se cobraron al inquilino, los abona el propietario):",
-                sty["CiudadClause"],
-            ),
-            _tabla_kv([(lbl, _money(monto)) for lbl, monto in items_propietario]),
-        ]
 
     story += [
         Spacer(1, 8 * mm),
