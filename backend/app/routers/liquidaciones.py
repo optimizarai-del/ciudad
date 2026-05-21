@@ -33,16 +33,37 @@ router = APIRouter(prefix="/api/liquidaciones", tags=["liquidaciones"])
 
 
 def _calcular_neto(pago: models.Pago, contrato: models.Contrato | None) -> float:
-    """Neto que le toca al propietario: alquiler − comisión inmobiliaria.
+    """Neto que le toca al propietario:
+        (alquiler − comisión sobre alquiler)
+        + expensas + tasas municipales + otros conceptos cobrados al inquilino
 
-    Las expensas, tasas y otros conceptos son gastos pasantes (se cobran al
-    inquilino y se derivan a quien corresponda — consorcio, municipio, etc.)
-    NO van al propietario.
+    El propietario paga previamente expensas, tasas, etc. al consorcio/municipio.
+    Cuando la inmobiliaria los cobra al inquilino, ese dinero le pertenece al
+    propietario íntegro (sin comisión). La comisión sólo se aplica al alquiler.
     """
     alquiler = float(pago.monto_alquiler or 0)
     comision_porc = float(contrato.comision_porc or 0) if contrato else 0.0
     comision = round(alquiler * comision_porc / 100.0, 2)
-    return round(alquiler - comision, 2)
+    # Pasantes cobrados al inquilino (estado='cobrar') → van íntegros al propietario
+    pasantes_total = 0.0
+    if pago.detalle_conceptos:
+        import json
+        try:
+            conceptos = json.loads(pago.detalle_conceptos) or []
+            for c in conceptos:
+                estado = c.get("estado") or ("pagado_directo" if c.get("paga") == "propietario" else "cobrar")
+                if estado == "cobrar":
+                    pasantes_total += float(c.get("monto") or 0)
+        except Exception:
+            pasantes_total = 0.0
+    else:
+        # Fallback legacy: campos sueltos en el pago
+        pasantes_total = (
+            float(pago.monto_expensas or 0)
+            + float(pago.monto_municipal or 0)
+            + float(pago.monto_otros or 0)
+        )
+    return round(alquiler - comision + pasantes_total, 2)
 
 
 def _propietario_dict(c: models.Cliente | None) -> dict:

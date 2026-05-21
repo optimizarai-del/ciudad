@@ -522,10 +522,10 @@ function ModalMarcar({ pago, onClose, onSaved }) {
   filasDesglose.push({
     label: 'Alquiler',
     pagado: totalCobradoAlquiler,         // el inquilino lo pagó
-    a_rendir: totalCobradoAlquiler - comision,
-    nota: pago.comision_porc ? `comisión ${pago.comision_porc}% = ${fmt(comision)}` : null,
+    a_rendir: totalCobradoAlquiler,        // se muestra entero; la comisión se resta abajo
   })
-  // Agrupamos por label
+  // Agrupamos por label (Expensas, Tasas municipales, Otros…) — todos pasan
+  // 100 % al propietario porque ya los abonó previamente
   const grupos = {}
   for (const c of conceptos) {
     const lbl = c.label || 'Otro'
@@ -534,7 +534,7 @@ function ModalMarcar({ pago, onClose, onSaved }) {
     const estado = _estadoDe(c)
     const monto = Number(c.monto) || 0
     if (estado === 'cobrar') {
-      // Se cobró al inquilino → es plata de paso, hay que rendirla
+      // Se cobró al inquilino → es plata de paso, va 100% al propietario
       grupos[key].pagado += monto
       grupos[key].a_rendir += monto
     } else if (estado === 'pagado_directo') {
@@ -543,6 +543,15 @@ function ModalMarcar({ pago, onClose, onSaved }) {
     }
   }
   Object.values(grupos).forEach(g => filasDesglose.push(g))
+
+  // Fila de comisión (descuento) — sólo se aplica al alquiler
+  if (pago.comision_porc && comision > 0) {
+    filasDesglose.push({
+      label: `Comisión adm. ${pago.comision_porc}% s/ alquiler`,
+      a_rendir: -comision,
+      descuento: true,
+    })
+  }
 
   const totalPagado = filasDesglose.reduce((s, f) => s + (f.pagado || 0), 0)
   const totalARendir = filasDesglose.reduce((s, f) => s + (f.a_rendir || 0), 0)
@@ -581,18 +590,22 @@ function ModalMarcar({ pago, onClose, onSaved }) {
 
           <div className="space-y-1 text-[12px]">
             {filasDesglose.map((f, i) => (
-              <div key={i} className="grid grid-cols-[1fr_110px_110px] gap-2 px-1 py-1 rounded-lg hover:bg-white/40 dark:hover:bg-black/20">
+              <div key={i} className={`grid grid-cols-[1fr_110px_110px] gap-2 px-1 py-1 rounded-lg hover:bg-white/40 dark:hover:bg-black/20 ${
+                f.descuento ? 'text-red-600 dark:text-red-400' : ''
+              }`}>
                 <div className="min-w-0">
                   <p className="truncate">{f.label}</p>
                   {f.nota && (
                     <p className="text-[10px] text-muted/70 italic truncate">{f.nota}</p>
                   )}
                 </div>
-                <span className="text-right tabular-nums text-muted">
+                <span className={`text-right tabular-nums ${f.descuento ? '' : 'text-muted'}`}>
                   {f.pagado > 0 ? fmt(f.pagado) : '—'}
                 </span>
                 <span className="text-right tabular-nums">
-                  {f.a_rendir > 0 ? fmt(f.a_rendir) : '—'}
+                  {f.descuento
+                    ? `− ${fmt(Math.abs(f.a_rendir))}`
+                    : (f.a_rendir > 0 ? fmt(f.a_rendir) : '—')}
                 </span>
               </div>
             ))}

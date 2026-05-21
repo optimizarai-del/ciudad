@@ -552,8 +552,11 @@ def _registrar_pago_impl(
     monto_alquiler = float(data.monto_alquiler or 0)
     comision_pct = float(contrato.comision_porc or 0)
     comision = round(monto_alquiler * comision_pct / 100.0, 2)
-    neto = round(monto_alquiler - comision, 2)
     items_pasantes = [(l, v) for l, v in items_no_cero if l != "Alquiler"]
+    # Expensas, tasas, etc. cobrados al inquilino van íntegros al propietario
+    # (los abonó previamente). La comisión sólo se aplica al alquiler.
+    pasantes_total = sum(v for _, v in items_pasantes)
+    neto = round(monto_alquiler - comision + pasantes_total, 2)
 
     nombre_inq = _nombre_cliente(inquilino) or "Inquilino/a"
     nombre_pro = _nombre_cliente(propietario) or "Propietario/a"

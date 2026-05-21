@@ -235,11 +235,17 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
         Spacer(1, 8 * mm),
     ]
 
-    # 2) Liquidación: comisión sobre el alquiler. Pasantes informativos abajo.
+    # 2) Liquidación al propietario:
+    #    - Alquiler − comisión (la comisión sólo aplica al alquiler)
+    #    - Expensas / Tasas municipales / Otros cobrados al inquilino: van
+    #      íntegros al propietario (los abonó previamente al consorcio /
+    #      municipio y se le reintegran).
     liq_items = [
         ("Alquiler base del período", alquiler),
         (f"Comisión inmobiliaria ({comision_pct}% sobre alquiler)", -comision),
     ]
+    for lbl, monto in items_pasantes:
+        liq_items.append((lbl, monto))
     story += [
         Paragraph("LIQUIDACIÓN AL PROPIETARIO", sty["CiudadSection"]),
         _tabla_montos(
@@ -249,17 +255,6 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
             acento_total=COLOR_COBRE,
         ),
     ]
-
-    if items_pasantes:
-        story += [
-            Spacer(1, 6 * mm),
-            Paragraph(
-                "Conceptos pasantes (cobrados al inquilino y derivados a quien corresponda — "
-                "no integran el neto al propietario):",
-                sty["CiudadClause"],
-            ),
-            _tabla_kv([(lbl, _money(monto)) for lbl, monto in items_pasantes]),
-        ]
 
     # Conceptos que paga directamente el propietario (no se cobraron al inquilino)
     items_propietario = ctx.get("items_propietario") or []
