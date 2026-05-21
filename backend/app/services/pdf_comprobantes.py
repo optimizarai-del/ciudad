@@ -77,6 +77,119 @@ def _tabla_montos(rows: list[tuple[str, float]], total_label="TOTAL", total_valu
     return t
 
 
+COLOR_ROJO = HexColor("#DC2626")  # red-600 — para descuentos como la comisión
+
+
+def _tabla_desglose(rows: list[dict], total_pagado: float | None = None,
+                    total_rendir: float | None = None,
+                    total_final_label: str = "TOTAL A ENTREGAR",
+                    total_final: float | None = None,
+                    incluye_a_rendir: bool = True):
+    """Tabla de desglose tipo modal de Liquidaciones.
+
+    rows = [{label, pagado, a_rendir, descuento}]
+        - descuento=True → fila en rojo y monto con prefijo "−"
+        - pagado/a_rendir None o 0 → se muestra "—"
+
+    Si incluye_a_rendir=False, tabla de 2 columnas (Concepto | Pagado).
+    """
+    # Header
+    if incluye_a_rendir:
+        data = [["Concepto", "Pagado", "A rendir"]]
+        colWidths = [85 * mm, 42 * mm, 43 * mm]
+    else:
+        data = [["Concepto", "Monto"]]
+        colWidths = [120 * mm, 50 * mm]
+
+    # Filas
+    rojas: list[int] = []  # índices (1-based en data) de filas a colorear en rojo
+    for r in rows:
+        label = r.get("label") or ""
+        pagado = r.get("pagado")
+        a_rendir = r.get("a_rendir")
+        descuento = bool(r.get("descuento"))
+
+        def _fmt(v):
+            if v is None or v == 0:
+                return "—"
+            if descuento and v < 0:
+                return f"− {_money(abs(v))}"
+            return _money(v)
+
+        if incluye_a_rendir:
+            data.append([label, _fmt(pagado), _fmt(a_rendir)])
+        else:
+            # En modo inquilino: si tiene "monto" o usamos pagado
+            v = r.get("monto") if r.get("monto") is not None else pagado
+            data.append([label, _fmt(v)])
+
+        if descuento:
+            rojas.append(len(data) - 1)
+
+    # Totales (suma)
+    if incluye_a_rendir:
+        sum_pagado = total_pagado if total_pagado is not None else sum(
+            (r.get("pagado") or 0) for r in rows if not r.get("descuento")
+        )
+        sum_rendir = total_rendir if total_rendir is not None else sum(
+            (r.get("a_rendir") or 0) for r in rows
+        )
+        data.append(["Totales", _money(sum_pagado), _money(sum_rendir)])
+    else:
+        sum_total = total_final if total_final is not None else sum(
+            (r.get("monto") or r.get("pagado") or 0) for r in rows if not r.get("descuento")
+        )
+        data.append([total_final_label, _money(sum_total)])
+
+    # Fila final destacada (solo si hay columna a_rendir)
+    if incluye_a_rendir:
+        final_value = total_final if total_final is not None else sum_rendir
+        data.append([total_final_label, "", _money(final_value)])
+
+    t = Table(data, colWidths=colWidths)
+    style = [
+        # Header
+        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 8),
+        ("BACKGROUND", (0, 0), (-1, 0), COLOR_FONDO),
+        ("TEXTCOLOR", (0, 0), (-1, 0), COLOR_NOCHE),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, COLOR_BORDE),
+        # Filas normales
+        ("FONT", (0, 1), (-1, -3 if incluye_a_rendir else -2), "Helvetica", 9.5),
+        ("LINEBELOW", (0, 1), (-1, -3 if incluye_a_rendir else -2), 0.25, COLOR_BORDE),
+        # Alineación
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        # Padding
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        # Totales row (penúltima si hay total_final, última si no)
+        ("FONT", (0, -2 if incluye_a_rendir else -1), (-1, -2 if incluye_a_rendir else -1), "Helvetica-Bold", 10),
+        ("LINEABOVE", (0, -2 if incluye_a_rendir else -1), (-1, -2 if incluye_a_rendir else -1), 0.5, COLOR_BORDE),
+    ]
+    if incluye_a_rendir:
+        # Última fila: TOTAL A ENTREGAR destacado en cobre
+        style += [
+            ("FONT", (0, -1), (-1, -1), "Helvetica-Bold", 12),
+            ("LINEABOVE", (0, -1), (-1, -1), 1.2, COLOR_COBRE),
+            ("TEXTCOLOR", (0, -1), (-1, -1), COLOR_COBRE),
+            ("BACKGROUND", (0, -1), (-1, -1), HexColor("#FAF8F3")),
+        ]
+    else:
+        # Modo inquilino: solo la fila de Total destacada
+        style += [
+            ("FONT", (0, -1), (-1, -1), "Helvetica-Bold", 11),
+            ("LINEABOVE", (0, -1), (-1, -1), 1, COLOR_NOCHE),
+            ("TEXTCOLOR", (0, -1), (-1, -1), COLOR_NOCHE),
+            ("BACKGROUND", (0, -1), (-1, -1), HexColor("#FAF8F3")),
+        ]
+    # Pintar de rojo las filas marcadas como descuento
+    for idx in rojas:
+        style.append(("TEXTCOLOR", (0, idx), (-1, idx), COLOR_ROJO))
+    t.setStyle(TableStyle(style))
+    return t
+
+
 def generar_pdf_comprobante_inquilino(ctx: dict) -> bytes:
     """
     ctx = {
@@ -115,14 +228,20 @@ def generar_pdf_comprobante_inquilino(ctx: dict) -> bytes:
         ("Fecha de pago", _fecha(ctx.get("fecha_pago"))),
     ])]
 
+    # Desglose con mismo estilo que el de propietario, pero sin "A rendir"
+    # ni comisión (el inquilino no ve esa información interna).
+    desglose_inq = [
+        {"label": lbl, "monto": monto}
+        for lbl, monto in (ctx.get("items") or [])
+    ]
     story += [
         Spacer(1, 8 * mm),
-        Paragraph("DETALLE DE CONCEPTOS", sty["CiudadSection"]),
-        _tabla_montos(
-            ctx.get("items") or [],
-            total_label="TOTAL ABONADO",
-            total_value=ctx.get("total"),
-            acento_total=COLOR_NOCHE,
+        Paragraph("DESGLOSE", sty["CiudadSection"]),
+        _tabla_desglose(
+            desglose_inq,
+            total_final_label="TOTAL ABONADO",
+            total_final=ctx.get("total"),
+            incluye_a_rendir=False,
         ),
     ]
 
@@ -222,37 +341,32 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
     items_cobrados = ctx.get("items_cobrados") or []
     items_pasantes = ctx.get("items_pasantes") or []
 
-    # 1) Detalle de lo cobrado al inquilino (informativo, todos los conceptos)
-    story += [
-        Spacer(1, 8 * mm),
-        Paragraph("DETALLE COBRADO AL INQUILINO", sty["CiudadSection"]),
-        _tabla_montos(
-            items_cobrados,
-            total_label="TOTAL COBRADO AL INQUILINO",
-            total_value=cobrado_total or sum(v for _, v in items_cobrados),
-            acento_total=COLOR_NOCHE,
-        ),
-        Spacer(1, 8 * mm),
-    ]
-
-    # 2) Liquidación al propietario:
-    #    - Alquiler − comisión (la comisión sólo aplica al alquiler)
-    #    - Expensas / Tasas municipales / Otros cobrados al inquilino: van
-    #      íntegros al propietario (los abonó previamente al consorcio /
-    #      municipio y se le reintegran).
-    liq_items = [
-        ("Alquiler base del período", alquiler),
-        (f"Comisión inmobiliaria ({comision_pct}% sobre alquiler)", -comision),
-    ]
+    # Desglose tipo modal de Liquidaciones:
+    #   Concepto | Pagado (inquilino) | A rendir (al propietario)
+    #   Alquiler:              pagado=alquiler         a_rendir=alquiler
+    #   Expensas/Tasas/Otros:  pagado=monto            a_rendir=monto (íntegros)
+    #   Comisión adm. X%:      pagado=—                a_rendir=−comisión  (rojo)
+    desglose_rows = [{"label": "Alquiler", "pagado": alquiler, "a_rendir": alquiler}]
     for lbl, monto in items_pasantes:
-        liq_items.append((lbl, monto))
+        desglose_rows.append({"label": lbl, "pagado": monto, "a_rendir": monto})
+    if comision_pct and comision > 0:
+        desglose_rows.append({
+            "label": f"Comisión adm. {comision_pct}% s/ alquiler",
+            "pagado": None,
+            "a_rendir": -comision,
+            "descuento": True,
+        })
+
     story += [
-        Paragraph("LIQUIDACIÓN AL PROPIETARIO", sty["CiudadSection"]),
-        _tabla_montos(
-            liq_items,
-            total_label="NETO A LIQUIDAR AL PROPIETARIO",
-            total_value=neto,
-            acento_total=COLOR_COBRE,
+        Spacer(1, 8 * mm),
+        Paragraph("DESGLOSE", sty["CiudadSection"]),
+        _tabla_desglose(
+            desglose_rows,
+            total_pagado=cobrado_total or sum(v for _, v in items_cobrados),
+            total_rendir=neto,
+            total_final_label="TOTAL A ENTREGAR",
+            total_final=neto,
+            incluye_a_rendir=True,
         ),
     ]
 
