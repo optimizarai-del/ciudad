@@ -1,13 +1,16 @@
 /**
- * Barra de progreso del contrato.
+ * Barra de tiempo restante del contrato (cuenta regresiva).
  *
- * Colores:
- *   - Verde       → más de 2 meses para el vencimiento
- *   - Amarillo    → 2 meses o menos
- *   - Rojo        → 1 mes o menos (o ya vencido)
+ * La barra MUESTRA EL TIEMPO QUE QUEDA: arranca llena al principio del
+ * contrato y se va vaciando a medida que pasa el tiempo.
+ *
+ * Colores según porcentaje restante (proporcional a la duración total):
+ *   - Verde       → > 50% del tiempo restante
+ *   - Amarillo    → 20% – 50% del tiempo restante
+ *   - Rojo        → < 20% del tiempo restante  (o ≤ 1 mes absoluto, o vencido)
  *
  * Modos:
- *   - `compact` (default) → versión chica para esquina superior derecha de cards
+ *   - `compact` (default) → versión chica para tablas / esquinas de cards
  *   - `full`              → versión grande con %% y meses restantes
  */
 export default function ProgresoContrato({ inicio, fin, estado, mode = 'compact', className = '' }) {
@@ -17,21 +20,24 @@ export default function ProgresoContrato({ inicio, fin, estado, mode = 'compact'
 
   const total = end - ini
   const elapsed = Math.max(0, Math.min(total, now - ini))
-  const pct = Math.round((elapsed / total) * 100)
+  const pctElapsed = Math.round((elapsed / total) * 100)
+  const pctRestante = Math.max(0, 100 - pctElapsed)
 
   const msPorMes = 1000 * 60 * 60 * 24 * 30.44
   const mesesRestantes = (end - now) / msPorMes
 
+  // Color por porcentaje restante (proporcional al total del contrato)
+  // o por meses absolutos cuando faltan muy pocos (gana lo más restrictivo).
   let color, bg, label, textColor
   if (mesesRestantes <= 0) {
     color = 'bg-red-500'; bg = 'bg-red-100 dark:bg-red-900/30'
     textColor = 'text-red-600 dark:text-red-400'
     label = 'Vencido'
-  } else if (mesesRestantes <= 1) {
+  } else if (pctRestante < 20 || mesesRestantes <= 1) {
     color = 'bg-red-500'; bg = 'bg-red-100 dark:bg-red-900/30'
     textColor = 'text-red-600 dark:text-red-400'
-    label = 'Último mes'
-  } else if (mesesRestantes <= 2) {
+    label = mesesRestantes <= 1 ? 'Último mes' : `${Math.ceil(mesesRestantes)} meses`
+  } else if (pctRestante < 50) {
     color = 'bg-amber-500'; bg = 'bg-amber-100 dark:bg-amber-900/30'
     textColor = 'text-amber-600 dark:text-amber-400'
     label = `${Math.ceil(mesesRestantes)} meses`
@@ -44,10 +50,10 @@ export default function ProgresoContrato({ inicio, fin, estado, mode = 'compact'
   if (mode === 'compact') {
     return (
       <div className={`flex flex-col items-end gap-0.5 ${className}`}
-        title={`${pct}% transcurrido · ${label} restantes`}>
+        title={`${pctRestante}% del contrato restante · ${label}`}>
         <span className={`text-[9px] font-semibold uppercase tracking-wider ${textColor}`}>{label}</span>
         <div className={`h-1 w-16 rounded-full overflow-hidden ${bg}`}>
-          <div className={`h-full ${color} transition-all`} style={{ width: `${Math.max(4, pct)}%` }} />
+          <div className={`h-full ${color} transition-all`} style={{ width: `${Math.max(4, pctRestante)}%` }} />
         </div>
       </div>
     )
@@ -56,11 +62,11 @@ export default function ProgresoContrato({ inicio, fin, estado, mode = 'compact'
   return (
     <div className={className}>
       <div className="flex items-center justify-between text-[10px] mb-1">
-        <span className="text-muted">{pct}% transcurrido</span>
-        <span className={`font-medium ${textColor}`}>{label} restantes</span>
+        <span className="text-muted">{pctRestante}% restante</span>
+        <span className={`font-medium ${textColor}`}>{label}</span>
       </div>
       <div className={`h-1.5 rounded-full overflow-hidden ${bg}`}>
-        <div className={`h-full ${color} transition-all`} style={{ width: `${Math.max(2, pct)}%` }} />
+        <div className={`h-full ${color} transition-all`} style={{ width: `${Math.max(2, pctRestante)}%` }} />
       </div>
     </div>
   )
