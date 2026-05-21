@@ -310,39 +310,50 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd, montoTransferenc
                   onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))
                 }} />
 
-              {/* Radio "Pago inquilino" — el inquilino lo pagó directo */}
-              <div className="flex justify-center">
-                <button type="button"
-                  onClick={() => setEstado(i, estado === 'pagado' ? null : 'pagado')}
-                  title="El inquilino ya lo pagó directo al ente (no se cobra acá ni se rinde al propietario)"
-                  disabled={estado === 'cobrar'}
-                  className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                    estado === 'pagado'
-                      ? 'bg-green-500 border-green-500 text-white'
-                      : estado === 'cobrar'
-                        ? 'border-neutral-300 dark:border-[#2A2A2A] bg-white dark:bg-[#0A0A0A] opacity-40 cursor-not-allowed'
-                        : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
-                  }`}>
-                  {estado === 'pagado' && <Check size={12} />}
-                </button>
-              </div>
+              {/* El Alquiler SIEMPRE lo cobra la inmobiliaria y se lo rinde
+                  al propietario, así que no mostramos los radios para esa fila. */}
+              {c.label === 'Alquiler' ? (
+                <>
+                  <span />
+                  <span />
+                </>
+              ) : (
+                <>
+                  {/* Radio "Pago inquilino" — el inquilino lo pagó directo */}
+                  <div className="flex justify-center">
+                    <button type="button"
+                      onClick={() => setEstado(i, estado === 'pagado' ? null : 'pagado')}
+                      title="El inquilino ya lo pagó directo al ente (no se cobra acá ni se rinde al propietario)"
+                      disabled={estado === 'cobrar'}
+                      className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                        estado === 'pagado'
+                          ? 'bg-green-500 border-green-500 text-white'
+                          : estado === 'cobrar'
+                            ? 'border-neutral-300 dark:border-[#2A2A2A] bg-white dark:bg-[#0A0A0A] opacity-40 cursor-not-allowed'
+                            : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
+                      }`}>
+                      {estado === 'pagado' && <Check size={12} />}
+                    </button>
+                  </div>
 
-              {/* Radio "Pago a propietario" — la inmobiliaria lo cobra y lo rinde al propietario */}
-              <div className="flex justify-center">
-                <button type="button"
-                  onClick={() => setEstado(i, estado === 'cobrar' ? null : 'cobrar')}
-                  title="Lo cobra la inmobiliaria y se le rinde íntegro al propietario"
-                  disabled={estado === 'pagado'}
-                  className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                    estado === 'cobrar'
-                      ? 'bg-green-500 border-green-500 text-white'
-                      : estado === 'pagado'
-                        ? 'border-neutral-300 dark:border-[#2A2A2A] bg-white dark:bg-[#0A0A0A] opacity-40 cursor-not-allowed'
-                        : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
-                  }`}>
-                  {estado === 'cobrar' && <Check size={12} />}
-                </button>
-              </div>
+                  {/* Radio "Pago a propietario" — la inmobiliaria lo cobra y lo rinde al propietario */}
+                  <div className="flex justify-center">
+                    <button type="button"
+                      onClick={() => setEstado(i, estado === 'cobrar' ? null : 'cobrar')}
+                      title="Lo cobra la inmobiliaria y se le rinde íntegro al propietario"
+                      disabled={estado === 'pagado'}
+                      className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                        estado === 'cobrar'
+                          ? 'bg-green-500 border-green-500 text-white'
+                          : estado === 'pagado'
+                            ? 'border-neutral-300 dark:border-[#2A2A2A] bg-white dark:bg-[#0A0A0A] opacity-40 cursor-not-allowed'
+                            : 'border-[#0A0A0A] dark:border-white bg-white dark:bg-[#0A0A0A] hover:bg-neutral-100 dark:hover:bg-[#1A1A1A]'
+                      }`}>
+                      {estado === 'cobrar' && <Check size={12} />}
+                    </button>
+                  </div>
+                </>
+              )}
 
               {/* A cobrar — monto formateado. Tachado si el inquilino ya pagó directo. */}
               <div className={`text-right text-[13px] font-semibold tabular-nums ${
@@ -452,7 +463,9 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     fecha_pago: new Date().toISOString().slice(0, 10),
     notas: '',
     conceptos: [
-      { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, estado: null },
+      // El alquiler SIEMPRE lo cobra la inmobiliaria y se lo rinde al propietario,
+      // por eso arranca con estado='cobrar' y no se puede cambiar desde la UI.
+      { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, estado: 'cobrar' },
       { label: 'Expensas',          fijo: true, monto: extraSug('Expensas', item.monto_expensas_sug),               estado: null },
       { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug),         estado: null },
       // Arrastres de OTROS conceptos (no Expensas / Tasas que ya están arriba)
