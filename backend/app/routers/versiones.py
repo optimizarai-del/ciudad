@@ -59,6 +59,12 @@ _PROJECT_ROOT  = _BACKEND_ROOT.parent           # raíz del monorepo
 _FRONTEND_ROOT = _PROJECT_ROOT / "frontend"
 _FRONTEND_DIST = _FRONTEND_ROOT / "dist"
 
+# Frontend pre-buildeado dentro del backend. Se usa en producción (Docker)
+# donde no hay Node — se buildea localmente con `npm run build` y se copia
+# a esta ubicación con scripts/copy_frontend.sh (o copy_frontend.bat).
+# En dev local, si esta carpeta existe se usa; si no, se buildea on-the-fly.
+_FRONTEND_PREBUILT = _BACKEND_ROOT / "app" / "static"
+
 # Cache de runtimes (Python embebido y wheels). Sobrevive entre requests pero
 # si se pierde no pasa nada — se rebaja la próxima vez.
 _CACHE_ROOT = Path(tempfile.gettempdir()) / "ciudad-bundle-cache"
@@ -175,28 +181,38 @@ def _export_sqlite(sqlite_path: str) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _ensure_frontend_built() -> Path:
-    """Asegura que exista frontend/dist/. Si no existe y hay npm en el sistema,
-    corre `npm run build`. Si no hay npm y dist no existe, falla con mensaje
-    claro pidiendo pre-buildear.
+    """Devuelve un directorio con el frontend buildeado. Prioridad:
 
-    En desarrollo local (TÚ con Node instalado) se buildea automáticamente.
-    En producción (Easypanel) conviene que el Dockerfile lo build durante
-    el deploy y deje el directorio listo.
+      1. backend/app/static/ (pre-buildeado y commiteado al repo)
+         → Usado en producción, donde no hay Node ni el directorio frontend/
+      2. frontend/dist/ (si ya está buildeado)
+         → Cache del build local
+      3. Buildear frontend/dist/ con `npm run build` (si hay Node)
+         → Caso dev local cuando se cambió el frontend
+
+    Si no encuentra ninguno, falla con mensaje claro.
     """
+    # 1) Frontend pre-buildeado dentro del backend (caso producción)
+    if _FRONTEND_PREBUILT.exists() and (_FRONTEND_PREBUILT / "index.html").exists():
+        return _FRONTEND_PREBUILT
+
+    # 2) Dist ya generado en frontend/dist
     if _FRONTEND_DIST.exists() and (_FRONTEND_DIST / "index.html").exists():
         return _FRONTEND_DIST
 
+    # 3) Intentar buildear con npm
     npm = shutil.which("npm") or shutil.which("npm.cmd")
-    if not npm:
+    if not npm or not _FRONTEND_ROOT.exists():
         raise RuntimeError(
-            "No se encontró el frontend ya buildeado en frontend/dist/ y "
-            "este servidor no tiene Node/npm instalados para buildearlo. "
-            "Corré `npm run build` desde el directorio frontend/ y reintentá."
+            "No se encontró el frontend buildeado. Esperaba uno de:\n"
+            f"  · {_FRONTEND_PREBUILT}\n"
+            f"  · {_FRONTEND_DIST}\n"
+            "Y tampoco hay Node/npm para buildearlo en el servidor. "
+            "Corré `npm run build` en frontend/ y commiteá el resultado en "
+            "backend/app/static/ (usá scripts/copy_frontend.sh)."
         )
 
     print(f"[versiones] Buildeando frontend con {npm} (puede tardar ~30s)...")
-
-    # Instalar dependencias si no están
     if not (_FRONTEND_ROOT / "node_modules").exists():
         subprocess.run([npm, "install", "--silent"],
                        cwd=str(_FRONTEND_ROOT), check=True, timeout=300)
