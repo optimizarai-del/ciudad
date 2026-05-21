@@ -1,25 +1,44 @@
 """
-Versiones local — snapshots descargables para uso offline.
+Versiones local — snapshots descargables y autocontenidos.
 
-Genera un ZIP con:
-  · Código fuente del backend (Python, sin venv ni .env)
-  · Código fuente del frontend (React/Vite, sin node_modules ni dist)
-  · Dump completo de la base de datos en SQLite (archivo ciudad.db)
-  · .env pre-configurado para modo local (SQLite, sin Supabase)
-  · Scripts de arranque con un doble clic (INICIAR.bat / iniciar.sh)
-  · README con instrucciones paso a paso
+Genera un ZIP con TODO lo necesario para correr la plataforma en una PC
+sin instalar nada externo:
 
-El ZIP es streameable: se genera en memoria y se descarga directamente.
-Cada descarga queda registrada en la tabla `versiones_local`.
+  · Código del backend (FastAPI)
+  · Frontend YA BUILDEADO (no requiere Node ni Vite) — servido por FastAPI
+  · Dump completo de la base de datos en SQLite (ciudad.db)
+  · Python 3.12 embebido (Windows) + wheels offline de todas las deps
+  · Scripts de arranque con doble clic (INICIAR.bat / iniciar.sh)
+  · .env pre-configurado para modo local
+
+Estructura del ZIP:
+
+  ciudad-vYYYYMMDD-HHMMSS/
+  ├── INICIAR.bat           ← Windows: doble click (autocontenido)
+  ├── iniciar.sh            ← Mac/Linux: doble click (requiere Python 3)
+  ├── LEEME.txt
+  ├── runtime-windows/
+  │   ├── python/           ← Python 3.12 embebido (~30 MB)
+  │   └── wheels/           ← wheels offline para Windows amd64
+  └── backend/
+      ├── app/
+      │   └── static/       ← frontend buildeado (sirve FastAPI)
+      ├── ciudad.db         ← snapshot SQLite
+      ├── requirements.txt
+      └── .env
 """
 import io
 import json
 import os
+import shutil
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from urllib.request import urlopen, Request
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -38,32 +57,49 @@ router = APIRouter(prefix="/api/versiones", tags=["versiones"])
 _BACKEND_ROOT  = Path(__file__).parents[2]      # .../backend
 _PROJECT_ROOT  = _BACKEND_ROOT.parent           # raíz del monorepo
 _FRONTEND_ROOT = _PROJECT_ROOT / "frontend"
+_FRONTEND_DIST = _FRONTEND_ROOT / "dist"
 
-# Dirs/archivos a excluir al empaquetar
-_SKIP_BACKEND  = {
-    "__pycache__", ".venv", "venv", "env", ".env",
+# Cache de runtimes (Python embebido y wheels). Sobrevive entre requests pero
+# si se pierde no pasa nada — se rebaja la próxima vez.
+_CACHE_ROOT = Path(tempfile.gettempdir()) / "ciudad-bundle-cache"
+_CACHE_PY_WIN = _CACHE_ROOT / "python-3.12.7-embed-amd64"
+_CACHE_WHEELS_WIN = _CACHE_ROOT / "wheels-win-amd64"
+
+# Versión de Python embebido que se va a empaquetar
+_PY_VERSION = "3.12.7"
+_PY_EMBED_URL = f"https://www.python.org/ftp/python/{_PY_VERSION}/python-{_PY_VERSION}-embed-amd64.zip"
+_GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
+
+# Dirs/archivos a excluir al empaquetar el backend
+_SKIP_BACKEND = {
+    "__pycache__", ".venv", "venv", "env",
     ".git", ".mypy_cache", ".pytest_cache",
-    "ciudad.db", "*.db", "*.db-shm", "*.db-wal",
+    "ciudad.db",
     "*.pyc", "*.pyo", "*.egg-info", "dist", "build",
 }
-_SKIP_FRONTEND = {
-    "node_modules", "dist", ".git",
-    ".cache", ".turbo", ".next",
-}
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Helpers de empaquetado básico
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _skip(rel: Path, excluir: set) -> bool:
     """Devuelve True si alguna parte del path relativo debe excluirse."""
     for parte in rel.parts:
         if parte in excluir or parte.startswith("."):
             return True
+    # Extensiones a excluir
+    if rel.suffix in (".pyc", ".pyo"):
+        return True
+    if rel.name.endswith((".db-shm", ".db-wal")):
+        return True
     return False
 
 
 def _add_dir(zf: zipfile.ZipFile, src: Path, arc_prefix: str, excluir: set):
     """Agrega recursivamente src/ al zip bajo arc_prefix/."""
+    if not src.exists():
+        return
     for item in src.rglob("*"):
         if not item.is_file():
             continue
@@ -73,253 +109,425 @@ def _add_dir(zf: zipfile.ZipFile, src: Path, arc_prefix: str, excluir: set):
         try:
             zf.write(item, f"{arc_prefix}/{rel.as_posix()}")
         except Exception:
-            pass  # skip archivos no legibles (ej. sockets)
+            pass
 
+
+def _add_file_executable(zf: zipfile.ZipFile, arcname: str, contenido: str):
+    """Agrega un archivo al ZIP con permisos +x (para scripts shell en Unix)."""
+    info = zipfile.ZipInfo(arcname)
+    info.external_attr = 0o755 << 16
+    info.compress_type = zipfile.ZIP_DEFLATED
+    zf.writestr(info, contenido)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Export de la DB activa → SQLite portable
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _export_sqlite(sqlite_path: str) -> dict:
     """Exporta todas las tablas de la DB activa a un archivo SQLite nuevo.
-
-    Devuelve {tabla: cantidad_de_filas}.
-    Convierte todos los valores a TEXT para máxima compatibilidad con SQLite.
-    """
+    Devuelve un dict {tabla: cantidad_filas}. Si la DB activa ya es SQLite,
+    igual hace el copy fresco a través del engine (sin file-copy directo) para
+    asegurar consistencia."""
+    ins = sa_inspect(engine)
     schema = CIUDAD_SCHEMA if IS_POSTGRES else None
-    qual   = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
-    skip   = {"alembic_version", "ciudad_settings"}
+    tablas_db = ins.get_table_names(schema=schema)
 
-    inspector = sa_inspect(engine)
-    tables    = inspector.get_table_names(schema=schema)
+    # Crear SQLite destino
+    if os.path.exists(sqlite_path):
+        os.unlink(sqlite_path)
+    conn = sqlite3.connect(sqlite_path)
+    conn.execute("PRAGMA foreign_keys = OFF")
 
-    totales: dict = {}
-    lite = sqlite3.connect(sqlite_path)
-
-    try:
-        with engine.connect() as conn:
-            for table in sorted(tables):
-                if table in skip:
+    resumen: dict[str, int] = {}
+    with engine.connect() as src:
+        for tabla in tablas_db:
+            try:
+                cols_info = ins.get_columns(tabla, schema=schema)
+                col_names = [c["name"] for c in cols_info]
+                if not col_names:
                     continue
+                # Crear tabla en SQLite (todos TEXT — SQLite es dinámico)
+                cols_ddl = ", ".join(f'"{c}" TEXT' for c in col_names)
+                conn.execute(f'CREATE TABLE IF NOT EXISTS "{tabla}" ({cols_ddl})')
 
-                cols      = inspector.get_columns(table, schema=schema)
-                col_names = [c["name"] for c in cols]
-
-                # Crear tabla SQLite con todos los campos como TEXT
-                defs = ", ".join(f'"{n}" TEXT' for n in col_names)
-                lite.execute(f'CREATE TABLE IF NOT EXISTS "{table}" ({defs})')
-
-                rows = conn.execute(
-                    text(f'SELECT * FROM {qual}"{table}"')
-                ).fetchall()
-
+                # Copiar filas
+                qual = f'"{CIUDAD_SCHEMA}"."{tabla}"' if IS_POSTGRES else f'"{tabla}"'
+                rows = src.execute(text(f"SELECT * FROM {qual}")).fetchall()
                 if rows:
-                    ph = ", ".join("?" for _ in col_names)
-                    lite.executemany(
-                        f'INSERT OR IGNORE INTO "{table}" VALUES ({ph})',
-                        [
-                            tuple(str(v) if v is not None else None for v in row)
-                            for row in rows
-                        ],
+                    placeholders = ", ".join(["?"] * len(col_names))
+                    conn.executemany(
+                        f'INSERT INTO "{tabla}" VALUES ({placeholders})',
+                        [tuple(None if v is None else str(v) for v in r) for r in rows],
                     )
+                resumen[tabla] = len(rows)
+            except Exception as e:
+                print(f"[versiones] No se pudo exportar tabla {tabla}: {e}")
+                resumen[tabla] = -1
 
-                totales[table] = len(rows)
+    conn.commit()
+    conn.close()
+    return resumen
 
-        lite.commit()
-    finally:
-        lite.close()
 
-    return totales
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Build del frontend (sin Node en el cliente)
+# ═══════════════════════════════════════════════════════════════════════════════
 
+def _ensure_frontend_built() -> Path:
+    """Asegura que exista frontend/dist/. Si no existe y hay npm en el sistema,
+    corre `npm run build`. Si no hay npm y dist no existe, falla con mensaje
+    claro pidiendo pre-buildear.
+
+    En desarrollo local (TÚ con Node instalado) se buildea automáticamente.
+    En producción (Easypanel) conviene que el Dockerfile lo build durante
+    el deploy y deje el directorio listo.
+    """
+    if _FRONTEND_DIST.exists() and (_FRONTEND_DIST / "index.html").exists():
+        return _FRONTEND_DIST
+
+    npm = shutil.which("npm") or shutil.which("npm.cmd")
+    if not npm:
+        raise RuntimeError(
+            "No se encontró el frontend ya buildeado en frontend/dist/ y "
+            "este servidor no tiene Node/npm instalados para buildearlo. "
+            "Corré `npm run build` desde el directorio frontend/ y reintentá."
+        )
+
+    print(f"[versiones] Buildeando frontend con {npm} (puede tardar ~30s)...")
+
+    # Instalar dependencias si no están
+    if not (_FRONTEND_ROOT / "node_modules").exists():
+        subprocess.run([npm, "install", "--silent"],
+                       cwd=str(_FRONTEND_ROOT), check=True, timeout=300)
+
+    subprocess.run([npm, "run", "build"],
+                   cwd=str(_FRONTEND_ROOT), check=True, timeout=300)
+
+    if not _FRONTEND_DIST.exists():
+        raise RuntimeError("`npm run build` corrió pero no generó dist/")
+    return _FRONTEND_DIST
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Python embebido para Windows (cacheado)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _download(url: str, dest: Path):
+    """Descarga url → dest. Crea el directorio padre si falta."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    req = Request(url, headers={"User-Agent": "ciudad-bundler/1.0"})
+    with urlopen(req, timeout=120) as r, open(dest, "wb") as f:
+        shutil.copyfileobj(r, f)
+
+
+def _ensure_python_embedded_windows() -> Path:
+    """Descarga (si falta) y prepara Python embebido para Windows con pip habilitado.
+    Devuelve el path al directorio listo para empaquetar.
+
+    Se cachea en _CACHE_PY_WIN para no rebajar en cada generación de ZIP.
+    """
+    marker = _CACHE_PY_WIN / ".ready"
+    if marker.exists() and (_CACHE_PY_WIN / "python.exe").exists():
+        return _CACHE_PY_WIN
+
+    print("[versiones] Preparando Python embebido para Windows (cache primer uso)...")
+    if _CACHE_PY_WIN.exists():
+        shutil.rmtree(_CACHE_PY_WIN, ignore_errors=True)
+    _CACHE_PY_WIN.mkdir(parents=True, exist_ok=True)
+
+    # 1) Descargar el ZIP oficial
+    zip_path = _CACHE_PY_WIN / "embed.zip"
+    _download(_PY_EMBED_URL, zip_path)
+
+    # 2) Extraer
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(_CACHE_PY_WIN)
+    zip_path.unlink(missing_ok=True)
+
+    # 3) Habilitar pip: descomentar `import site` en python312._pth
+    pth_files = list(_CACHE_PY_WIN.glob("python3*._pth"))
+    if pth_files:
+        pth = pth_files[0]
+        contenido = pth.read_text(encoding="utf-8")
+        contenido = contenido.replace("#import site", "import site")
+        if "import site" not in contenido:
+            contenido += "\nimport site\n"
+        pth.write_text(contenido, encoding="utf-8")
+
+    # 4) Bajar get-pip.py — la versión embebida no trae pip por defecto
+    get_pip = _CACHE_PY_WIN / "get-pip.py"
+    _download(_GET_PIP_URL, get_pip)
+
+    marker.touch()
+    return _CACHE_PY_WIN
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Wheels offline para Windows
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _ensure_wheels_windows() -> Path:
+    """Baja todas las dependencias de requirements.txt como wheels Windows
+    amd64 + py3.12. Si ya hay cache válida, no rebaja. Devuelve el directorio.
+
+    Usa el pip del servidor para descargar wheels específicas del target
+    (Windows amd64), no del host. Las wheels descargadas son binary-only:
+    si una dep no tiene wheel para Windows, falla con error claro.
+    """
+    req_file = _BACKEND_ROOT / "requirements.txt"
+    marker = _CACHE_WHEELS_WIN / ".ready"
+
+    # Verificar si la cache sigue válida (mismo hash de requirements.txt)
+    import hashlib
+    req_hash = hashlib.sha256(req_file.read_bytes()).hexdigest()[:12]
+    hash_file = _CACHE_WHEELS_WIN / ".req-hash"
+
+    if marker.exists() and hash_file.exists() and hash_file.read_text().strip() == req_hash:
+        return _CACHE_WHEELS_WIN
+
+    print("[versiones] Bajando wheels para Windows (cache primer uso)...")
+    if _CACHE_WHEELS_WIN.exists():
+        shutil.rmtree(_CACHE_WHEELS_WIN, ignore_errors=True)
+    _CACHE_WHEELS_WIN.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable, "-m", "pip", "download",
+        "-d", str(_CACHE_WHEELS_WIN),
+        "-r", str(req_file),
+        "--platform", "win_amd64",
+        "--python-version", "312",
+        "--implementation", "cp",
+        "--abi", "cp312",
+        "--only-binary=:all:",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        # Si hay deps sin wheels Windows, lo dejamos como warning — el usuario
+        # va a tener que tener internet la primera vez para instalar lo que falte.
+        print(f"[versiones] pip download (Windows) terminó con warnings:\n{result.stderr[-2000:]}")
+
+    hash_file.write_text(req_hash)
+    marker.touch()
+    return _CACHE_WHEELS_WIN
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Construcción del ZIP final
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_zip(version_name: str, sqlite_path: str, tablas: dict) -> bytes:
-    """Construye el ZIP completo en memoria y retorna los bytes."""
-    p = version_name  # prefijo = carpeta raíz dentro del ZIP
+    """Construye el ZIP autocontenido en memoria y retorna los bytes."""
+    p = version_name
     now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    # ── Scripts de arranque ────────────────────────────────────────────────
+    # ── Preparar componentes (algunos requieren red la primera vez) ──────────
+    dist_path = _ensure_frontend_built()       # frontend/dist/
 
+    incluir_runtime_win = True
+    py_embed_path = None
+    wheels_path = None
+    try:
+        py_embed_path = _ensure_python_embedded_windows()
+        wheels_path   = _ensure_wheels_windows()
+    except Exception as e:
+        print(f"[versiones] No se pudo preparar runtime Windows: {e}")
+        incluir_runtime_win = False
+
+    # ── Scripts de arranque ──────────────────────────────────────────────────
+
+    # INICIAR.bat usa el Python embebido empaquetado. Sin instalar nada.
     bat = rf"""@echo off
-setlocal
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
-echo.
-echo ===================================================
-echo   CIUDAD ^| Version local  ({version_name})
-echo ===================================================
+title CIUDAD - Version local
+
+echo ============================================================
+echo   CIUDAD ^| Version local ({version_name})
+echo   No requiere instalar Python ni Node
+echo ============================================================
 echo.
 
-:: Verificar Python
-where python >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Python no encontrado.
-    echo Instala Python 3.10+ desde  https://www.python.org/downloads/
-    echo Marcar "Add to PATH" durante la instalacion.
+set PY=runtime-windows\python\python.exe
+if not exist "%PY%" (
+    echo ERROR: No se encontro el runtime de Python en runtime-windows\python\
+    echo.
+    echo Si descargaste el ZIP sin la opcion de incluir runtime Windows,
+    echo instala Python 3.12+ desde https://www.python.org/downloads/
+    echo y volve a correr este script.
     pause
     exit /b 1
 )
 
-:: Entorno virtual + dependencias
-echo [1/4] Preparando entorno Python...
-cd backend
-if not exist venv (
-    python -m venv venv
-)
-call venv\Scripts\activate
-pip install -r requirements.txt --quiet
-cd ..
-
-:: Frontend (opcional, requiere Node.js)
-where node >nul 2>&1
-if errorlevel 1 (
-    echo [2/4] Node.js no encontrado ^(solo API disponible^).
-    echo       Instala desde  https://nodejs.org/  para el frontend visual.
-    echo.
-    echo [3/4] Iniciando backend en  http://localhost:8000
-    start "CIUDAD Backend" cmd /c "cd /d "%~dp0backend" && call venv\Scripts\activate && python run.py"
-    timeout /t 4 /nobreak >nul
-    start http://localhost:8000
-) else (
-    echo [2/4] Preparando frontend...
-    cd frontend
-    if not exist node_modules (
-        echo       Instalando dependencias Node ^(primera vez, puede tardar unos minutos^)...
-        call npm install --silent
+REM Primera vez: instalar pip y dependencias usando wheels offline
+if not exist runtime-windows\.installed (
+    echo [1/3] Instalando pip ^(primera vez^)...
+    "%PY%" runtime-windows\python\get-pip.py --no-warn-script-location --no-index --find-links=runtime-windows\wheels 2>nul
+    if errorlevel 1 (
+        echo       Sin wheel local para pip, bajando de internet...
+        "%PY%" runtime-windows\python\get-pip.py --no-warn-script-location
     )
-    cd ..
-    echo [3/4] Iniciando backend en  http://localhost:8000
-    start "CIUDAD Backend" cmd /c "cd /d "%~dp0backend" && call venv\Scripts\activate && python run.py"
-    echo [4/4] Iniciando frontend en  http://localhost:5173
-    start "CIUDAD Frontend" cmd /c "cd /d "%~dp0frontend" && npm run dev"
-    timeout /t 5 /nobreak >nul
-    start http://localhost:5173
+
+    echo [2/3] Instalando dependencias offline...
+    "%PY%" -m pip install --no-warn-script-location --no-index --find-links=runtime-windows\wheels -r backend\requirements.txt
+    if errorlevel 1 (
+        echo       Faltan algunas wheels offline, completando desde internet...
+        "%PY%" -m pip install --no-warn-script-location -r backend\requirements.txt
+    )
+    type nul > runtime-windows\.installed
+) else (
+    echo [1/3] Dependencias ya instaladas, saltando.
+    echo [2/3] OK
 )
 
+echo [3/3] Iniciando CIUDAD en http://localhost:8000
 echo.
-echo  CIUDAD iniciada correctamente.
-echo  Cierra esta ventana para detener todos los servicios.
+echo  - Para detener: cerra esta ventana
+echo  - Si el navegador no abre solo, entra a http://localhost:8000
 echo.
+
+REM Abrir navegador despues de 3 seg (en paralelo)
+start "" /b cmd /c "timeout /t 3 /nobreak >nul && start http://localhost:8000"
+
+cd backend
+"%~dp0%PY%" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+
 pause
 """
 
+    # iniciar.sh asume python3 instalado (Mac/Linux modernos lo tienen).
     sh = f"""#!/usr/bin/env bash
 set -e
 cd "$(dirname "$0")"
 
-echo ""
-echo "==================================================="
-echo "  CIUDAD | Version local  ({version_name})"
-echo "==================================================="
+echo "============================================================"
+echo "  CIUDAD | Version local ({version_name})"
+echo "============================================================"
 echo ""
 
-# ── Backend ────────────────────────────────────────────
-echo "[1] Preparando entorno Python..."
-cd backend
-python3 -m venv venv 2>/dev/null || true
-source venv/bin/activate
-pip install -r requirements.txt -q
-python run.py &
-BACKEND_PID=$!
-cd ..
+# Detectar Python 3
+PY=$(command -v python3 || command -v python || true)
+if [ -z "$PY" ]; then
+    echo "ERROR: Falta Python 3. Instalalo desde:"
+    echo "  Mac:   https://www.python.org/downloads/"
+    echo "  Linux: usa el package manager (apt/dnf/pacman/brew)"
+    exit 1
+fi
+echo "Usando Python: $PY"
 
-# ── Frontend ───────────────────────────────────────────
-if command -v node &>/dev/null; then
-    echo "[2] Preparando frontend..."
-    cd frontend
-    [ ! -d node_modules ] && npm install -q
-    npm run dev &
-    FRONTEND_PID=$!
-    cd ..
-    sleep 5
-    URL="http://localhost:5173"
-else
-    echo "[2] Node.js no encontrado. Solo disponible la API."
-    sleep 2
-    URL="http://localhost:8000"
+# Crear venv local en .venv si no existe
+if [ ! -d ".venv" ]; then
+    echo "[1/3] Creando entorno virtual..."
+    "$PY" -m venv .venv
 fi
 
-# Abrir navegador (Mac + Linux)
-( open "$URL" 2>/dev/null || xdg-open "$URL" 2>/dev/null || true ) &
+VENV_PY=".venv/bin/python"
+[ -f "$VENV_PY" ] || VENV_PY=".venv/Scripts/python.exe"  # Windows-bash fallback
 
+if [ ! -f .venv/.installed ]; then
+    echo "[2/3] Instalando dependencias (requiere internet primera vez)..."
+    "$VENV_PY" -m pip install --quiet --upgrade pip
+    "$VENV_PY" -m pip install --quiet -r backend/requirements.txt
+    touch .venv/.installed
+fi
+
+echo "[3/3] Iniciando CIUDAD en http://localhost:8000"
+echo "  - Para detener: Ctrl+C"
 echo ""
-echo " CIUDAD iniciada en  $URL"
-echo " Presiona Ctrl+C para detener."
-echo ""
-wait $BACKEND_PID
+
+# Abrir navegador (en background, despues de 3s)
+(
+    sleep 3
+    if command -v open >/dev/null 2>&1; then open http://localhost:8000
+    elif command -v xdg-open >/dev/null 2>&1; then xdg-open http://localhost:8000
+    fi
+) &
+
+cd backend
+"../$VENV_PY" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 """
 
+    # ── .env para modo local (SQLite, sin Supabase) ──────────────────────────
     env_backend = """# Configuración local — SQLite, sin Supabase
 DATABASE_URL=sqlite:///./ciudad.db
 SECRET_KEY=ciudad-local-secret-key-offline
-
-# CORS: permite tanto el puerto de Vite como el de preview
-CORS_ORIGINS=http://localhost:5173,http://localhost:4173,http://localhost:8000,http://127.0.0.1:5173
-
-# Email — descomentá para activar envío de comprobantes
-# SMTP_HOST=smtp.gmail.com
-# SMTP_PORT=587
-# SMTP_USER=tu@email.com
-# SMTP_PASS=tu-contraseña-de-aplicacion
-# EMAIL_FROM=tu@email.com
+CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
 """
 
-    env_frontend = """# API local
-VITE_API_URL=http://localhost:8000
-"""
-
-    # Resumen de tablas para el README
+    # ── README ───────────────────────────────────────────────────────────────
     resumen_tablas = "\n".join(
         f"  · {t:<30} {n:>6} fila{'s' if n != 1 else ''}"
-        for t, n in sorted(tablas.items())
-        if n > 0
+        for t, n in sorted(tablas.items()) if n > 0
     )
 
-    readme = f"""CIUDAD — Negocios Inmobiliarios
+    leeme = f"""CIUDAD — Negocios Inmobiliarios
 Versión local generada el {now_str}
 
-=== INSTRUCCIONES RÁPIDAS ===
+═══════════════════════════════════════════════════════════
+  INSTRUCCIONES — DOBLE CLIC Y LISTO
+═══════════════════════════════════════════════════════════
 
-WINDOWS
+▶ WINDOWS
   Hacer doble clic en:  INICIAR.bat
 
-MAC / LINUX
-  Abrir una terminal en esta carpeta y ejecutar:
+  No requiere instalar Python ni Node — todo viene incluido.
+  La primera vez tarda ~30 seg en instalar dependencias offline.
+
+▶ MAC
+  Abrir Terminal en esta carpeta y ejecutar:
     chmod +x iniciar.sh
     ./iniciar.sh
 
-=== REQUISITOS ===
+  Requiere Python 3 (instalado por defecto en macOS 12.3+).
+  Si no lo tenés, instalalo desde https://www.python.org/downloads/
 
-  Python 3.10+  →  https://www.python.org/downloads/
-                   (marcar "Add Python to PATH" durante la instalación)
+═══════════════════════════════════════════════════════════
+  ACCESO
+═══════════════════════════════════════════════════════════
 
-  Node.js 18+   →  https://nodejs.org/
-                   (para el frontend visual; sin Node sólo corre la API)
+  Aplicación completa:  http://localhost:8000
+  Salud del backend:    http://localhost:8000/health
 
-=== PRIMERA VEZ ===
+  El backend sirve TAMBIÉN el frontend en el mismo puerto.
+  No hay que abrir dos URLs ni correr Vite por separado.
 
-  El script instala automáticamente todas las dependencias Python (venv)
-  y Node (node_modules) la primera vez que se ejecuta.
-  Las siguientes ejecuciones arrancan directamente sin instalar nada.
+═══════════════════════════════════════════════════════════
+  BASE DE DATOS
+═══════════════════════════════════════════════════════════
 
-=== BASE DE DATOS ===
+  backend/ciudad.db   ← snapshot SQLite con todos los datos
+                        exportados al momento de la descarga.
 
-  El archivo  backend/ciudad.db  es una copia SQLite de todos los datos
-  exportados desde la plataforma en la nube al momento de esta descarga.
-  Es una copia FIJA — los cambios locales no se sincronizan con la nube.
-  Para obtener datos actualizados, generá una nueva versión desde
-  la plataforma en:  Herramientas → Versiones local.
+  Los cambios que hagas en local NO se sincronizan con la
+  versión en la nube. Para datos actualizados, generá una
+  nueva versión desde Herramientas → Versiones local.
 
-=== TABLAS EXPORTADAS ===
+═══════════════════════════════════════════════════════════
+  TABLAS EXPORTADAS
+═══════════════════════════════════════════════════════════
 
 {resumen_tablas}
 
-=== ACCESO ===
+═══════════════════════════════════════════════════════════
+  CONTENIDO DEL PAQUETE
+═══════════════════════════════════════════════════════════
 
-  Frontend completo:  http://localhost:5173
-  Solo API:           http://localhost:8000
-  Salud del backend:  http://localhost:8000/health
+  INICIAR.bat            ← arranque para Windows (doble clic)
+  iniciar.sh             ← arranque para Mac/Linux
+  runtime-windows/       ← Python 3.12 + dependencias offline
+                            (sólo se usa en Windows)
+  backend/               ← código del servidor
+    app/static/          ← frontend ya buildeado
+    ciudad.db            ← base de datos SQLite
+    requirements.txt
+    .env
 
-=== SOPORTE ===
-
+═══════════════════════════════════════════════════════════
   CIUDAD — Negocios Inmobiliarios · #VIVIRMEJOR
+═══════════════════════════════════════════════════════════
 """
 
-    # ── Armar el ZIP ───────────────────────────────────────────────────────
+    # ── Armar el ZIP ─────────────────────────────────────────────────────────
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
 
@@ -327,32 +535,33 @@ MAC / LINUX
         zf.write(sqlite_path, f"{p}/backend/ciudad.db")
 
         # Código fuente del backend
-        if _BACKEND_ROOT.exists():
-            _add_dir(zf, _BACKEND_ROOT, f"{p}/backend", _SKIP_BACKEND)
+        _add_dir(zf, _BACKEND_ROOT, f"{p}/backend", _SKIP_BACKEND)
+
+        # Frontend buildeado dentro de backend/app/static/
+        # (main.py lo monta automáticamente si encuentra ese directorio)
+        _add_dir(zf, dist_path, f"{p}/backend/app/static", set())
 
         # .env local para el backend
         zf.writestr(f"{p}/backend/.env", env_backend)
 
-        # Código fuente del frontend
-        if _FRONTEND_ROOT.exists():
-            _add_dir(zf, _FRONTEND_ROOT, f"{p}/frontend", _SKIP_FRONTEND)
-
-        # .env local para el frontend
-        zf.writestr(f"{p}/frontend/.env.local", env_frontend)
+        # Runtime de Windows (Python embebido + wheels offline)
+        if incluir_runtime_win and py_embed_path and wheels_path:
+            _add_dir(zf, py_embed_path, f"{p}/runtime-windows/python", set())
+            _add_dir(zf, wheels_path, f"{p}/runtime-windows/wheels", set())
 
         # Scripts de arranque
         zf.writestr(f"{p}/INICIAR.bat", bat)
-        info_sh = zipfile.ZipInfo(f"{p}/iniciar.sh")
-        info_sh.external_attr = 0o755 << 16   # chmod +x en sistemas Unix
-        zf.writestr(info_sh, sh)
+        _add_file_executable(zf, f"{p}/iniciar.sh", sh)
 
         # README
-        zf.writestr(f"{p}/README.txt", readme)
+        zf.writestr(f"{p}/LEEME.txt", leeme)
 
     return buf.getvalue()
 
 
-# ─── Endpoints ────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("")
 def listar_versiones(
@@ -384,8 +593,10 @@ def crear_version(
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ):
-    """Genera el snapshot ZIP, registra la descarga y la retorna como stream."""
-
+    """Genera el snapshot ZIP autocontenido, registra la descarga y la devuelve
+    como stream. La primera vez puede tardar varios minutos (descarga Python
+    embebido y wheels); las siguientes son ~30 seg porque todo está cacheado.
+    """
     ts           = datetime.now().strftime("%Y%m%d-%H%M%S")
     version_name = f"ciudad-v{ts}"
 
@@ -396,37 +607,35 @@ def crear_version(
     try:
         tablas = _export_sqlite(sqlite_path)
     except Exception as e:
-        try:
-            os.unlink(sqlite_path)
-        except OSError:
-            pass
+        try: os.unlink(sqlite_path)
+        except OSError: pass
         raise HTTPException(500, f"Error exportando la base de datos: {e}")
 
-    # 2. Generar ZIP en memoria
+    # 2. Generar ZIP en memoria (incluye frontend build, python embed, wheels)
     try:
         zip_bytes = _build_zip(version_name, sqlite_path, tablas)
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
     except Exception as e:
-        raise HTTPException(500, f"Error generando el ZIP: {e}")
+        raise HTTPException(500, f"Error generando el ZIP: {type(e).__name__}: {e}")
     finally:
-        try:
-            os.unlink(sqlite_path)
-        except OSError:
-            pass
+        try: os.unlink(sqlite_path)
+        except OSError: pass
 
     size_bytes = len(zip_bytes)
 
-    # 3. Registrar en versiones_local
-    ver = models.VersionLocal(
-        nombre     = version_name,
-        size_bytes = size_bytes,
-        tablas     = json.dumps(tablas),
-        notas      = None,
-    )
-    db.add(ver)
+    # 3. Registrar en versiones_local (no crítico si falla)
     try:
+        ver = models.VersionLocal(
+            nombre     = version_name,
+            size_bytes = size_bytes,
+            tablas     = json.dumps(tablas),
+            notas      = None,
+        )
+        db.add(ver)
         db.commit()
     except Exception:
-        db.rollback()   # no crítico si falla el registro
+        db.rollback()
 
     # 4. Stream al cliente
     filename = f"{version_name}.zip"
