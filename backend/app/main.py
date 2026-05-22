@@ -57,29 +57,30 @@ def health():
 # ─── Servir el frontend buildeado (modo local autocontenido) ──────────────────
 # Cuando la app corre como "versión local" (bajada desde Herramientas →
 # Versiones local), el ZIP incluye el frontend ya buildeado en `app/static/`.
-# Si esa carpeta existe la montamos en "/" para que un único servidor en
-# localhost:8000 sirva tanto el API como la UI — el usuario no necesita
-# Node ni Vite para correr el frontend.
+# Si esa carpeta existe Y la env var SERVE_FRONTEND=true, la montamos en "/"
+# para que un único servidor en localhost:8000 sirva API + UI.
 #
-# En producción (Easypanel) este directorio no existe, así que el mount no
-# se activa y el frontend se sirve por separado como antes.
+# IMPORTANTE: en producción cloud (Easypanel) DEJAR `SERVE_FRONTEND` SIN definir.
+# El catch-all del SPA puede interceptar requests como `/api/propiedades`
+# (sin barra final) y devolver 404 en lugar de que FastAPI haga su redirect 307
+# a `/api/propiedades/` (que es lo registrado por @router.get("/")).
+# Por eso lo dejamos opt-in via env var, solo para el ZIP local que no tiene
+# subdominio API separado.
 from pathlib import Path as _Path
 from fastapi.staticfiles import StaticFiles as _StaticFiles
 from fastapi.responses import FileResponse as _FileResponse
 from fastapi import Request as _Request, HTTPException as _HTTPException
 
 _FRONT_DIR = _Path(__file__).parent / "static"
-if _FRONT_DIR.exists() and (_FRONT_DIR / "index.html").exists():
-    # Mount de archivos estáticos (assets, JS, CSS). Importante: name=…
-    # para que url_for funcione si en algún momento lo usamos.
+_SERVE_FRONTEND = os.getenv("SERVE_FRONTEND", "").lower() in ("1", "true", "yes", "on")
+
+if _SERVE_FRONTEND and _FRONT_DIR.exists() and (_FRONT_DIR / "index.html").exists():
     app.mount("/assets", _StaticFiles(directory=str(_FRONT_DIR / "assets")), name="assets")
 
-    # Catch-all para client-side routing del SPA. Lo registramos al FINAL
-    # para que los endpoints /api/* sigan teniendo prioridad.
     @app.get("/{full_path:path}", include_in_schema=False)
     def _spa_fallback(full_path: str, request: _Request):
         # Si alguien pidió algo del API que no existe, devolver 404 normal
-        if full_path.startswith("api/") or full_path == "health":
+        if full_path.startswith("api") or full_path == "health":
             raise _HTTPException(404, "Not found")
         # Archivos estáticos sueltos (favicon, robots.txt, etc.)
         candidato = _FRONT_DIR / full_path

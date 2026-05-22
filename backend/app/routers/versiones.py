@@ -468,6 +468,10 @@ cd backend
 DATABASE_URL=sqlite:///./ciudad.db
 SECRET_KEY=ciudad-local-secret-key-offline
 CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+
+# Activa el servidor SPA: un único puerto sirve API + UI.
+# Solo en modo local — en producción cloud se sirve por separado.
+SERVE_FRONTEND=true
 """
 
     # ── README ───────────────────────────────────────────────────────────────
