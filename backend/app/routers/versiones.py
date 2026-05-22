@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db, engine, IS_POSTGRES, CIUDAD_SCHEMA
 from app.security import get_current_user
+from app.services.workspace import is_demo_user
 from app import models
 
 router = APIRouter(prefix="/api/versiones", tags=["versiones"])
@@ -130,20 +131,64 @@ def _add_file_executable(zf: zipfile.ZipFile, arcname: str, contenido: str):
 #  Export de la DB activa → SQLite portable
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _export_sqlite(sqlite_path: str) -> dict:
-    """Exporta todas las tablas de la DB activa a un archivo SQLite nuevo.
-    Devuelve un dict {tabla: cantidad_filas}. Si la DB activa ya es SQLite,
-    igual hace el copy fresco a través del engine (sin file-copy directo) para
-    asegurar consistencia."""
+# Tablas con flag is_demo propio — se filtran directo por WHERE is_demo = ?
+_TABLAS_CON_IS_DEMO = {
+    "propiedades", "clientes", "contratos", "pagos", "leads", "refacciones",
+}
+
+# Tablas hijas: para preservar la separación de workspaces, hay que filtrar
+# por la FK al padre que sí tiene is_demo. clave = nombre tabla; valor = SQL
+# WHERE que filtra por la FK correspondiente. Se usa f-string con {qual_padre}.
+_TABLAS_FILTRADAS_POR_PADRE = {
+    "ajustes_contrato":      ('contrato_id',  'contratos'),
+    "propiedad_adjuntos":    ('propiedad_id', 'propiedades'),
+    "propiedad_propietarios":('propiedad_id', 'propiedades'),
+    "pago_adjuntos":         ('pago_id',      'pagos'),
+    "comprobantes":          ('pago_id',      'pagos'),
+    "mensajes_conversacion": ('lead_id',      'leads'),
+}
+
+# Tablas globales sin concepto de workspace — siempre se exportan completas
+# (settings de schema, users de la plataforma, etc.). Cuidado: users incluye
+# TODAS las cuentas, también las que no son del workspace que descarga.
+_TABLAS_GLOBALES = {"users", "ciudad_settings", "alembic_version"}
+
+
+def _export_sqlite(sqlite_path: str, is_demo_workspace: bool | None) -> dict:
+    """Exporta a SQLite las tablas filtradas por el workspace del usuario.
+
+    Args:
+      sqlite_path: ruta del archivo SQLite destino
+      is_demo_workspace: True si el usuario es admin_demo (exporta solo demo),
+                         False si es usuario real (exporta solo data real),
+                         None para exportar TODO sin filtrar (deprecated).
+
+    Devuelve dict {tabla: cantidad_filas_exportadas}.
+    """
     ins = sa_inspect(engine)
     schema = CIUDAD_SCHEMA if IS_POSTGRES else None
     tablas_db = ins.get_table_names(schema=schema)
 
-    # Crear SQLite destino
     if os.path.exists(sqlite_path):
         os.unlink(sqlite_path)
     conn = sqlite3.connect(sqlite_path)
     conn.execute("PRAGMA foreign_keys = OFF")
+
+    def _qual(tabla: str) -> str:
+        return f'"{CIUDAD_SCHEMA}"."{tabla}"' if IS_POSTGRES else f'"{tabla}"'
+
+    def _where_workspace(tabla: str) -> str:
+        """Devuelve cláusula WHERE para aislar el workspace, o '' si no aplica."""
+        if is_demo_workspace is None:
+            return ""
+        flag_sql = "TRUE" if is_demo_workspace else "FALSE"
+        if tabla in _TABLAS_CON_IS_DEMO:
+            return f" WHERE is_demo = {flag_sql}"
+        if tabla in _TABLAS_FILTRADAS_POR_PADRE:
+            fk, padre = _TABLAS_FILTRADAS_POR_PADRE[tabla]
+            return f" WHERE {fk} IN (SELECT id FROM {_qual(padre)} WHERE is_demo = {flag_sql})"
+        # Globales y otras: sin filtro
+        return ""
 
     resumen: dict[str, int] = {}
     with engine.connect() as src:
@@ -153,13 +198,11 @@ def _export_sqlite(sqlite_path: str) -> dict:
                 col_names = [c["name"] for c in cols_info]
                 if not col_names:
                     continue
-                # Crear tabla en SQLite (todos TEXT — SQLite es dinámico)
                 cols_ddl = ", ".join(f'"{c}" TEXT' for c in col_names)
                 conn.execute(f'CREATE TABLE IF NOT EXISTS "{tabla}" ({cols_ddl})')
 
-                # Copiar filas
-                qual = f'"{CIUDAD_SCHEMA}"."{tabla}"' if IS_POSTGRES else f'"{tabla}"'
-                rows = src.execute(text(f"SELECT * FROM {qual}")).fetchall()
+                sql = f"SELECT * FROM {_qual(tabla)}{_where_workspace(tabla)}"
+                rows = src.execute(text(sql)).fetchall()
                 if rows:
                     placeholders = ", ".join(["?"] * len(col_names))
                     conn.executemany(
@@ -611,21 +654,26 @@ def listar_versiones(
 @router.post("/crear")
 def crear_version(
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
-    """Genera el snapshot ZIP autocontenido, registra la descarga y la devuelve
-    como stream. La primera vez puede tardar varios minutos (descarga Python
-    embebido y wheels); las siguientes son ~30 seg porque todo está cacheado.
+    """Genera el snapshot ZIP autocontenido del workspace del usuario llamante
+    (data demo o data real, según su rol — no se cruzan). Registra la descarga
+    y la devuelve como stream. La primera vez puede tardar varios minutos
+    (descarga Python embebido y wheels); las siguientes son ~30 seg por cache.
     """
     ts           = datetime.now().strftime("%Y%m%d-%H%M%S")
     version_name = f"ciudad-v{ts}"
 
-    # 1. Exportar DB → SQLite temporal
+    # Aislamiento de workspace: el snapshot solo lleva la data del usuario
+    # que lo solicita. admin_demo → solo is_demo=true. Resto → is_demo=false.
+    is_demo_workspace = is_demo_user(user)
+
+    # 1. Exportar DB → SQLite temporal, filtrando por workspace
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         sqlite_path = tmp.name
 
     try:
-        tablas = _export_sqlite(sqlite_path)
+        tablas = _export_sqlite(sqlite_path, is_demo_workspace=is_demo_workspace)
     except Exception as e:
         try: os.unlink(sqlite_path)
         except OSError: pass
