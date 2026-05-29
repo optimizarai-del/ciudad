@@ -257,13 +257,23 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
         # Generar pagos pendientes futuros para que el contrato aparezca
         # automáticamente en Cobros y Liquidaciones. Si el estado es 'vigente'
         # y hay fechas, crea un Pago/mes desde hoy hasta fecha_fin.
+        print(f"[contratos.crear] post-commit: estado={obj.estado}, "
+              f"fechas={obj.fecha_inicio}-{obj.fecha_fin}")
         try:
             if (obj.estado == models.ContratoEstado.vigente
                     and obj.fecha_inicio and obj.fecha_fin):
                 from app.services.contrato_import import _generar_pagos_futuros
-                _generar_pagos_futuros(db, obj)
+                n = _generar_pagos_futuros(db, obj)
+                print(f"[contratos.crear] generados {n} pagos pendientes")
+            else:
+                razones = []
+                if obj.estado != models.ContratoEstado.vigente:
+                    razones.append(f"estado={obj.estado}")
+                if not obj.fecha_inicio: razones.append("falta fecha_inicio")
+                if not obj.fecha_fin:    razones.append("falta fecha_fin")
+                print(f"[contratos.crear] sin pagos pendientes: {', '.join(razones)}")
         except Exception as e:
-            print(f"[contratos.crear] generar_pagos_futuros falló (continuamos): {e}")
+            print(f"[contratos.crear] generar_pagos_futuros falló (continuamos): {type(e).__name__}: {e}")
 
         db.commit(); db.refresh(obj)
         return obj

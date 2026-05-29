@@ -663,21 +663,53 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
 
     # 4bis. Filas pivote contrato_inquilinos — una por cada firmante detectado.
     # El primero queda marcado como principal (compat con contrato.inquilino_id).
-    for idx, (cli, _reu, _principal) in enumerate(inquilinos_creados):
-        db.add(models.ContratoInquilino(
-            contrato_id=contrato.id,
-            cliente_id=cli.id,
-            es_principal=(idx == 0),
-            rol=("inquilino" if idx == 0 else "co_inquilino"),
-        ))
-    db.flush()
+    # Defensivo: si la tabla pivote aún no existe en este deploy, logueamos
+    # pero NO rompemos el flujo (el contrato igual queda creado).
+    try:
+        for idx, (cli, _reu, _principal) in enumerate(inquilinos_creados):
+            db.add(models.ContratoInquilino(
+                contrato_id=contrato.id,
+                cliente_id=cli.id,
+                es_principal=(idx == 0),
+                rol=("inquilino" if idx == 0 else "co_inquilino"),
+            ))
+        db.flush()
+    except Exception as e:
+        print(f"[contrato_import] filas pivote inquilinos falló (continuamos): {e}")
+        try: db.rollback()
+        except Exception: pass
+        # Re-flush del contrato porque el rollback nos volteó la sesión
+        db.add(contrato); db.flush()
 
-    # 5. Pagos futuros — sólo si el contrato está vigente y nos pidieron
-    # autogenerar. Por defecto: sí (el operador puede borrar luego).
+    # 5. Pagos futuros — siempre que el contrato esté vigente y haya fechas.
+    # Logueo explícito para diagnosticar por qué no se generan si el usuario
+    # reporta "no hay cobros pendientes". Defensivo: cualquier fallo no rompe
+    # la creación del contrato.
     pagos_generados = 0
-    if (datos.get("generar_pagos_futuros", True) and
-            estado_enum == models.ContratoEstado.vigente and fi and ff):
-        pagos_generados = _generar_pagos_futuros(db, contrato)
+    quiere_generar = datos.get("generar_pagos_futuros", True) is not False
+    es_vigente     = estado_enum == models.ContratoEstado.vigente
+    tiene_fechas   = bool(fi and ff)
+
+    print(f"[contrato_import] pagos futuros: quiere={quiere_generar} "
+          f"vigente={es_vigente} fechas={tiene_fechas} (fi={fi}, ff={ff})")
+
+    if quiere_generar and es_vigente and tiene_fechas:
+        try:
+            pagos_generados = _generar_pagos_futuros(db, contrato)
+            print(f"[contrato_import] se generaron {pagos_generados} pagos pendientes")
+        except Exception as e:
+            print(f"[contrato_import] _generar_pagos_futuros falló: {type(e).__name__}: {e}")
+            # Reabrir la sesión por si quedó en estado de error
+            try: db.rollback()
+            except Exception: pass
+            db.add(contrato); db.flush()
+    else:
+        razones = []
+        if not quiere_generar: razones.append("checkbox desmarcado")
+        if not es_vigente:     razones.append(f"estado={estado_enum.value}")
+        if not tiene_fechas:   razones.append("faltan fechas")
+        print(f"[contrato_import] NO se generan pagos. Razones: {', '.join(razones)}")
+
     resumen["pagos_generados"] = pagos_generados
 
     db.commit()
@@ -689,12 +721,16 @@ def _generar_pagos_futuros(db: Session, contrato: models.Contrato) -> int:
     """Crea un Pago en estado=pendiente para cada mes desde hoy (o desde el
     inicio del contrato si todavía no empezó) hasta fecha_fin inclusive.
 
+    Robusto: commitea cada Pago individualmente. Si uno falla (ej: schema
+    drift por una columna nueva que aún no migró), continúa con los demás.
+
     Devuelve la cantidad de pagos creados.
     """
     from datetime import date as _date
     from dateutil.relativedelta import relativedelta
 
     if not contrato.fecha_inicio or not contrato.fecha_fin:
+        print(f"[_generar_pagos_futuros] contrato {contrato.id} sin fechas — skip")
         return 0
 
     hoy = _date.today()
@@ -704,35 +740,52 @@ def _generar_pagos_futuros(db: Session, contrato: models.Contrato) -> int:
 
     dia_venc = contrato.dia_vencimiento_pago or 10
     creados = 0
+    fallidos = 0
+    contrato_id = contrato.id  # capturar antes de cualquier rollback
+    is_demo    = contrato.is_demo
+    monto      = contrato.monto_inicial or 0
+
     while cursor <= end:
         periodo = cursor.strftime("%Y-%m")
-        # Evitar duplicar si ya existe el Pago de ese período
-        existe = db.query(models.Pago).filter_by(
-            contrato_id=contrato.id, periodo=periodo,
-        ).first()
-        if existe:
-            cursor = cursor + relativedelta(months=1)
-            continue
-        # Fecha de vencimiento: día_venc del mes (clamp a último día si excede)
         try:
-            fecha_venc = cursor.replace(day=dia_venc)
-        except ValueError:
-            # Día inválido (ej: día 31 en febrero) → último día del mes
-            siguiente = (cursor.replace(day=1) + relativedelta(months=1))
-            fecha_venc = siguiente - relativedelta(days=1)
+            # Evitar duplicar si ya existe el Pago de ese período
+            existe = db.query(models.Pago).filter_by(
+                contrato_id=contrato_id, periodo=periodo,
+            ).first()
+            if existe:
+                cursor = cursor + relativedelta(months=1)
+                continue
+            # Fecha de vencimiento: día_venc del mes (clamp a último día si excede)
+            try:
+                fecha_venc = cursor.replace(day=dia_venc)
+            except ValueError:
+                siguiente = (cursor.replace(day=1) + relativedelta(months=1))
+                fecha_venc = siguiente - relativedelta(days=1)
 
-        pago = models.Pago(
-            contrato_id=contrato.id,
-            periodo=periodo,
-            fecha_vencimiento=fecha_venc,
-            monto_total=contrato.monto_inicial,
-            monto_alquiler=contrato.monto_inicial,
-            estado=models.PagoEstado.pendiente,
-            is_demo=contrato.is_demo,
-        )
-        db.add(pago)
-        creados += 1
+            pago = models.Pago(
+                contrato_id=contrato_id,
+                periodo=periodo,
+                fecha_vencimiento=fecha_venc,
+                monto_total=monto,
+                monto_alquiler=monto,
+                estado=models.PagoEstado.pendiente,
+                is_demo=is_demo,
+            )
+            db.add(pago)
+            db.flush()
+            creados += 1
+        except Exception as e:
+            fallidos += 1
+            print(f"[_generar_pagos_futuros] {periodo}: {type(e).__name__}: {e}")
+            try: db.rollback()
+            except Exception: pass
+            # Re-adjuntar el contrato al estado para que siga vivo en sesión
+            try:
+                contrato = db.merge(contrato)
+            except Exception: pass
         cursor = cursor + relativedelta(months=1)
 
-    db.flush()
+    if fallidos:
+        print(f"[_generar_pagos_futuros] contrato {contrato_id}: "
+              f"{creados} creados, {fallidos} fallidos")
     return creados
