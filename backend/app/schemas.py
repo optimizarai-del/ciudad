@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, EmailStr
 
 
@@ -107,11 +107,38 @@ class PropiedadOut(PropiedadBase):
 
 
 # ---------- Contrato ----------
+class ContratoInquilinoIn(BaseModel):
+    """Un firmante del contrato. Puede ser titular o co-firmante.
+
+    Permite pasar `cliente_id` (referencia a Cliente ya existente) o crear
+    uno nuevo enviando los datos completos (nombre, apellido, documento, etc.)
+    desde el frontend — en cuyo caso `cliente_id` queda en None y el router
+    crea el Cliente.
+    """
+    cliente_id: Optional[int] = None
+    es_principal: Optional[bool] = False
+    rol: Optional[str] = None  # 'inquilino', 'co_inquilino', 'garante', etc.
+
+    # Datos para crear un Cliente nuevo si cliente_id es None:
+    nombre: Optional[str] = None
+    apellido: Optional[str] = None
+    razon_social: Optional[str] = None
+    documento: Optional[str] = None
+    tipo_documento: Optional[str] = None
+    nacionalidad: Optional[str] = None
+    email: Optional[str] = None
+    telefono: Optional[str] = None
+    notas: Optional[str] = None
+
+
 class ContratoBase(BaseModel):
     codigo: Optional[str] = None
     tipo: str
     estado: Optional[str] = "borrador"
     propiedad_id: int
+    # Inquilino principal (legacy / single). Por compat con la API anterior.
+    # Si se mandó `inquilinos` (lista), `inquilino_id` se setea automático al
+    # cliente marcado como principal de esa lista.
     inquilino_id: Optional[int] = None
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
@@ -125,7 +152,9 @@ class ContratoBase(BaseModel):
 
 
 class ContratoCreate(ContratoBase):
-    pass
+    # Lista opcional de inquilinos firmantes. Si viene, reemplaza el
+    # `inquilino_id` single como fuente de verdad.
+    inquilinos: Optional[List[ContratoInquilinoIn]] = None
 
 
 class ContratoOut(ContratoBase):
@@ -134,6 +163,10 @@ class ContratoOut(ContratoBase):
     archivo_subido_at: Optional[datetime] = None
     archivado: Optional[bool] = False
     fecha_archivado: Optional[datetime] = None
+    # Lista completa de firmantes — siempre presente en respuestas.
+    # Cada item: {id, cliente_id, nombre, apellido, documento, email,
+    #             es_principal, rol}
+    inquilinos_lista: Optional[List[dict]] = None
 
     class Config:
         from_attributes = True

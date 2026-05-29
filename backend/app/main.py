@@ -243,6 +243,15 @@ def _migrar_storage_path():
                     print(f"[migrar] contratos.{col}: {e}")
                     db.rollback()
 
+        # contrato_inquilinos: tabla pivote para múltiples inquilinos por contrato
+        if "contrato_inquilinos" not in ins.get_table_names(schema=schema):
+            try:
+                from app.models import ContratoInquilino
+                ContratoInquilino.__table__.create(engine, checkfirst=True)
+                print("[migrar] creada tabla contrato_inquilinos")
+            except Exception as e:
+                print(f"[migrar] crear contrato_inquilinos: {e}")
+
         # pagos: monto_pagado_transferencia (parte abonada por transferencia)
         cols_pagos = {c["name"] for c in ins.get_columns("pagos", schema=schema)}
         if "monto_pagado_transferencia" not in cols_pagos:

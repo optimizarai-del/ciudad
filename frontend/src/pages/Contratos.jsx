@@ -32,7 +32,12 @@ const empty = {
   // Liquidaciones y demás flujos operativos, el estado tiene que ser 'vigente'.
   // 'borrador' es para guardar un draft que todavía no se firmó.
   codigo:'', tipo:'alquiler_vivienda', estado:'vigente',
-  propiedad_id:'', inquilino_id:'',
+  propiedad_id:'',
+  // Lista de inquilinos firmantes (compat con multi-inquilino). El primer
+  // elemento es siempre el titular principal. El campo inquilino_id legacy
+  // queda en sync con inquilinos_ids[0] al hacer el submit.
+  inquilinos_ids: [],
+  inquilino_id:'',
   fecha_inicio:'', fecha_fin:'',
   monto_inicial:'', deposito:'',
   indice_ajuste:'ipc', periodicidad_meses:'3', porcentaje_fijo:'',
@@ -410,7 +415,26 @@ function FilterPill({ active, onClick, label }) {
 }
 
 function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
-  const [form, setForm]   = useState(initial ? { ...initial, fecha_inicio: initial.fecha_inicio || '', fecha_fin: initial.fecha_fin || '' } : { ...empty })
+  // Cuando se edita un contrato existente, normalizar inquilinos_ids desde
+  // initial.inquilinos_lista (formato del backend) o desde el legacy inquilino_id.
+  const _normalizeInitial = (i) => {
+    if (!i) return { ...empty }
+    const inquilinos_ids = Array.isArray(i.inquilinos_lista) && i.inquilinos_lista.length
+      ? i.inquilinos_lista
+          .slice()
+          .sort((a, b) => (b.es_principal ? 1 : 0) - (a.es_principal ? 1 : 0))
+          .map(x => x.cliente_id)
+      : (i.inquilino_id ? [i.inquilino_id] : [])
+    return {
+      ...empty,
+      ...i,
+      fecha_inicio: i.fecha_inicio || '',
+      fecha_fin:    i.fecha_fin || '',
+      inquilinos_ids,
+      inquilino_id: inquilinos_ids[0] || '',
+    }
+  }
+  const [form, setForm]   = useState(_normalizeInitial(initial))
   const [loading, setLoading] = useState(false)
   const [err, setErr]     = useState('')
   const [propsLocal, setPropsLocal] = useState(propiedades)
@@ -430,6 +454,23 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
     })
     if (!payload.fecha_inicio) payload.fecha_inicio = null
     if (!payload.fecha_fin)    payload.fecha_fin    = null
+
+    // Mapear inquilinos_ids → inquilinos[] (el backend lo espera así).
+    // El primero es el principal. Quitamos el array auxiliar y mandamos
+    // ambos campos para que el backend pueda hacer compat con clientes viejos.
+    const ids = (form.inquilinos_ids || []).filter(Boolean)
+    if (ids.length > 0) {
+      payload.inquilinos = ids.map((cid, idx) => ({
+        cliente_id: Number(cid),
+        es_principal: idx === 0,
+      }))
+      payload.inquilino_id = Number(ids[0])
+    } else {
+      payload.inquilinos = []
+    }
+    delete payload.inquilinos_ids
+    delete payload.inquilinos_lista  // solo lectura
+
     try {
       if (initial) await api.patch(`/api/contratos/${initial.id}`, payload)
       else await api.post('/api/contratos', payload)
@@ -471,21 +512,16 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
             </select>
           </div>
 
-          <div>
-            <div className="flex items-center justify-between">
-              <label className="label">Inquilino / Comprador</label>
-              <button type="button" onClick={() => setCreando('inquilino')}
-                className="text-[11px] text-primary dark:text-white hover:underline font-medium">
-                + Nuevo inquilino
-              </button>
-            </div>
-            <select className="input" value={form.inquilino_id || ''} onChange={set('inquilino_id')}>
-              <option value="">Sin asignar</option>
-              {clientesLocal
-                .filter(c => c.rol === 'inquilino' || c.rol === 'comprador')
-                .map(c => <option key={c.id} value={c.id}>{c.nombre} {c.apellido}</option>)}
-            </select>
-          </div>
+          <InquilinosMulti
+            inquilinos_ids={form.inquilinos_ids}
+            clientes={clientesLocal}
+            onChange={(ids) => setForm(f => ({
+              ...f,
+              inquilinos_ids: ids,
+              inquilino_id: ids[0] || '',
+            }))}
+            onNuevoInquilino={() => setCreando('inquilino')}
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -588,10 +624,119 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
           onClose={() => setCreando(null)}
           onSaved={c => {
             setClientesLocal(prev => [c, ...prev])
-            setForm(f => ({ ...f, inquilino_id: c.id }))
+            // Agregar al final de la lista de inquilinos del contrato.
+            // Si es el primero, queda como principal automáticamente.
+            setForm(f => {
+              const ids = [...(f.inquilinos_ids || []), c.id]
+              return { ...f, inquilinos_ids: ids, inquilino_id: ids[0] }
+            })
             setCreando(null)
           }}
         />
+      )}
+    </div>
+  )
+}
+
+
+/**
+ * Multi-select de inquilinos firmantes del contrato.
+ *
+ * El primer item de la lista es siempre el TITULAR PRINCIPAL — se marca
+ * visualmente con un chip "PRINCIPAL" en cobre y queda en sync con el campo
+ * legacy `inquilino_id` del backend.
+ *
+ * Para agregar co-inquilinos (matrimonios, sociedades, hermanos que firman
+ * juntos): elegirlos del select de abajo o crear nuevos con "+ Nuevo inquilino".
+ */
+function InquilinosMulti({ inquilinos_ids, clientes, onChange, onNuevoInquilino }) {
+  const ids = inquilinos_ids || []
+  const elegibles = (clientes || []).filter(
+    c => c.rol === 'inquilino' || c.rol === 'comprador'
+  )
+  const disponibles = elegibles.filter(c => !ids.includes(c.id))
+  const seleccionados = ids
+    .map(id => elegibles.find(c => c.id === id))
+    .filter(Boolean)
+
+  const agregar = (id) => {
+    const numId = Number(id)
+    if (!numId || ids.includes(numId)) return
+    onChange([...ids, numId])
+  }
+  const quitar = (id) => onChange(ids.filter(x => x !== id))
+  const hacerPrincipal = (id) => {
+    // Mover el id elegido al inicio de la lista
+    const restantes = ids.filter(x => x !== id)
+    onChange([id, ...restantes])
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <label className="label !mb-0">
+          Inquilino{ids.length > 1 ? `s (${ids.length})` : ''} / Comprador
+        </label>
+        <button type="button" onClick={onNuevoInquilino}
+          className="text-[11px] text-primary dark:text-white hover:underline font-medium">
+          + Nuevo inquilino
+        </button>
+      </div>
+
+      {/* Lista de inquilinos ya seleccionados */}
+      {seleccionados.length > 0 && (
+        <div className="space-y-2 mb-2">
+          {seleccionados.map((c, idx) => (
+            <div key={c.id}
+              className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-neutral-50 dark:bg-[#141414] border border-border dark:border-[#2A2A2A]">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[13px] font-medium truncate">
+                  {c.nombre} {c.apellido || ''}
+                </span>
+                {idx === 0 && (
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-[#B8893A] bg-[#B8893A]/10 px-1.5 py-0.5 rounded-full">
+                    PRINCIPAL
+                  </span>
+                )}
+                {c.documento && (
+                  <span className="text-[11px] text-muted font-mono">{c.documento}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {idx > 0 && (
+                  <button type="button" onClick={() => hacerPrincipal(c.id)}
+                    className="text-[10px] text-muted hover:text-primary dark:hover:text-white underline">
+                    hacer principal
+                  </button>
+                )}
+                <button type="button" onClick={() => quitar(c.id)}
+                  className="text-[10px] text-danger hover:underline">
+                  Quitar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Select para agregar más */}
+      <select className="input" value="" onChange={e => agregar(e.target.value)}>
+        <option value="">
+          {seleccionados.length === 0
+            ? 'Sin asignar — elegí un inquilino'
+            : '+ Agregar otro inquilino firmante'}
+        </option>
+        {disponibles.map(c => (
+          <option key={c.id} value={c.id}>
+            {c.nombre} {c.apellido || ''} {c.documento ? `· ${c.documento}` : ''}
+          </option>
+        ))}
+      </select>
+
+      {ids.length > 1 && (
+        <p className="text-[10px] text-muted mt-1.5">
+          {ids.length} firmantes. Los co-inquilinos son solidariamente responsables del alquiler.
+        </p>
       )}
     </div>
   )

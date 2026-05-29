@@ -216,24 +216,8 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
       <PropietariosSection datos={datos} setNested={setNested} />
 
 
-      {/* Inquilino */}
-      <Seccion titulo="Inquilino / Comprador">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Nombre" value={datos.inquilino?.nombre} onChange={v => setNested('inquilino.nombre', v)} />
-          <Field label="Apellido" value={datos.inquilino?.apellido} onChange={v => setNested('inquilino.apellido', v)} />
-          <Field label="Razón social" value={datos.inquilino?.razon_social} onChange={v => setNested('inquilino.razon_social', v)} />
-          <Field label="Documento" value={datos.inquilino?.documento} onChange={v => setNested('inquilino.documento', v)} placeholder="12.345.678 o 20-12345678-3" />
-          <div>
-            <label className="label">Tipo de documento</label>
-            <select className="input" value={datos.inquilino?.tipo_documento || 'DNI'} onChange={e => setNested('inquilino.tipo_documento', e.target.value)}>
-              {['DNI','CUIT','CUIL','Pasaporte','LE','LC','Otro'].map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <Field label="Nacionalidad" value={datos.inquilino?.nacionalidad} onChange={v => setNested('inquilino.nacionalidad', v)} />
-          <Field label="Email" value={datos.inquilino?.email} onChange={v => setNested('inquilino.email', v)} type="email" />
-          <Field label="Teléfono" value={datos.inquilino?.telefono} onChange={v => setNested('inquilino.telefono', v)} />
-        </div>
-      </Seccion>
+      {/* Inquilinos — uno o varios firmantes del contrato */}
+      <InquilinosSection datos={datos} setNested={setNested} />
 
       {/* Co-firmantes / Garantes */}
       <CoFirmantesSection datos={datos} setNested={setNested} />
@@ -534,6 +518,143 @@ function BooleanSelect({ label, path, datos, setNested, nullable }) {
  * Sección de garantes / co-firmantes detectados en el contrato.
  * Aparece sólo si la IA detectó alguno; si no, se puede agregar manualmente.
  */
+/**
+ * Sección de inquilinos extraídos del contrato. Acepta múltiples firmantes
+ * (matrimonios, sociedades, hermanos compartiendo el alquiler).
+ *
+ * Compat: si la IA devolvió `inquilino` (objeto único) lo migra a la
+ * primera posición de `inquilinos` (lista).
+ */
+function InquilinosSection({ datos, setNested }) {
+  // Normalizar: inquilino (objeto único legacy) + inquilinos (lista nueva).
+  // Si los dos vienen y el único no está en la lista por documento, lo
+  // ponemos primero como principal.
+  const listaRaw = datos.inquilinos || []
+  const inqUnico = datos.inquilino || null
+  let lista = listaRaw
+  if (inqUnico && (inqUnico.nombre || inqUnico.razon_social || inqUnico.documento)) {
+    const doc = (inqUnico.documento || '').trim()
+    const yaEsta = lista.some(i => (i.documento || '').trim() === doc && doc)
+    if (!yaEsta) lista = [inqUnico, ...listaRaw]
+  }
+
+  const sincronizar = (nuevaLista) => {
+    setNested('inquilinos', nuevaLista)
+    // Mantener el campo `inquilino` legacy en sync con el principal (idx 0)
+    setNested('inquilino', nuevaLista[0] || null)
+  }
+  const updateAt = (idx, field, value) => {
+    sincronizar(lista.map((p, i) => i === idx
+      ? { ...p, [field]: value === '' ? null : value }
+      : p))
+  }
+  const eliminar = (idx) => sincronizar(lista.filter((_, i) => i !== idx))
+  const agregar = () => sincronizar([
+    ...lista,
+    { nombre: '', apellido: '', razon_social: null, documento: null,
+      tipo_documento: 'DNI', nacionalidad: null, email: null, telefono: null },
+  ])
+  const hacerPrincipal = (idx) => {
+    if (idx === 0) return
+    const principal = lista[idx]
+    const resto = lista.filter((_, i) => i !== idx)
+    sincronizar([principal, ...resto])
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold">
+          Inquilinos <span className="text-muted/70 font-normal lowercase tracking-normal">({lista.length})</span>
+        </p>
+        <button type="button" onClick={agregar}
+          className="text-[11px] text-primary dark:text-white hover:underline font-medium">
+          + Agregar inquilino
+        </button>
+      </div>
+
+      {lista.length === 0 && (
+        <div className="rounded-2xl bg-warn/5 border border-warn/20 p-4 text-[12px] text-warn">
+          La IA no detectó ningún inquilino en el contrato. Agregá al menos uno antes de confirmar.
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {lista.map((p, idx) => (
+          <div key={idx} className="rounded-2xl bg-neutral-50 dark:bg-[#141414] border border-border dark:border-[#2A2A2A] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[12px] font-semibold">
+                Inquilino #{idx + 1}
+                {idx === 0 && <span className="ml-2 text-[10px] text-[#B8893A]">PRINCIPAL</span>}
+              </p>
+              <div className="flex items-center gap-2">
+                {idx > 0 && (
+                  <button type="button" onClick={() => hacerPrincipal(idx)}
+                    className="text-[10px] text-muted hover:underline">
+                    hacer principal
+                  </button>
+                )}
+                {lista.length > 1 && (
+                  <button type="button" onClick={() => eliminar(idx)}
+                    className="text-[11px] text-danger hover:underline">
+                    Quitar
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Nombre</label>
+                <input className="input" value={p.nombre || ''}
+                  onChange={e => updateAt(idx, 'nombre', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Apellido</label>
+                <input className="input" value={p.apellido || ''}
+                  onChange={e => updateAt(idx, 'apellido', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Razón social</label>
+                <input className="input" value={p.razon_social || ''}
+                  onChange={e => updateAt(idx, 'razon_social', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Documento</label>
+                <input className="input" value={p.documento || ''}
+                  placeholder="12.345.678 o 20-12345678-3"
+                  onChange={e => updateAt(idx, 'documento', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Tipo doc.</label>
+                <select className="input" value={p.tipo_documento || 'DNI'}
+                  onChange={e => updateAt(idx, 'tipo_documento', e.target.value)}>
+                  {['DNI','CUIT','CUIL','Pasaporte','LE','LC','Otro'].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Nacionalidad</label>
+                <input className="input" value={p.nacionalidad || ''}
+                  onChange={e => updateAt(idx, 'nacionalidad', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input className="input" type="email" value={p.email || ''}
+                  onChange={e => updateAt(idx, 'email', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Teléfono</label>
+                <input className="input" value={p.telefono || ''}
+                  onChange={e => updateAt(idx, 'telefono', e.target.value)} />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
 function CoFirmantesSection({ datos, setNested }) {
   const lista = datos.co_firmantes || []
   const updateAt = (idx, field, value) => {
@@ -657,7 +778,18 @@ function DoneStep({ resumen, onClose }) {
         {!resumen.propietarios && resumen.propietario && (
           <Row label="Propietario" info={resumen.propietario} />
         )}
-        {resumen.inquilino?.id && <Row label="Inquilino" info={resumen.inquilino} />}
+        {/* Lista nueva de inquilinos (multi). Si vino la lista, la usamos.
+            Si no y hay inquilino legacy, mostramos ese. */}
+        {Array.isArray(resumen.inquilinos) && resumen.inquilinos.length > 0
+          ? resumen.inquilinos.map((iq, i) => (
+              <Row
+                key={iq.id || i}
+                label={`Inquilino${resumen.inquilinos.length > 1 ? ` ${i + 1}` : ''}${iq.es_principal && resumen.inquilinos.length > 1 ? ' (principal)' : ''}`}
+                info={iq}
+              />
+            ))
+          : (resumen.inquilino?.id && <Row label="Inquilino" info={resumen.inquilino} />)
+        }
         {(resumen.co_firmantes || []).map((cf, i) => (
           <Row key={cf.id || i} label={`Garante ${i + 1}`} info={cf} />
         ))}

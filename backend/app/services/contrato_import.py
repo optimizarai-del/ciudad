@@ -66,6 +66,8 @@ Esquema de respuesta:
     // ... uno o más; si en el contrato firma sólo uno, devolvé el array con 1
     // si firman 2+ (matrimonio, hermanos, sociedad de hecho) devolvé todos
   ],
+  // Inquilino (PRINCIPAL — único, para retrocompatibilidad). Coincide con
+  // el primer elemento de inquilinos[] si esa lista vino.
   "inquilino": {
     "nombre": <string>,
     "apellido": <string> | null,
@@ -76,6 +78,15 @@ Esquema de respuesta:
     "email": <string> | null,
     "telefono": <string> | null
   },
+  "inquilinos": [
+    // Si el contrato tiene MÁS DE UN inquilino/locatario firmante
+    // (matrimonios, hermanos compartiendo el alquiler, sociedades),
+    // devolvelos todos acá. Cada item: mismo formato que `inquilino`.
+    // El primero se considera principal por defecto.
+    // Si hay un solo inquilino, dejá esta lista vacía o ponelo solo en
+    // el campo `inquilino` de arriba.
+    { ... }
+  ],
   "co_firmantes": [
     // Garantes / codeudores / fiadores que firman el contrato.
     // Mismo formato que inquilino. Lista vacía si no hay.
@@ -131,8 +142,15 @@ Reglas:
   personas (matrimonio, herederos, sociedad), devolvelos a todos en
   `propietarios`. Si el contrato menciona explícitamente porcentajes de
   copropiedad, completalos en `porcentaje`; sino dejá `porcentaje: null`.
+- Múltiples inquilinos: si firman como LOCATARIOS 2 o más personas
+  (matrimonios, compañeros de departamento, sociedades comerciales),
+  devolvelos a todos en `inquilinos`. El primero es el titular principal.
+  Si firma uno solo, dejá `inquilinos: []` y completá `inquilino` arriba.
+  NO incluir acá a garantes/fiadores — esos van en `co_firmantes`.
 - co_firmantes: garantes, fiadores y codeudores van acá. NO son inquilinos
   principales pero hay que cargarlos como Clientes para tener su contacto.
+  Si la cláusula dice "los locatarios serán solidariamente responsables"
+  pero el firmante es una sola persona, NO inventes co-firmantes.
 - inventario: copialo casi completo si está, listando muebles/electrodomésticos.
 - policies: en contratos típicos de vivienda, expensas y servicios son del
   inquilino, e impuesto inmobiliario es del propietario. No asumas si no
@@ -412,33 +430,67 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
             "reutilizado": reu,
         })
 
-    # 2. Inquilino
-    inq_data = datos.get("inquilino") or {}
-    inquilino = None
-    if (inq_data.get("nombre") or inq_data.get("razon_social") or inq_data.get("documento")):
-        inquilino = _buscar_cliente_existente(db, inq_data, "inquilino", is_demo)
-        if inquilino:
-            if not inquilino.tipo_documento and inq_data.get("tipo_documento"):
-                inquilino.tipo_documento = inq_data["tipo_documento"]
-            if not inquilino.nacionalidad and inq_data.get("nacionalidad"):
-                inquilino.nacionalidad = inq_data["nacionalidad"]
-            resumen["inquilino"] = {"id": inquilino.id, "reutilizado": True}
+    # 2. Inquilinos — uno o varios firmantes del contrato.
+    # Por compat con extractos viejos, aceptamos tanto `inquilinos` (lista
+    # nueva) como `inquilino` (objeto único). Si vienen los dos, unificamos:
+    # el objeto único pasa a ser el primero de la lista.
+    inquilinos_data: list[dict] = list(datos.get("inquilinos") or [])
+    inq_single = datos.get("inquilino") or {}
+    if inq_single and (inq_single.get("nombre") or inq_single.get("razon_social") or inq_single.get("documento")):
+        # Si la lista nueva ya incluye al principal por documento, no duplicar
+        doc_principal = (inq_single.get("documento") or "").strip()
+        ya_listado = any(
+            (i.get("documento") or "").strip() == doc_principal and doc_principal
+            for i in inquilinos_data
+        )
+        if not ya_listado:
+            inquilinos_data.insert(0, inq_single)
+
+    inquilinos_creados: list = []  # tuplas (cliente, reutilizado, es_principal)
+    for idx, inq in enumerate(inquilinos_data):
+        if not (inq.get("nombre") or inq.get("razon_social") or inq.get("documento")):
+            continue
+        existing = _buscar_cliente_existente(db, inq, "inquilino", is_demo)
+        if existing:
+            if not existing.tipo_documento and inq.get("tipo_documento"):
+                existing.tipo_documento = inq["tipo_documento"]
+            if not existing.nacionalidad and inq.get("nacionalidad"):
+                existing.nacionalidad = inq["nacionalidad"]
+            inquilinos_creados.append((existing, True, idx == 0))
         else:
-            inquilino = models.Cliente(
-                nombre=inq_data.get("nombre") or (inq_data.get("razon_social") or "Inquilino"),
-                apellido=inq_data.get("apellido"),
-                razon_social=inq_data.get("razon_social"),
-                documento=inq_data.get("documento"),
-                tipo_documento=inq_data.get("tipo_documento"),
-                nacionalidad=inq_data.get("nacionalidad"),
-                email=inq_data.get("email"),
-                telefono=inq_data.get("telefono"),
+            nuevo = models.Cliente(
+                nombre=inq.get("nombre") or (inq.get("razon_social") or "Inquilino"),
+                apellido=inq.get("apellido"),
+                razon_social=inq.get("razon_social"),
+                documento=inq.get("documento"),
+                tipo_documento=inq.get("tipo_documento"),
+                nacionalidad=inq.get("nacionalidad"),
+                email=inq.get("email"),
+                telefono=inq.get("telefono"),
                 rol=models.ClienteRol.inquilino,
                 notas="[IMPORTADO desde contrato]",
                 is_demo=is_demo,
             )
-            db.add(inquilino); db.flush()
-            resumen["inquilino"] = {"id": inquilino.id, "reutilizado": False}
+            db.add(nuevo); db.flush()
+            inquilinos_creados.append((nuevo, False, idx == 0))
+
+    # Inquilino principal = el primero (o None si no hubo ninguno)
+    inquilino = inquilinos_creados[0][0] if inquilinos_creados else None
+
+    # Resumen retrocompatible
+    resumen["inquilinos"] = [
+        {
+            "id":            cli.id,
+            "nombre":        (cli.razon_social or
+                              f"{cli.nombre} {cli.apellido or ''}".strip()),
+            "documento":     cli.documento,
+            "reutilizado":   reu,
+            "es_principal":  principal,
+        }
+        for (cli, reu, principal) in inquilinos_creados
+    ]
+    if inquilino:
+        resumen["inquilino"] = {"id": inquilino.id, "reutilizado": inquilinos_creados[0][1]}
 
     # 2bis. Co-firmantes (garantes, codeudores, fiadores).
     # Se crean como Clientes con rol=inquilino y notas indicando que son
@@ -608,6 +660,17 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
     )
     db.add(contrato); db.flush()
     resumen["contrato"] = {"id": contrato.id, "codigo": contrato.codigo}
+
+    # 4bis. Filas pivote contrato_inquilinos — una por cada firmante detectado.
+    # El primero queda marcado como principal (compat con contrato.inquilino_id).
+    for idx, (cli, _reu, _principal) in enumerate(inquilinos_creados):
+        db.add(models.ContratoInquilino(
+            contrato_id=contrato.id,
+            cliente_id=cli.id,
+            es_principal=(idx == 0),
+            rol=("inquilino" if idx == 0 else "co_inquilino"),
+        ))
+    db.flush()
 
     # 5. Pagos futuros — sólo si el contrato está vigente y nos pidieron
     # autogenerar. Por defecto: sí (el operador puede borrar luego).

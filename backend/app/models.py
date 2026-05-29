@@ -186,6 +186,33 @@ class PropiedadPropietario(Base):
     cliente = relationship("Cliente")
 
 
+class ContratoInquilino(Base):
+    """Tabla pivote contrato ↔ cliente (rol inquilino).
+
+    Permite que un contrato tenga varios inquilinos firmantes (matrimonios,
+    sociedades, hermanos compartiendo el alquiler). El campo `es_principal`
+    marca cuál es el titular del contrato — por compatibilidad con código
+    legacy, ese mismo cliente se referencia desde `Contrato.inquilino_id`.
+
+    El `rol` opcional permite distinguir entre 'inquilino' (titular) y
+    'co_inquilino' (firmante adicional) si la inmobiliaria lo necesita.
+    """
+    __tablename__ = "contrato_inquilinos"
+    id = Column(Integer, primary_key=True)
+    contrato_id = Column(Integer, ForeignKey("contratos.id", ondelete="CASCADE"), nullable=False, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id", ondelete="CASCADE"), nullable=False, index=True)
+    es_principal = Column(Boolean, default=False, nullable=False)
+    # Texto libre para clarificar el rol del firmante (ej: "co-inquilino",
+    # "garante solidario", "firmante con poder"). Para garantes formales
+    # se sigue usando la tabla aparte si hace falta — esto es sólo descriptivo.
+    rol = Column(String, nullable=True)
+    notas = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    contrato = relationship("Contrato", back_populates="inquilinos")
+    cliente = relationship("Cliente")
+
+
 class Cliente(Base):
     __tablename__ = "clientes"
     id = Column(Integer, primary_key=True)
@@ -218,8 +245,19 @@ class Contrato(Base):
 
     propiedad_id = Column(Integer, ForeignKey("propiedades.id"), nullable=False)
     propiedad = relationship("Propiedad")
+    # Inquilino principal (legacy / single). Para contratos con varios
+    # inquilinos co-firmantes (matrimonios, sociedades, garantes con poder),
+    # ver la relación `inquilinos` más abajo — esa apunta a la tabla pivote
+    # `contrato_inquilinos`. Mantenemos `inquilino_id` para retrocompatibilidad
+    # y como referencia rápida al principal.
     inquilino_id = Column(Integer, ForeignKey("clientes.id"))
     inquilino = relationship("Cliente", foreign_keys=[inquilino_id])
+    inquilinos = relationship(
+        "ContratoInquilino",
+        back_populates="contrato",
+        cascade="all, delete-orphan",
+        order_by="desc(ContratoInquilino.es_principal)",
+    )
 
     fecha_inicio = Column(Date)
     fecha_fin = Column(Date)

@@ -46,6 +46,42 @@ def _generar_codigo(db: Session, is_demo: bool) -> str:
     return f"{prefix}{int(datetime.utcnow().timestamp())}"
 
 
+def _inquilinos_lista(contrato: models.Contrato) -> list[dict]:
+    """Arma la lista de firmantes con datos del cliente, lista para serializar."""
+    out = []
+    for ci in (contrato.inquilinos or []):
+        c = ci.cliente
+        if not c:
+            continue
+        out.append({
+            "id": ci.id,
+            "cliente_id": c.id,
+            "nombre":     c.nombre,
+            "apellido":   c.apellido,
+            "razon_social": c.razon_social,
+            "documento":  c.documento,
+            "tipo_documento": c.tipo_documento,
+            "email":      c.email,
+            "telefono":   c.telefono,
+            "es_principal": bool(ci.es_principal),
+            "rol":        ci.rol,
+        })
+    return out
+
+
+def _to_contrato_out(obj: models.Contrato) -> dict:
+    """Serializa un Contrato a dict compatible con ContratoOut, agregando
+    la lista de firmantes desde la tabla pivote."""
+    d = {
+        c.name: getattr(obj, c.name)
+        for c in models.Contrato.__table__.columns
+        # solo columnas que están en el schema ContratoOut
+    }
+    d["id"] = obj.id
+    d["inquilinos_lista"] = _inquilinos_lista(obj)
+    return d
+
+
 @router.get("/", response_model=List[schemas.ContratoOut])
 def listar(
     incluir_archivados: bool = False,
@@ -54,7 +90,13 @@ def listar(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    q = _scope(db, user)
+    from sqlalchemy.orm import selectinload, joinedload
+    q = (
+        _scope(db, user)
+        .options(
+            selectinload(models.Contrato.inquilinos).joinedload(models.ContratoInquilino.cliente),
+        )
+    )
     if not incluir_archivados:
         q = q.filter(models.Contrato.archivado.is_(False))
     if propietario_id:
@@ -74,7 +116,92 @@ def listar(
     q = q.order_by(models.Contrato.id.desc())
     if limit:
         q = q.limit(limit)
-    return q.all()
+    return [_to_contrato_out(c) for c in q.all()]
+
+
+def _sync_inquilinos(db: Session, contrato: models.Contrato,
+                     inquilinos_data: list[dict], is_demo: bool) -> None:
+    """Sincroniza las filas pivote `contrato_inquilinos` del contrato a partir
+    de la lista que mandó el frontend. Cada item puede:
+      - Apuntar a un cliente existente con `cliente_id`
+      - Crear uno nuevo con nombre/documento/etc.
+      - Si manda `documento` y existe un cliente con ese documento en el
+        mismo workspace, lo reutiliza (evita duplicados).
+
+    El primer item marcado como `es_principal=True` (o el primero de la
+    lista si nadie lo está) se setea también como `contrato.inquilino_id`
+    para mantener compatibilidad con código legacy.
+
+    Borra todas las filas previas del contrato y las recrea — pensado para
+    POST (crear) y PATCH (editar) por igual.
+    """
+    # Limpiar filas previas si es un edit
+    for ci in list(contrato.inquilinos or []):
+        db.delete(ci)
+    db.flush()
+
+    if not inquilinos_data:
+        contrato.inquilino_id = None
+        return
+
+    principal_cli_id: Optional[int] = None
+
+    for idx, item in enumerate(inquilinos_data):
+        cli = None
+        cli_id = item.get("cliente_id")
+
+        if cli_id:
+            cli = db.query(models.Cliente).filter_by(id=cli_id).first()
+            if not cli:
+                raise HTTPException(404, f"El inquilino #{cli_id} no existe.")
+            if bool(cli.is_demo) != is_demo:
+                raise HTTPException(403, f"El inquilino #{cli_id} no pertenece a tu workspace.")
+        else:
+            # Buscar por documento para evitar duplicados
+            doc = (item.get("documento") or "").strip()
+            if doc:
+                cli = (
+                    db.query(models.Cliente)
+                    .filter(models.Cliente.is_demo == is_demo,
+                            models.Cliente.documento == doc)
+                    .first()
+                )
+
+            if cli is None:
+                # Crear nuevo Cliente
+                nombre = (item.get("nombre") or item.get("razon_social") or "").strip()
+                if not nombre:
+                    raise HTTPException(400, f"Inquilino #{idx + 1}: falta nombre o razón social.")
+                cli = models.Cliente(
+                    nombre=nombre,
+                    apellido=item.get("apellido") or None,
+                    razon_social=item.get("razon_social") or None,
+                    documento=doc or None,
+                    tipo_documento=item.get("tipo_documento") or None,
+                    nacionalidad=item.get("nacionalidad") or None,
+                    email=item.get("email") or None,
+                    telefono=item.get("telefono") or None,
+                    rol=models.ClienteRol.inquilino,
+                    notas=item.get("notas") or None,
+                    is_demo=is_demo,
+                )
+                db.add(cli); db.flush()
+
+        es_principal = bool(item.get("es_principal")) or (idx == 0 and principal_cli_id is None)
+        if es_principal:
+            principal_cli_id = cli.id
+
+        db.add(models.ContratoInquilino(
+            contrato_id=contrato.id,
+            cliente_id=cli.id,
+            es_principal=es_principal,
+            rol=item.get("rol"),
+            notas=item.get("notas"),
+        ))
+
+    # Setear inquilino_id legacy al principal (o al primero si ninguno fue marcado)
+    contrato.inquilino_id = principal_cli_id
+    db.flush()
 
 
 @router.post("/", response_model=schemas.ContratoOut)
@@ -82,6 +209,7 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
     # Mensajes de error claros para los validaciones más comunes en vez de
     # un 500 genérico que aparezca como toast rojo sin información.
     payload = data.model_dump()
+    inquilinos_data = payload.pop("inquilinos", None)
 
     # Validar propiedad
     if not payload.get("propiedad_id"):
@@ -90,8 +218,8 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
     if not prop:
         raise HTTPException(404, f"La propiedad #{payload['propiedad_id']} no existe.")
 
-    # Validar inquilino si se mandó
-    if payload.get("inquilino_id"):
+    # Validar inquilino_id legacy (si se mandó single y no la lista nueva)
+    if not inquilinos_data and payload.get("inquilino_id"):
         cli = db.query(models.Cliente).filter_by(id=payload["inquilino_id"]).first()
         if not cli:
             raise HTTPException(404, f"El inquilino #{payload['inquilino_id']} no existe.")
@@ -118,23 +246,40 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
 
     is_demo = workspace_flag(user)
 
-    # Autogenerar el código si vino vacío. Con la restricción UNIQUE en
-    # Postgres, cadena vacía repetida tira IntegrityError; NULL permite
-    # múltiples filas pero acá preferimos un código humano-legible.
+    # Autogenerar el código si vino vacío.
     codigo = (payload.get("codigo") or "").strip()
     if not codigo:
         codigo = _generar_codigo(db, is_demo)
     else:
-        # Si el usuario forzó un código, validamos que no esté en uso
         if db.query(models.Contrato).filter_by(codigo=codigo).first():
             raise HTTPException(409, f"Ya existe un contrato con el código '{codigo}'.")
     payload["codigo"] = codigo
 
+    # Sacar inquilinos_lista (no es columna del modelo)
+    payload.pop("inquilinos_lista", None)
+
     try:
         obj = models.Contrato(**payload)
         obj.is_demo = is_demo
-        db.add(obj); db.commit(); db.refresh(obj)
-        return obj
+        db.add(obj); db.flush()  # flush para tener obj.id antes de _sync
+
+        # Si vino la lista nueva, la sincronizamos. Si no y vino inquilino_id
+        # legacy, creamos UNA fila pivote referenciando a ese cliente como
+        # principal (así la consulta unificada siempre devuelve algo).
+        if inquilinos_data:
+            _sync_inquilinos(db, obj, inquilinos_data, is_demo)
+        elif obj.inquilino_id:
+            db.add(models.ContratoInquilino(
+                contrato_id=obj.id,
+                cliente_id=obj.inquilino_id,
+                es_principal=True,
+            ))
+
+        db.commit(); db.refresh(obj)
+        return _to_contrato_out(obj)
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         print(f"[contratos.crear] {type(e).__name__}: {e}")
@@ -145,17 +290,28 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
 def detalle(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     obj = _scope(db, user).filter_by(id=id).first()
     if not obj: raise HTTPException(404, "No encontrado")
-    return obj
+    return _to_contrato_out(obj)
 
 
 @router.patch("/{id}", response_model=schemas.ContratoOut)
 def editar(id: int, data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     obj = _scope(db, user).filter_by(id=id).first()
     if not obj: raise HTTPException(404, "No encontrado")
-    for k, v in data.model_dump(exclude_unset=True).items():
+
+    payload = data.model_dump(exclude_unset=True)
+    inquilinos_data = payload.pop("inquilinos", None)
+    payload.pop("inquilinos_lista", None)  # solo lectura
+
+    for k, v in payload.items():
         setattr(obj, k, v)
+
+    # Si vino la lista de inquilinos en el PATCH, la sincronizamos.
+    # Si no, dejamos las filas pivote como están.
+    if inquilinos_data is not None:
+        _sync_inquilinos(db, obj, inquilinos_data, workspace_flag(user))
+
     db.commit(); db.refresh(obj)
-    return obj
+    return _to_contrato_out(obj)
 
 
 @router.delete("/{id}")
