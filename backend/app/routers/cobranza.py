@@ -91,19 +91,33 @@ def _indice_str_safe(c: models.Contrato) -> str:
     return v.value if hasattr(v, "value") else str(v)
 
 
+def _count_ajustes_safe(c: models.Contrato) -> int:
+    """Cuenta ajustes aplicados sin romper si la tabla no existe."""
+    try:
+        return len(c.ajustes or [])
+    except Exception:
+        return 0
+
+
 def _last_ajuste_info(c: models.Contrato) -> dict | None:
-    """Devuelve los datos del último ajuste registrado, o None si no hay."""
-    ajustes = list(c.ajustes or [])
-    if not ajustes:
+    """Devuelve los datos del último ajuste registrado, o None si no hay.
+    Defensivo: si la tabla ajustes_contrato aún no existe en este deploy,
+    devuelve None sin romper la response."""
+    try:
+        ajustes = list(c.ajustes or [])
+        if not ajustes:
+            return None
+        ultimo = max(ajustes, key=lambda a: (a.fecha or None, a.id))
+        return {
+            "fecha":          ultimo.fecha.isoformat() if ultimo.fecha else None,
+            "porcentaje":     float(ultimo.porcentaje or 0),
+            "monto_anterior": float(ultimo.monto_anterior or 0),
+            "monto_nuevo":    float(ultimo.monto_nuevo or 0),
+            "indice_usado":   ultimo.indice_usado,
+        }
+    except Exception as e:
+        print(f"[_last_ajuste_info] {type(e).__name__}: {e}")
         return None
-    ultimo = max(ajustes, key=lambda a: (a.fecha or None, a.id))
-    return {
-        "fecha":          ultimo.fecha.isoformat() if ultimo.fecha else None,
-        "porcentaje":     float(ultimo.porcentaje or 0),
-        "monto_anterior": float(ultimo.monto_anterior or 0),
-        "monto_nuevo":    float(ultimo.monto_nuevo or 0),
-        "indice_usado":   ultimo.indice_usado,
-    }
 
 
 def _nombre_cliente(c: models.Cliente | None) -> str:
@@ -284,7 +298,7 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
             "monto_alquiler_sug":       round(alquiler_sug, 2),
             "monto_alquiler_base":      float(c.monto_inicial or 0),
             "indice_ajuste":            _indice_str_safe(c),
-            "ajustes_aplicados":        len(c.ajustes or []),
+            "ajustes_aplicados":        _count_ajustes_safe(c),
             "ultimo_ajuste":            _last_ajuste_info(c),
             "monto_expensas_sug":       round(expensas_sug, 2),
             "monto_tasas_sug":          round(tasas_sug, 2),

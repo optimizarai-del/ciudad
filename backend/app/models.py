@@ -259,6 +259,41 @@ class Contrato(Base):
         order_by="desc(ContratoInquilino.es_principal)",
     )
 
+    @property
+    def inquilinos_lista(self) -> list[dict]:
+        """Lista de firmantes con datos planos del cliente, lista para serializar.
+
+        Es property (no método) para que pydantic con from_attributes=True
+        la capture automáticamente. Defensiva: si la tabla pivote aún no
+        existe (deploy a medio aplicar la migración) o lazy-load falla,
+        devuelve [] sin romper la response del contrato.
+        """
+        try:
+            out = []
+            for ci in (self.inquilinos or []):
+                c = ci.cliente
+                if not c:
+                    continue
+                out.append({
+                    "id":             ci.id,
+                    "cliente_id":     c.id,
+                    "nombre":         c.nombre,
+                    "apellido":       c.apellido,
+                    "razon_social":   c.razon_social,
+                    "documento":      c.documento,
+                    "tipo_documento": c.tipo_documento,
+                    "email":          c.email,
+                    "telefono":       c.telefono,
+                    "es_principal":   bool(ci.es_principal),
+                    "rol":            ci.rol,
+                })
+            return out
+        except Exception as e:
+            # Cualquier fallo (tabla no existe, FK rota, etc.) NO debe romper
+            # la response del Contrato — devolvemos lista vacía y logueamos.
+            print(f"[Contrato.inquilinos_lista] {type(e).__name__}: {e}")
+            return []
+
     fecha_inicio = Column(Date)
     fecha_fin = Column(Date)
     monto_inicial = Column(Float, default=0)

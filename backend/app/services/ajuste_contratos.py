@@ -66,14 +66,20 @@ def _tasa_por_periodo(c: models.Contrato, periodicidad: int, tasas: dict) -> flo
 
 def monto_vigente(contrato: models.Contrato) -> float:
     """Devuelve el monto del último ajuste registrado, o el monto_inicial si no
-    hay ajustes. NO consulta tasas vivas — solo lee lo guardado."""
+    hay ajustes. NO consulta tasas vivas — solo lee lo guardado.
+    Defensivo: si la tabla ajustes_contrato no existe (deploy parcial) o
+    el lazy-load falla, retorna monto_inicial."""
     if not contrato:
         return 0.0
-    ajustes = list(contrato.ajustes or [])
-    if not ajustes:
+    try:
+        ajustes = list(contrato.ajustes or [])
+        if not ajustes:
+            return float(contrato.monto_inicial or 0)
+        ultimo = max(ajustes, key=lambda a: (a.fecha or _date.min, a.id))
+        return float(ultimo.monto_nuevo or contrato.monto_inicial or 0)
+    except Exception as e:
+        print(f"[monto_vigente] {type(e).__name__}: {e} — fallback a monto_inicial")
         return float(contrato.monto_inicial or 0)
-    ultimo = max(ajustes, key=lambda a: (a.fecha or _date.min, a.id))
-    return float(ultimo.monto_nuevo or contrato.monto_inicial or 0)
 
 
 def aplicar_ajustes_pendientes(

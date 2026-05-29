@@ -46,42 +46,6 @@ def _generar_codigo(db: Session, is_demo: bool) -> str:
     return f"{prefix}{int(datetime.utcnow().timestamp())}"
 
 
-def _inquilinos_lista(contrato: models.Contrato) -> list[dict]:
-    """Arma la lista de firmantes con datos del cliente, lista para serializar."""
-    out = []
-    for ci in (contrato.inquilinos or []):
-        c = ci.cliente
-        if not c:
-            continue
-        out.append({
-            "id": ci.id,
-            "cliente_id": c.id,
-            "nombre":     c.nombre,
-            "apellido":   c.apellido,
-            "razon_social": c.razon_social,
-            "documento":  c.documento,
-            "tipo_documento": c.tipo_documento,
-            "email":      c.email,
-            "telefono":   c.telefono,
-            "es_principal": bool(ci.es_principal),
-            "rol":        ci.rol,
-        })
-    return out
-
-
-def _to_contrato_out(obj: models.Contrato) -> dict:
-    """Serializa un Contrato a dict compatible con ContratoOut, agregando
-    la lista de firmantes desde la tabla pivote."""
-    d = {
-        c.name: getattr(obj, c.name)
-        for c in models.Contrato.__table__.columns
-        # solo columnas que están en el schema ContratoOut
-    }
-    d["id"] = obj.id
-    d["inquilinos_lista"] = _inquilinos_lista(obj)
-    return d
-
-
 @router.get("/", response_model=List[schemas.ContratoOut])
 def listar(
     incluir_archivados: bool = False,
@@ -90,13 +54,19 @@ def listar(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    # Eager-load defensivo de inquilinos. Si la tabla pivote aún no existe
+    # en este deploy, el selectinload puede tirar error — lo capturamos y
+    # caemos al query sin options así no rompe el listar de contratos.
     from sqlalchemy.orm import selectinload, joinedload
-    q = (
-        _scope(db, user)
-        .options(
-            selectinload(models.Contrato.inquilinos).joinedload(models.ContratoInquilino.cliente),
+    q = _scope(db, user)
+    try:
+        q = q.options(
+            selectinload(models.Contrato.inquilinos)
+                .joinedload(models.ContratoInquilino.cliente),
         )
-    )
+    except Exception as e:
+        print(f"[contratos.listar] selectinload inquilinos falló (fallback sin eager): {e}")
+
     if not incluir_archivados:
         q = q.filter(models.Contrato.archivado.is_(False))
     if propietario_id:
@@ -116,7 +86,7 @@ def listar(
     q = q.order_by(models.Contrato.id.desc())
     if limit:
         q = q.limit(limit)
-    return [_to_contrato_out(c) for c in q.all()]
+    return q.all()
 
 
 def _sync_inquilinos(db: Session, contrato: models.Contrato,
@@ -135,10 +105,15 @@ def _sync_inquilinos(db: Session, contrato: models.Contrato,
     Borra todas las filas previas del contrato y las recrea — pensado para
     POST (crear) y PATCH (editar) por igual.
     """
-    # Limpiar filas previas si es un edit
-    for ci in list(contrato.inquilinos or []):
-        db.delete(ci)
-    db.flush()
+    # Limpiar filas previas si es un edit. Defensivo: si la tabla pivote
+    # aún no existe (deploy a medio aplicar la migración), seguir adelante.
+    try:
+        for ci in list(contrato.inquilinos or []):
+            db.delete(ci)
+        db.flush()
+    except Exception as e:
+        print(f"[_sync_inquilinos] limpiar previos falló: {e}")
+        db.rollback()
 
     if not inquilinos_data:
         contrato.inquilino_id = None
@@ -263,20 +238,35 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
         obj.is_demo = is_demo
         db.add(obj); db.flush()  # flush para tener obj.id antes de _sync
 
-        # Si vino la lista nueva, la sincronizamos. Si no y vino inquilino_id
-        # legacy, creamos UNA fila pivote referenciando a ese cliente como
-        # principal (así la consulta unificada siempre devuelve algo).
-        if inquilinos_data:
-            _sync_inquilinos(db, obj, inquilinos_data, is_demo)
-        elif obj.inquilino_id:
-            db.add(models.ContratoInquilino(
-                contrato_id=obj.id,
-                cliente_id=obj.inquilino_id,
-                es_principal=True,
-            ))
+        # Sincronizar inquilinos en la tabla pivote (defensivo: si la tabla
+        # aún no existe en este deploy, lo logueamos pero no rompemos la creación)
+        try:
+            if inquilinos_data:
+                _sync_inquilinos(db, obj, inquilinos_data, is_demo)
+            elif obj.inquilino_id:
+                db.add(models.ContratoInquilino(
+                    contrato_id=obj.id,
+                    cliente_id=obj.inquilino_id,
+                    es_principal=True,
+                ))
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[contratos.crear] sync inquilinos falló (continuamos): {e}")
+
+        # Generar pagos pendientes futuros para que el contrato aparezca
+        # automáticamente en Cobros y Liquidaciones. Si el estado es 'vigente'
+        # y hay fechas, crea un Pago/mes desde hoy hasta fecha_fin.
+        try:
+            if (obj.estado == models.ContratoEstado.vigente
+                    and obj.fecha_inicio and obj.fecha_fin):
+                from app.services.contrato_import import _generar_pagos_futuros
+                _generar_pagos_futuros(db, obj)
+        except Exception as e:
+            print(f"[contratos.crear] generar_pagos_futuros falló (continuamos): {e}")
 
         db.commit(); db.refresh(obj)
-        return _to_contrato_out(obj)
+        return obj
     except HTTPException:
         db.rollback()
         raise
@@ -290,7 +280,7 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
 def detalle(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     obj = _scope(db, user).filter_by(id=id).first()
     if not obj: raise HTTPException(404, "No encontrado")
-    return _to_contrato_out(obj)
+    return obj
 
 
 @router.patch("/{id}", response_model=schemas.ContratoOut)
@@ -306,12 +296,16 @@ def editar(id: int, data: schemas.ContratoCreate, db: Session = Depends(get_db),
         setattr(obj, k, v)
 
     # Si vino la lista de inquilinos en el PATCH, la sincronizamos.
-    # Si no, dejamos las filas pivote como están.
     if inquilinos_data is not None:
-        _sync_inquilinos(db, obj, inquilinos_data, workspace_flag(user))
+        try:
+            _sync_inquilinos(db, obj, inquilinos_data, workspace_flag(user))
+        except HTTPException:
+            db.rollback(); raise
+        except Exception as e:
+            print(f"[contratos.editar] sync inquilinos: {e}")
 
     db.commit(); db.refresh(obj)
-    return _to_contrato_out(obj)
+    return obj
 
 
 @router.delete("/{id}")
