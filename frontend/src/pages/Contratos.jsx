@@ -447,6 +447,24 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
 
   const submit = async e => {
     e.preventDefault(); setLoading(true); setErr('')
+
+    // Validación previa: si las dos fechas están cargadas y la de fin es
+    // anterior a la de inicio, frenar acá. De otro modo el contrato se
+    // crea pero NO se generan pagos porque cursor > end → 0 períodos a
+    // crear → no aparece en Cobros ni Liquidaciones.
+    if (form.fecha_inicio && form.fecha_fin && form.fecha_fin < form.fecha_inicio) {
+      setErr('La fecha de fin no puede ser anterior a la fecha de inicio.')
+      setLoading(false)
+      return
+    }
+    // Validación: si el estado es 'vigente' las fechas son obligatorias
+    // (sin ellas no se generan los pagos pendientes).
+    if (form.estado === 'vigente' && (!form.fecha_inicio || !form.fecha_fin)) {
+      setErr('Un contrato vigente requiere fecha de inicio y de fin para generar los cobros pendientes.')
+      setLoading(false)
+      return
+    }
+
     const payload = { ...form }
     ;['propiedad_id','inquilino_id','monto_inicial','deposito','periodicidad_meses','porcentaje_fijo','comision_porc'].forEach(k => {
       if (payload[k] === '' || payload[k] == null) payload[k] = null
