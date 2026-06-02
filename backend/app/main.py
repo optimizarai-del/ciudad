@@ -21,14 +21,43 @@ app = FastAPI(
     version="0.1.0",
 )
 
-origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+# CORS: permitir el dominio productivo de Easypanel + cualquier subdominio
+# de optimizar-ia.com (api.*, www.*, ciudad.*, etc.) + dev local.
+# Usamos allow_origin_regex como fallback robusto: si la env var
+# CORS_ORIGINS se pierde o queda vacía en un rebuild, el regex sigue
+# permitiendo el tráfico desde el dominio real. Eso evita que la app
+# quede caída por una configuración mal puesta.
+_env_origins = os.getenv("CORS_ORIGINS", "").strip()
+if _env_origins:
+    origins = [o.strip() for o in _env_origins.split(",") if o.strip()]
+else:
+    origins = []
+
+# Hardcoded baseline: estos siempre se aceptan, en cualquier deploy.
+_BASELINE_ORIGINS = [
+    "https://ciudad.optimizar-ia.com",
+    "https://www.ciudad.optimizar-ia.com",
+    "http://localhost:5173",
+    "http://localhost:4173",
+    "http://localhost:8000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+]
+for o in _BASELINE_ORIGINS:
+    if o not in origins:
+        origins.append(o)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    # Acepta también CUALQUIER subdominio https://*.optimizar-ia.com
+    # Esto es safety-net por si en el futuro se mueve a otro subdominio.
+    allow_origin_regex=r"https?://(.*\.)?optimizar-ia\.com$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+print(f"[CORS] origins permitidos: {origins}")
 
 for r in [auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos]:
     app.include_router(r.router)
