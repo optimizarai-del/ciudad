@@ -51,7 +51,61 @@ app.include_router(versiones.router)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "brand": "CIUDAD — Negocios Inmobiliarios", "slogan": "#VIVIRMEJOR"}
+    # Exponemos el GIT_SHA del build (Easypanel lo pasa como build-arg)
+    # para poder diagnosticar si el deploy está sincronizado con el repo.
+    return {
+        "status": "ok",
+        "brand":  "CIUDAD — Negocios Inmobiliarios",
+        "slogan": "#VIVIRMEJOR",
+        "git_sha": os.getenv("GIT_SHA", "unknown")[:12],
+        "build_marker": "post-savepoints-fix",  # cambia con cada deploy importante
+    }
+
+
+@app.get("/api/debug/contratos-vigentes")
+def debug_contratos_vigentes(db = None):
+    """Endpoint público de diagnóstico — SIN AUTH — para verificar qué
+    contratos vigentes y pagos hay en la DB del deploy actual.
+    No expone PII ni datos sensibles. Solo conteos y códigos.
+    Quitar cuando el bug esté resuelto."""
+    from app.database import SessionLocal
+    from sqlalchemy import text, inspect
+    from app.database import IS_POSTGRES, CIUDAD_SCHEMA
+    db = SessionLocal()
+    try:
+        ins = inspect(db.bind)
+        schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+        out = {"schema": schema, "tablas": ins.get_table_names(schema=schema)}
+        qual_c = f'"{CIUDAD_SCHEMA}".contratos' if IS_POSTGRES else "contratos"
+        qual_p = f'"{CIUDAD_SCHEMA}".pagos' if IS_POSTGRES else "pagos"
+        # Conteos por workspace
+        out["contratos_vigentes_reales"] = db.execute(text(
+            f"SELECT COUNT(*) FROM {qual_c} WHERE estado='vigente' AND is_demo=false"
+        )).scalar()
+        out["contratos_vigentes_demo"]   = db.execute(text(
+            f"SELECT COUNT(*) FROM {qual_c} WHERE estado='vigente' AND is_demo=true"
+        )).scalar()
+        out["pagos_reales_pendientes"]   = db.execute(text(
+            f"SELECT COUNT(*) FROM {qual_p} WHERE is_demo=false AND estado='pendiente'"
+        )).scalar()
+        out["pagos_demo_pendientes"]     = db.execute(text(
+            f"SELECT COUNT(*) FROM {qual_p} WHERE is_demo=true AND estado='pendiente'"
+        )).scalar()
+        # Últimos contratos vigentes reales
+        rows = db.execute(text(f"""
+            SELECT c.codigo, c.fecha_inicio, c.fecha_fin,
+                   (SELECT COUNT(*) FROM {qual_p} WHERE contrato_id=c.id) as np
+            FROM {qual_c} c
+            WHERE c.estado='vigente' AND c.is_demo=false
+            ORDER BY c.id DESC LIMIT 10
+        """)).fetchall()
+        out["ultimos_contratos_reales"] = [
+            {"codigo": r[0], "fechas": f"{r[1]}->{r[2]}", "pagos": r[3]}
+            for r in rows
+        ]
+        return out
+    finally:
+        db.close()
 
 
 # ─── Servir el frontend buildeado (modo local autocontenido) ──────────────────
