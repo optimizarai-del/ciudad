@@ -752,45 +752,105 @@ def _generar_pagos_futuros(db: Session, contrato: models.Contrato) -> int:
           f"cursor={cursor.isoformat()} end={end.isoformat()} "
           f"dia_venc={dia_venc} monto={monto} is_demo={is_demo}")
 
+    # Construir lista de períodos a crear (en Python, sin tocar DB)
+    periodos_a_crear = []
     while cursor <= end:
         periodo = cursor.strftime("%Y-%m")
-        # Evitar duplicar si ya existe el Pago de ese período
-        existe = db.query(models.Pago).filter_by(
-            contrato_id=contrato_id, periodo=periodo,
-        ).first()
-        if existe:
-            cursor = cursor + relativedelta(months=1)
-            continue
-
-        # Fecha de vencimiento: día_venc del mes (clamp a último día si excede)
         try:
             fecha_venc = cursor.replace(day=dia_venc)
         except ValueError:
             siguiente = (cursor.replace(day=1) + relativedelta(months=1))
             fecha_venc = siguiente - relativedelta(days=1)
-
-        # SAVEPOINT: si este Pago falla, solo se revierte ESTA inserción,
-        # no la transacción padre con el contrato y los pagos anteriores.
-        try:
-            with db.begin_nested():
-                pago = models.Pago(
-                    contrato_id=contrato_id,
-                    periodo=periodo,
-                    fecha_vencimiento=fecha_venc,
-                    monto_total=monto,
-                    monto_alquiler=monto,
-                    estado=models.PagoEstado.pendiente,
-                    is_demo=is_demo,
-                )
-                db.add(pago)
-                # El __exit__ del begin_nested hace flush+release del savepoint
-            creados += 1
-        except Exception as e:
-            fallidos += 1
-            print(f"[_generar_pagos_futuros] {periodo}: {type(e).__name__}: {e}")
-            # SAVEPOINT revertido automáticamente — no tocamos la transacción raíz.
-
+        periodos_a_crear.append((periodo, fecha_venc))
         cursor = cursor + relativedelta(months=1)
+
+    if not periodos_a_crear:
+        print(f"[_generar_pagos_futuros] contrato {contrato_id}: no hay meses entre cursor y fecha_fin")
+        return 0
+
+    # Filtrar los que ya existen para no duplicar
+    periodos_strs = [p[0] for p in periodos_a_crear]
+    try:
+        existentes = {
+            row[0] for row in
+            db.query(models.Pago.periodo)
+              .filter(models.Pago.contrato_id == contrato_id,
+                      models.Pago.periodo.in_(periodos_strs))
+              .all()
+        }
+    except Exception as e:
+        print(f"[_generar_pagos_futuros] check existentes falló: {e}")
+        existentes = set()
+
+    a_insertar = [(p, f) for (p, f) in periodos_a_crear if p not in existentes]
+    if not a_insertar:
+        print(f"[_generar_pagos_futuros] todos los {len(periodos_a_crear)} períodos ya existían")
+        return 0
+
+    # ───── INSERT crudo vía SQLAlchemy Core ─────
+    # Usamos sql.insert con SOLO las columnas mínimas para evitar problemas
+    # de schema drift (columnas nuevas como monto_pagado_transferencia que
+    # podrían no estar migradas en algunos deploys). El INSERT crudo solo
+    # toca las columnas que listamos explícitamente — el resto toma defaults
+    # del schema de Postgres.
+    from sqlalchemy import insert as _insert
+    from datetime import datetime as _dt
+
+    rows = [
+        {
+            "contrato_id":       contrato_id,
+            "periodo":           periodo,
+            "fecha_vencimiento": fecha_venc,
+            "monto_alquiler":    float(monto),
+            "monto_expensas":    0,
+            "monto_impuestos":   0,
+            "monto_municipal":   0,
+            "monto_otros":       0,
+            "monto_total":       float(monto),
+            "estado":            "pendiente",
+            "is_demo":           bool(is_demo),
+            "created_at":        _dt.utcnow(),
+        }
+        for (periodo, fecha_venc) in a_insertar
+    ]
+
+    try:
+        db.execute(_insert(models.Pago.__table__), rows)
+        db.flush()
+        creados = len(rows)
+        print(f"[_generar_pagos_futuros] contrato {contrato_id}: "
+              f"INSERTaron {creados} pagos pendientes")
+    except Exception as e:
+        # Fallback: si el bulk insert falla por schema drift, intentamos
+        # uno por uno con SQL todavía más mínimo.
+        print(f"[_generar_pagos_futuros] bulk insert falló: {type(e).__name__}: {e}")
+        try: db.rollback()
+        except Exception: pass
+
+        from sqlalchemy import text
+        for periodo, fecha_venc in a_insertar:
+            try:
+                # Usar :param para no exponer SQL injection.
+                # Schema de Postgres: tabla vive en schema 'ciudad'. SQLite: sin schema.
+                from app.database import IS_POSTGRES, CIUDAD_SCHEMA
+                qual = f'"{CIUDAD_SCHEMA}".pagos' if IS_POSTGRES else "pagos"
+                db.execute(text(f"""
+                    INSERT INTO {qual}
+                      (contrato_id, periodo, fecha_vencimiento, monto_alquiler,
+                       monto_total, estado, is_demo, created_at)
+                    VALUES
+                      (:cid, :per, :fv, :ma, :mt, 'pendiente', :demo, :now)
+                """), {
+                    "cid": contrato_id, "per": periodo, "fv": fecha_venc,
+                    "ma": float(monto), "mt": float(monto),
+                    "demo": bool(is_demo), "now": _dt.utcnow(),
+                })
+                creados += 1
+            except Exception as e2:
+                fallidos += 1
+                print(f"[_generar_pagos_futuros] fallback {periodo}: {e2}")
+                try: db.rollback()
+                except Exception: pass
 
     print(f"[_generar_pagos_futuros] contrato {contrato_id}: "
           f"{creados} creados, {fallidos} fallidos")

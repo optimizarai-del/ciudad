@@ -280,12 +280,42 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
         db.commit(); db.refresh(obj)
 
         # Verificación post-commit: SELECT explícito a la DB para confirmar
-        # que los pagos quedaron persistidos. Si pagos_n > 0 pero la query
-        # devuelve 0, hay un bug serio en la transacción.
+        # que los pagos quedaron persistidos. Si la transacción falló
+        # silenciosamente, intentamos UNA VEZ MÁS en transacción nueva.
         try:
             count_db = db.query(models.Pago).filter_by(contrato_id=obj.id).count()
             print(f"[contratos.crear] ✅ contrato #{obj.id} CREADO en DB. "
                   f"Pagos en DB: {count_db} (esperados: {pagos_n})")
+
+            # GARANTIZADOR: si esperábamos pagos y no hay ninguno, retry
+            # en transacción independiente. Esto cubre el caso de que la
+            # transacción principal haya hecho rollback parcial sin avisar.
+            if pagos_n > 0 and count_db == 0:
+                print(f"[contratos.crear] ⚠ retry en tx nueva — pagos no persistieron")
+                from app.services.contrato_import import _generar_pagos_futuros
+                try:
+                    retry_n = _generar_pagos_futuros(db, obj)
+                    db.commit()
+                    final = db.query(models.Pago).filter_by(contrato_id=obj.id).count()
+                    print(f"[contratos.crear] retry: generó {retry_n}, final en DB: {final}")
+                except Exception as e:
+                    print(f"[contratos.crear] retry falló: {e}")
+                    try: db.rollback()
+                    except Exception: pass
+            elif estado_v == "vigente" and obj.fecha_inicio and obj.fecha_fin and count_db == 0:
+                # Caso raro: contrato vigente con fechas pero pagos_n=0
+                # (probablemente excepción silenciada arriba). Forzar generación.
+                print(f"[contratos.crear] ⚠ contrato vigente sin pagos — forzando generación")
+                from app.services.contrato_import import _generar_pagos_futuros
+                try:
+                    retry_n = _generar_pagos_futuros(db, obj)
+                    db.commit()
+                    final = db.query(models.Pago).filter_by(contrato_id=obj.id).count()
+                    print(f"[contratos.crear] forzado: generó {retry_n}, final en DB: {final}")
+                except Exception as e:
+                    print(f"[contratos.crear] forzado falló: {e}")
+                    try: db.rollback()
+                    except Exception: pass
         except Exception as e:
             print(f"[contratos.crear] post-commit count falló: {e}")
 
