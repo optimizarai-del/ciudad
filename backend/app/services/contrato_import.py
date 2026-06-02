@@ -663,23 +663,19 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
 
     # 4bis. Filas pivote contrato_inquilinos — una por cada firmante detectado.
     # El primero queda marcado como principal (compat con contrato.inquilino_id).
-    # Defensivo: si la tabla pivote aún no existe en este deploy, logueamos
-    # pero NO rompemos el flujo (el contrato igual queda creado).
+    # SAVEPOINT: si la tabla pivote aún no existe en este deploy, solo
+    # revertimos este sub-bloque — el contrato padre queda intacto.
     try:
-        for idx, (cli, _reu, _principal) in enumerate(inquilinos_creados):
-            db.add(models.ContratoInquilino(
-                contrato_id=contrato.id,
-                cliente_id=cli.id,
-                es_principal=(idx == 0),
-                rol=("inquilino" if idx == 0 else "co_inquilino"),
-            ))
-        db.flush()
+        with db.begin_nested():
+            for idx, (cli, _reu, _principal) in enumerate(inquilinos_creados):
+                db.add(models.ContratoInquilino(
+                    contrato_id=contrato.id,
+                    cliente_id=cli.id,
+                    es_principal=(idx == 0),
+                    rol=("inquilino" if idx == 0 else "co_inquilino"),
+                ))
     except Exception as e:
-        print(f"[contrato_import] filas pivote inquilinos falló (continuamos): {e}")
-        try: db.rollback()
-        except Exception: pass
-        # Re-flush del contrato porque el rollback nos volteó la sesión
-        db.add(contrato); db.flush()
+        print(f"[contrato_import] filas pivote inquilinos falló (savepoint revertido): {e}")
 
     # 5. Pagos futuros — siempre que el contrato esté vigente y haya fechas.
     # Logueo explícito para diagnosticar por qué no se generan si el usuario
@@ -698,11 +694,9 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
             pagos_generados = _generar_pagos_futuros(db, contrato)
             print(f"[contrato_import] se generaron {pagos_generados} pagos pendientes")
         except Exception as e:
+            # _generar_pagos_futuros ya usa savepoints internamente, así que un
+            # error acá NO debería corromper la transacción raíz. Solo loggear.
             print(f"[contrato_import] _generar_pagos_futuros falló: {type(e).__name__}: {e}")
-            # Reabrir la sesión por si quedó en estado de error
-            try: db.rollback()
-            except Exception: pass
-            db.add(contrato); db.flush()
     else:
         razones = []
         if not quiere_generar: razones.append("checkbox desmarcado")
@@ -721,8 +715,11 @@ def _generar_pagos_futuros(db: Session, contrato: models.Contrato) -> int:
     """Crea un Pago en estado=pendiente para cada mes desde hoy (o desde el
     inicio del contrato si todavía no empezó) hasta fecha_fin inclusive.
 
-    Robusto: commitea cada Pago individualmente. Si uno falla (ej: schema
-    drift por una columna nueva que aún no migró), continúa con los demás.
+    Robusto: usa SAVEPOINTS (db.begin_nested) por cada Pago. Si uno falla,
+    solo se revierte ese sub-bloque — el resto de los pagos creados Y el
+    contrato padre siguen en la transacción intacta. CRÍTICO: nunca llamar
+    db.rollback() directamente acá porque revierte la transacción raíz y
+    el contrato se pierde.
 
     Devuelve la cantidad de pagos creados.
     """
@@ -741,51 +738,54 @@ def _generar_pagos_futuros(db: Session, contrato: models.Contrato) -> int:
     dia_venc = contrato.dia_vencimiento_pago or 10
     creados = 0
     fallidos = 0
-    contrato_id = contrato.id  # capturar antes de cualquier rollback
+    contrato_id = contrato.id
     is_demo    = contrato.is_demo
     monto      = contrato.monto_inicial or 0
 
+    print(f"[_generar_pagos_futuros] contrato {contrato_id}: "
+          f"cursor={cursor.isoformat()} end={end.isoformat()} "
+          f"dia_venc={dia_venc} monto={monto} is_demo={is_demo}")
+
     while cursor <= end:
         periodo = cursor.strftime("%Y-%m")
-        try:
-            # Evitar duplicar si ya existe el Pago de ese período
-            existe = db.query(models.Pago).filter_by(
-                contrato_id=contrato_id, periodo=periodo,
-            ).first()
-            if existe:
-                cursor = cursor + relativedelta(months=1)
-                continue
-            # Fecha de vencimiento: día_venc del mes (clamp a último día si excede)
-            try:
-                fecha_venc = cursor.replace(day=dia_venc)
-            except ValueError:
-                siguiente = (cursor.replace(day=1) + relativedelta(months=1))
-                fecha_venc = siguiente - relativedelta(days=1)
+        # Evitar duplicar si ya existe el Pago de ese período
+        existe = db.query(models.Pago).filter_by(
+            contrato_id=contrato_id, periodo=periodo,
+        ).first()
+        if existe:
+            cursor = cursor + relativedelta(months=1)
+            continue
 
-            pago = models.Pago(
-                contrato_id=contrato_id,
-                periodo=periodo,
-                fecha_vencimiento=fecha_venc,
-                monto_total=monto,
-                monto_alquiler=monto,
-                estado=models.PagoEstado.pendiente,
-                is_demo=is_demo,
-            )
-            db.add(pago)
-            db.flush()
+        # Fecha de vencimiento: día_venc del mes (clamp a último día si excede)
+        try:
+            fecha_venc = cursor.replace(day=dia_venc)
+        except ValueError:
+            siguiente = (cursor.replace(day=1) + relativedelta(months=1))
+            fecha_venc = siguiente - relativedelta(days=1)
+
+        # SAVEPOINT: si este Pago falla, solo se revierte ESTA inserción,
+        # no la transacción padre con el contrato y los pagos anteriores.
+        try:
+            with db.begin_nested():
+                pago = models.Pago(
+                    contrato_id=contrato_id,
+                    periodo=periodo,
+                    fecha_vencimiento=fecha_venc,
+                    monto_total=monto,
+                    monto_alquiler=monto,
+                    estado=models.PagoEstado.pendiente,
+                    is_demo=is_demo,
+                )
+                db.add(pago)
+                # El __exit__ del begin_nested hace flush+release del savepoint
             creados += 1
         except Exception as e:
             fallidos += 1
             print(f"[_generar_pagos_futuros] {periodo}: {type(e).__name__}: {e}")
-            try: db.rollback()
-            except Exception: pass
-            # Re-adjuntar el contrato al estado para que siga vivo en sesión
-            try:
-                contrato = db.merge(contrato)
-            except Exception: pass
+            # SAVEPOINT revertido automáticamente — no tocamos la transacción raíz.
+
         cursor = cursor + relativedelta(months=1)
 
-    if fallidos:
-        print(f"[_generar_pagos_futuros] contrato {contrato_id}: "
-              f"{creados} creados, {fallidos} fallidos")
+    print(f"[_generar_pagos_futuros] contrato {contrato_id}: "
+          f"{creados} creados, {fallidos} fallidos")
     return creados

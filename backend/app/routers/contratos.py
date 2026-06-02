@@ -107,13 +107,13 @@ def _sync_inquilinos(db: Session, contrato: models.Contrato,
     """
     # Limpiar filas previas si es un edit. Defensivo: si la tabla pivote
     # aún no existe (deploy a medio aplicar la migración), seguir adelante.
+    # Usamos SAVEPOINT para que un fallo acá no rompa la transacción padre.
     try:
-        for ci in list(contrato.inquilinos or []):
-            db.delete(ci)
-        db.flush()
+        with db.begin_nested():
+            for ci in list(contrato.inquilinos or []):
+                db.delete(ci)
     except Exception as e:
-        print(f"[_sync_inquilinos] limpiar previos falló: {e}")
-        db.rollback()
+        print(f"[_sync_inquilinos] limpiar previos falló (savepoint revertido): {e}")
 
     if not inquilinos_data:
         contrato.inquilino_id = None
