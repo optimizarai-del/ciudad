@@ -255,27 +255,40 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
             print(f"[contratos.crear] sync inquilinos falló (continuamos): {e}")
 
         # Generar pagos pendientes futuros para que el contrato aparezca
-        # automáticamente en Cobros y Liquidaciones. Si el estado es 'vigente'
-        # y hay fechas, crea un Pago/mes desde hoy hasta fecha_fin.
-        print(f"[contratos.crear] post-commit: estado={obj.estado}, "
-              f"fechas={obj.fecha_inicio}-{obj.fecha_fin}")
+        # automáticamente en Cobros y Liquidaciones.
+        # Comparación de estado por STRING (no por enum) — en SQLite a veces
+        # queda como string y la comparación con el Enum no matchea.
+        estado_v = obj.estado.value if hasattr(obj.estado, "value") else str(obj.estado)
+        print(f"[contratos.crear] post-flush contrato_id={obj.id} "
+              f"estado={estado_v!r} fechas={obj.fecha_inicio}-{obj.fecha_fin} "
+              f"monto={obj.monto_inicial} is_demo={obj.is_demo}")
+        pagos_n = 0
         try:
-            if (obj.estado == models.ContratoEstado.vigente
-                    and obj.fecha_inicio and obj.fecha_fin):
+            if estado_v == "vigente" and obj.fecha_inicio and obj.fecha_fin:
                 from app.services.contrato_import import _generar_pagos_futuros
-                n = _generar_pagos_futuros(db, obj)
-                print(f"[contratos.crear] generados {n} pagos pendientes")
+                pagos_n = _generar_pagos_futuros(db, obj)
+                print(f"[contratos.crear] ✓ generados {pagos_n} pagos pendientes (pre-commit)")
             else:
                 razones = []
-                if obj.estado != models.ContratoEstado.vigente:
-                    razones.append(f"estado={obj.estado}")
-                if not obj.fecha_inicio: razones.append("falta fecha_inicio")
-                if not obj.fecha_fin:    razones.append("falta fecha_fin")
-                print(f"[contratos.crear] sin pagos pendientes: {', '.join(razones)}")
+                if estado_v != "vigente":   razones.append(f"estado={estado_v!r}")
+                if not obj.fecha_inicio:    razones.append("falta fecha_inicio")
+                if not obj.fecha_fin:       razones.append("falta fecha_fin")
+                print(f"[contratos.crear] ⚠ NO se generan pagos: {', '.join(razones)}")
         except Exception as e:
-            print(f"[contratos.crear] generar_pagos_futuros falló (continuamos): {type(e).__name__}: {e}")
+            print(f"[contratos.crear] generar_pagos_futuros falló: {type(e).__name__}: {e}")
 
         db.commit(); db.refresh(obj)
+
+        # Verificación post-commit: SELECT explícito a la DB para confirmar
+        # que los pagos quedaron persistidos. Si pagos_n > 0 pero la query
+        # devuelve 0, hay un bug serio en la transacción.
+        try:
+            count_db = db.query(models.Pago).filter_by(contrato_id=obj.id).count()
+            print(f"[contratos.crear] ✅ contrato #{obj.id} CREADO en DB. "
+                  f"Pagos en DB: {count_db} (esperados: {pagos_n})")
+        except Exception as e:
+            print(f"[contratos.crear] post-commit count falló: {e}")
+
         return obj
     except HTTPException:
         db.rollback()

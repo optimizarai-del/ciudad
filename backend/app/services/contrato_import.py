@@ -735,7 +735,13 @@ def _generar_pagos_futuros(db: Session, contrato: models.Contrato) -> int:
     cursor = max(contrato.fecha_inicio.replace(day=1), hoy.replace(day=1))
     end = contrato.fecha_fin
 
-    dia_venc = contrato.dia_vencimiento_pago or 10
+    # Defensivo: si la columna dia_vencimiento_pago no fue migrada en este
+    # deploy, contrato.dia_vencimiento_pago tira OperationalError. Fallback a 10.
+    try:
+        dia_venc = contrato.dia_vencimiento_pago or 10
+    except Exception as e:
+        print(f"[_generar_pagos_futuros] no se pudo leer dia_vencimiento_pago: {e} — usando 10")
+        dia_venc = 10
     creados = 0
     fallidos = 0
     contrato_id = contrato.id

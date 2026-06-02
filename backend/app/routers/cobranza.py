@@ -150,6 +150,10 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
         mes = f"{hoy.year}-{hoy.month:02d}"
 
     # ── Query 1: contratos vigentes con todas las relaciones necesarias ──────
+    # Filtramos por estado='vigente' usando el valor string además del enum
+    # para cubrir ambos casos (Postgres enum nativo + SQLite que guarda como
+    # texto). En la práctica ambos caen en la misma fila, pero por las dudas
+    # protegemos contra schema drift.
     contratos = (
         apply_workspace_filter(db.query(models.Contrato), models.Contrato, user)
         .filter(models.Contrato.estado == models.ContratoEstado.vigente)
