@@ -12,6 +12,7 @@ from app.database import Base, engine
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
 from app.routers import cobranza, ventas_router, comprobantes
 from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr, tasas_mensuales, refacciones, versiones
+from app.routers import historial as historial_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -76,6 +77,7 @@ app.include_router(tasas_msr.router)
 app.include_router(tasas_mensuales.router)
 app.include_router(refacciones.router)
 app.include_router(versiones.router)
+app.include_router(historial_router.router)
 
 
 @app.get("/health")

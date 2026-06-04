@@ -26,6 +26,7 @@ import ActualizarTasas    from './pages/ActualizarTasas'
 import Refacciones        from './pages/Refacciones'
 import ClientesVentas     from './pages/ClientesVentas'
 import VersionesLocal     from './pages/VersionesLocal'
+import HistorialAcciones  from './pages/HistorialAcciones'
 
 export default function App() {
   return (
@@ -70,6 +71,9 @@ export default function App() {
         } />
         <Route path="/alquileres/refacciones" element={
           <ProtectedRoute requireAlquileres><Refacciones /></ProtectedRoute>
+        } />
+        <Route path="/alquileres/historial" element={
+          <ProtectedRoute requireAlquileres><HistorialAcciones /></ProtectedRoute>
         } />
         <Route path="/recordatorios" element={
           <ProtectedRoute><Recordatorios /></ProtectedRoute>

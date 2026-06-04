@@ -12,6 +12,7 @@ from app.services.contrato_docx import generar_docx
 from app.services import supabase_storage
 from app.services.workspace import apply_workspace_filter, workspace_flag
 from app.services import contrato_import
+from app.services import historial
 
 router = APIRouter(prefix="/api/contratos", tags=["contratos"])
 
@@ -277,6 +278,18 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
         except Exception as e:
             print(f"[contratos.crear] generar_pagos_futuros falló: {type(e).__name__}: {e}")
 
+        # Historial: registramos la creación con el snapshot final del contrato.
+        # La reversión va a borrarlo + pagos en cascada (FK ON DELETE CASCADE).
+        historial.registrar(
+            db, user,
+            entidad="contratos",
+            entidad_id=obj.id,
+            accion=models.AccionTipo.create,
+            descripcion=f"Creó contrato {obj.codigo or obj.id}",
+            antes=None,
+            despues=historial.snapshot(obj),
+        )
+
         db.commit(); db.refresh(obj)
 
         # Verificación post-commit: SELECT explícito a la DB para confirmar
@@ -341,6 +354,8 @@ def editar(id: int, data: schemas.ContratoCreate, db: Session = Depends(get_db),
     obj = _scope(db, user).filter_by(id=id).first()
     if not obj: raise HTTPException(404, "No encontrado")
 
+    snap_antes = historial.snapshot(obj)
+
     payload = data.model_dump(exclude_unset=True)
     inquilinos_data = payload.pop("inquilinos", None)
     payload.pop("inquilinos_lista", None)  # solo lectura
@@ -357,6 +372,15 @@ def editar(id: int, data: schemas.ContratoCreate, db: Session = Depends(get_db),
         except Exception as e:
             print(f"[contratos.editar] sync inquilinos: {e}")
 
+    historial.registrar(
+        db, user,
+        entidad="contratos",
+        entidad_id=obj.id,
+        accion=models.AccionTipo.update,
+        descripcion=f"Editó contrato {obj.codigo or obj.id}",
+        antes=snap_antes,
+        despues=historial.snapshot(obj),
+    )
     db.commit(); db.refresh(obj)
     return obj
 
@@ -365,6 +389,20 @@ def editar(id: int, data: schemas.ContratoCreate, db: Session = Depends(get_db),
 def eliminar(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     obj = _scope(db, user).filter_by(id=id).first()
     if not obj: raise HTTPException(404, "No encontrado")
+    snap_antes = historial.snapshot(obj)
+    historial.registrar(
+        db, user,
+        entidad="contratos",
+        entidad_id=obj.id,
+        accion=models.AccionTipo.delete,
+        descripcion=f"Eliminó contrato {obj.codigo or obj.id}",
+        antes=snap_antes,
+        despues=None,
+        # Borrar un contrato puede cascadear pagos/comprobantes/etc — no
+        # podemos garantizar reconstrucción completa, así que lo marcamos
+        # como no revertible para evitar falsos positivos.
+        revertible=False,
+    )
     db.delete(obj); db.commit()
     return {"ok": True}
 

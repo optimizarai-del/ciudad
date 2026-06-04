@@ -27,6 +27,7 @@ from app.services.pdf_comprobantes import (
 )
 from app.services.email_service import enviar_email, smtp_configurado
 from app.services import supabase_storage
+from app.services import historial
 
 router = APIRouter(prefix="/api/cobranza", tags=["cobranza"])
 
@@ -323,8 +324,19 @@ def marcar_cobrado(pago_id: int, db: Session = Depends(get_db), user=Depends(get
     pago = db.query(models.Pago).get(pago_id)
     if not pago:
         raise HTTPException(404, "Pago no encontrado")
+    snap_antes = historial.snapshot(pago)
     pago.estado = models.PagoEstado.pagado
     pago.fecha_pago = date.today()
+    db.flush()
+    historial.registrar(
+        db, user,
+        entidad="pagos",
+        entidad_id=pago.id,
+        accion=models.AccionTipo.cobrar,
+        descripcion=f"Marcó como cobrado el pago #{pago.id} ({pago.periodo or 'sin periodo'})",
+        antes=snap_antes,
+        despues=historial.snapshot(pago),
+    )
     db.commit()
     return {"ok": True, "fecha_pago": pago.fecha_pago.isoformat()}
 
@@ -558,6 +570,8 @@ def _registrar_pago_impl(
         .filter(models.Pago.contrato_id == contrato.id, models.Pago.periodo == periodo)
         .first()
     )
+    # Snapshot del estado anterior para poder revertir desde Historial
+    snap_pago_antes = historial.snapshot(pago) if pago is not None else None
     if pago is None:
         pago = models.Pago(contrato_id=contrato.id, periodo=periodo, is_demo=workspace_flag(user))
         db.add(pago)
@@ -706,6 +720,23 @@ def _registrar_pago_impl(
         pdf_pro, monto_total, monto_comision=comision, monto_neto=neto,
         asunto=f"Liquidación CIUDAD. — {periodo}", cuerpo=cuerpo_pro,
     )
+
+    # Historial: registrar el registro de pago para poder revertirlo después.
+    # snap_pago_antes es None si era un pago nuevo; en ese caso la reversión
+    # eliminará el pago, lo cual es lo correcto.
+    historial.registrar(
+        db, user,
+        entidad="pagos",
+        entidad_id=pago.id,
+        accion=models.AccionTipo.registrar_pago,
+        descripcion=(
+            f"Registró pago de contrato {contrato.codigo or contrato.id} "
+            f"({periodo}) — total ${monto_total}"
+        ),
+        antes=snap_pago_antes,
+        despues=historial.snapshot(pago),
+    )
+
     db.commit()
 
     return {

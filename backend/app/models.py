@@ -599,3 +599,76 @@ class VersionLocal(Base):
     size_bytes = Column(Integer, default=0)        # tamaño del ZIP en bytes
     tablas     = Column(Text, nullable=True)       # JSON: {"propiedades": 45, ...}
     notas      = Column(String, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# Historial de acciones (audit log + undo)
+# ---------------------------------------------------------------------------
+class AccionTipo(str, Enum):
+    """Tipo de acción registrada en el historial.
+
+    Los valores son etiquetas estables que el dispatcher de reversión usa
+    para decidir cómo deshacer la acción. Si agregás un valor nuevo, agregá
+    también el handler correspondiente en services/historial.py.
+    """
+    # CRUD genérico
+    create = "create"
+    update = "update"
+    delete = "delete"
+    # Acciones específicas de cobranza (las más críticas para revertir)
+    cobrar = "cobrar"                 # marcar un pago como cobrado
+    registrar_pago = "registrar_pago" # registrar pago + comprobante
+    # Ajustes
+    aplicar_ajuste = "aplicar_ajuste"
+
+
+class AccionHistorial(Base):
+    """Registro inmutable de cada acción significativa del sistema.
+
+    El objetivo es doble:
+    1. Auditoría: saber quién hizo qué y cuándo.
+    2. Undo: poder revertir la acción reconstruyendo el estado anterior
+       desde `snapshot_antes`.
+
+    Convenciones:
+    - `entidad`: nombre de la tabla principal afectada (ej "pagos", "contratos").
+    - `entidad_id`: id de la fila afectada. Para acciones de batch, NULL y
+      los ids quedan dentro de `snapshot_antes`/`snapshot_despues`.
+    - `snapshot_antes`: JSON con el estado de la entidad ANTES de la acción.
+      Para `create` es NULL. Para `delete` contiene la fila completa.
+    - `snapshot_despues`: JSON con el estado DESPUÉS de la acción.
+      Para `delete` es NULL.
+    - `revertible`: si la acción admite undo. False para acciones cuya
+      reversión es imposible o peligrosa (ej. envío de email).
+    - `revertida`: pasa a True cuando se ejecuta el undo. Una acción ya
+      revertida no se puede revertir de nuevo.
+    """
+    __tablename__ = "acciones_historial"
+
+    id              = Column(Integer, primary_key=True)
+    created_at      = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # Quién
+    user_id         = Column(Integer, ForeignKey("users.id"), index=True)
+    user_nombre     = Column(String)  # snapshot del nombre por si el user se borra
+
+    # Qué
+    entidad         = Column(String, nullable=False, index=True)  # "pagos", "contratos", ...
+    entidad_id      = Column(Integer, index=True)
+    accion          = Column(SQLEnum(AccionTipo), nullable=False)
+    descripcion     = Column(String, nullable=False)  # human-readable
+
+    # Snapshots para reversión
+    snapshot_antes  = Column(Text)  # JSON
+    snapshot_despues = Column(Text) # JSON
+
+    # Control de undo
+    revertible      = Column(Boolean, default=True)
+    revertida       = Column(Boolean, default=False, index=True)
+    revertida_at    = Column(DateTime)
+    revertida_by_id = Column(Integer, ForeignKey("users.id"))
+    revertida_motivo = Column(String)
+
+    # Relaciones
+    user            = relationship("User", foreign_keys=[user_id])
+    revertida_by    = relationship("User", foreign_keys=[revertida_by_id])

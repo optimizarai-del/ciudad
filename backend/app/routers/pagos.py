@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.security import get_current_user
 from app import models
+from app.services import historial
 
 router = APIRouter(tags=["pagos"])
 
@@ -84,6 +85,16 @@ def crear_pago(contrato_id: int, data: PagoCreate, db: Session = Depends(get_db)
         notas=data.notas,
     )
     db.add(pago)
+    db.flush()
+    historial.registrar(
+        db, user,
+        entidad="pagos",
+        entidad_id=pago.id,
+        accion=models.AccionTipo.create,
+        descripcion=f"Creó pago #{pago.id} ({pago.periodo or 'sin periodo'}) — ${total}",
+        antes=None,
+        despues=historial.snapshot(pago),
+    )
     db.commit()
     db.refresh(pago)
     return pago
@@ -94,8 +105,19 @@ def actualizar_pago(pago_id: int, data: PagoCreate, db: Session = Depends(get_db
     pago = db.query(models.Pago).filter_by(id=pago_id).first()
     if not pago:
         raise HTTPException(404, "Pago no encontrado")
+    snap_antes = historial.snapshot(pago)
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(pago, k, v)
+    db.flush()
+    historial.registrar(
+        db, user,
+        entidad="pagos",
+        entidad_id=pago.id,
+        accion=models.AccionTipo.update,
+        descripcion=f"Editó pago #{pago.id} ({pago.periodo or 'sin periodo'})",
+        antes=snap_antes,
+        despues=historial.snapshot(pago),
+    )
     db.commit()
     db.refresh(pago)
     return pago
@@ -106,6 +128,16 @@ def eliminar_pago(pago_id: int, db: Session = Depends(get_db), user=Depends(get_
     pago = db.query(models.Pago).filter_by(id=pago_id).first()
     if not pago:
         raise HTTPException(404, "Pago no encontrado")
+    snap_antes = historial.snapshot(pago)
+    historial.registrar(
+        db, user,
+        entidad="pagos",
+        entidad_id=pago.id,
+        accion=models.AccionTipo.delete,
+        descripcion=f"Eliminó pago #{pago.id} ({pago.periodo or 'sin periodo'})",
+        antes=snap_antes,
+        despues=None,
+    )
     db.delete(pago)
     db.commit()
     return {"ok": True}

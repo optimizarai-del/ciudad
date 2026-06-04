@@ -217,3 +217,33 @@ class RefaccionOut(RefaccionBase):
 
     class Config:
         from_attributes = True
+
+
+# ---------- Historial de acciones ----------
+class AccionHistorialOut(BaseModel):
+    id: int
+    created_at: datetime
+    user_id: Optional[int] = None
+    user_nombre: Optional[str] = None
+    entidad: str
+    entidad_id: Optional[int] = None
+    accion: str
+    descripcion: str
+    revertible: bool
+    revertida: bool
+    revertida_at: Optional[datetime] = None
+    revertida_by_id: Optional[int] = None
+    revertida_motivo: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AccionHistorialDetalle(AccionHistorialOut):
+    """Igual que AccionHistorialOut pero incluye los snapshots completos."""
+    snapshot_antes: Optional[dict] = None
+    snapshot_despues: Optional[dict] = None
+
+
+class RevertirAccionIn(BaseModel):
+    motivo: Optional[str] = None
