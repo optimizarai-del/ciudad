@@ -342,8 +342,78 @@ class Contrato(Base):
     archivo_mime = Column(String, nullable=True)
     archivo_subido_at = Column(DateTime, nullable=True)
 
+    garantes = relationship(
+        "Garante",
+        back_populates="contrato",
+        cascade="all, delete-orphan",
+        order_by="Garante.id",
+    )
+
+    @property
+    def garantes_lista(self) -> list[dict]:
+        """Lista de garantes con datos planos, lista para serializar.
+
+        Property (no método) para que pydantic con from_attributes=True la
+        capture automáticamente. Defensiva: si la tabla `garantes` aún no
+        existe (deploy a medio aplicar la migración) o el lazy-load falla,
+        devuelve [] sin romper la response del contrato.
+        """
+        try:
+            out = []
+            for g in (self.garantes or []):
+                out.append({
+                    "id":             g.id,
+                    "nombre":         g.nombre,
+                    "apellido":       g.apellido,
+                    "razon_social":   g.razon_social,
+                    "documento":      g.documento,
+                    "tipo_documento": g.tipo_documento,
+                    "nacionalidad":   g.nacionalidad,
+                    "domicilio":      g.domicilio,
+                    "telefono":       g.telefono,
+                    "email":          g.email,
+                    "notas":          g.notas,
+                })
+            return out
+        except Exception as e:
+            print(f"[Contrato.garantes_lista] {type(e).__name__}: {e}")
+            return []
+
     pagos = relationship("Pago", back_populates="contrato", cascade="all, delete")
     ajustes = relationship("AjusteContrato", back_populates="contrato", cascade="all, delete")
+
+
+class Garante(Base):
+    """Garante / fiador / codeudor de un contrato.
+
+    A diferencia de propietarios e inquilinos (que son `Cliente`), los garantes
+    se guardan en su propia tabla y NO aparecen en los listados de Clientes ni
+    de Propietarios. Sus datos (DNI, domicilio, teléfono) se almacenan inline
+    en la fila — no referencian a `clientes`.
+
+    Cada garante pertenece a UN contrato (se constituye como fiador para ese
+    contrato puntual, tal como figura en la cláusula de garantía).
+    """
+    __tablename__ = "garantes"
+    id = Column(Integer, primary_key=True)
+    contrato_id = Column(Integer, ForeignKey("contratos.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    apellido = Column(String)
+    razon_social = Column(String)
+    documento = Column(String, index=True)
+    tipo_documento = Column(String)        # DNI / CUIT / CUIL / etc.
+    nacionalidad = Column(String)
+    # Domicilio completo del garante tal como figura en el contrato
+    # (ej: "Chaco N° 475, M. Riglos, La Pampa").
+    domicilio = Column(Text)
+    telefono = Column(String)
+    email = Column(String)
+    notas = Column(Text)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    contrato = relationship("Contrato", back_populates="garantes")
 
 
 class AjusteContrato(Base):

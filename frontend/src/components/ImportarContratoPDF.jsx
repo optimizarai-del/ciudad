@@ -242,6 +242,16 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
           <Field label="Expensas $" type="number" value={datos.propiedad?.expensas} onChange={v => setNested('propiedad.expensas', v)} />
           <Field label="Tasa municipal $" type="number" value={datos.propiedad?.tasa_municipal} onChange={v => setNested('propiedad.tasa_municipal', v)} />
         </div>
+        <div className="mt-3">
+          <label className="label">Descripción del inmueble</label>
+          <textarea
+            className="input resize-none"
+            rows={2}
+            placeholder="Habitaciones, m², cocina, ambientes, comodidades…"
+            value={datos.propiedad?.descripcion ?? ''}
+            onChange={e => setNested('propiedad.descripcion', e.target.value)}
+          />
+        </div>
       </Seccion>
 
       {/* Contrato */}
@@ -665,7 +675,7 @@ function CoFirmantesSection({ datos, setNested }) {
   const agregar = () => setNested('co_firmantes', [
     ...lista,
     { nombre: '', apellido: '', documento: null, tipo_documento: 'DNI',
-      nacionalidad: null, email: null, telefono: null },
+      nacionalidad: null, domicilio: null, email: null, telefono: null },
   ])
 
   if (lista.length === 0) {
@@ -729,6 +739,12 @@ function CoFirmantesSection({ datos, setNested }) {
                   onChange={e => updateAt(idx, 'tipo_documento', e.target.value)}>
                   {['DNI','CUIT','CUIL','Pasaporte','LE','LC','Otro'].map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="label">Domicilio</label>
+                <input className="input" value={p.domicilio || ''}
+                  placeholder="Chaco N° 475, M. Riglos, La Pampa"
+                  onChange={e => updateAt(idx, 'domicilio', e.target.value)} />
               </div>
               <div>
                 <label className="label">Email</label>

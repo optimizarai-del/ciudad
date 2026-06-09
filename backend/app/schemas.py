@@ -131,6 +131,33 @@ class ContratoInquilinoIn(BaseModel):
     notas: Optional[str] = None
 
 
+class GaranteIn(BaseModel):
+    """Datos de un garante/fiador del contrato. Se guardan inline en la tabla
+    `garantes` — no se crean Clientes. `id` viene seteado al editar (garante
+    ya existente), None al crear uno nuevo."""
+    id: Optional[int] = None
+    # nombre puede venir vacío si se manda razon_social; el router valida que
+    # al menos uno esté presente (devuelve un 400 claro en vez de un 422).
+    nombre: Optional[str] = None
+    apellido: Optional[str] = None
+    razon_social: Optional[str] = None
+    documento: Optional[str] = None
+    tipo_documento: Optional[str] = None
+    nacionalidad: Optional[str] = None
+    domicilio: Optional[str] = None
+    telefono: Optional[str] = None
+    email: Optional[str] = None
+    notas: Optional[str] = None
+
+
+class GaranteOut(GaranteIn):
+    id: int
+    nombre: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class ContratoBase(BaseModel):
     codigo: Optional[str] = None
     tipo: str
@@ -155,6 +182,9 @@ class ContratoCreate(ContratoBase):
     # Lista opcional de inquilinos firmantes. Si viene, reemplaza el
     # `inquilino_id` single como fuente de verdad.
     inquilinos: Optional[List[ContratoInquilinoIn]] = None
+    # Lista opcional de garantes/fiadores. Si viene (incluso vacía en un PATCH),
+    # reemplaza el set completo de garantes del contrato.
+    garantes: Optional[List[GaranteIn]] = None
 
 
 class ContratoOut(ContratoBase):
@@ -167,6 +197,10 @@ class ContratoOut(ContratoBase):
     # Cada item: {id, cliente_id, nombre, apellido, documento, email,
     #             es_principal, rol}
     inquilinos_lista: Optional[List[dict]] = None
+    # Lista completa de garantes — siempre presente en respuestas (derivada de
+    # la relación Contrato.garantes). Cada item: {id, nombre, apellido,
+    # documento, tipo_documento, nacionalidad, domicilio, telefono, email}.
+    garantes_lista: Optional[List[dict]] = None
 
     class Config:
         from_attributes = True

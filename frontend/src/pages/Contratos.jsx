@@ -442,6 +442,32 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
   const [creando, setCreando] = useState(null)  // 'propiedad' | 'propietario' | 'inquilino' | null
   const set = k => e => setForm({ ...form, [k]: e.target.value })
 
+  // Garantes del contrato (entidad propia — se guardan inline, no son Clientes).
+  // Se inicializan desde garantes_lista al editar.
+  const [garantes, setGarantes] = useState(
+    Array.isArray(initial?.garantes_lista) ? initial.garantes_lista.map(g => ({ ...g })) : []
+  )
+
+  // Descripción del inmueble — pertenece a la PROPIEDAD, no al contrato.
+  // Se carga desde la propiedad seleccionada y, si se edita, se hace PATCH a
+  // /api/propiedades/{id} al guardar el contrato.
+  const _propById = (id) => propsLocal.find(p => String(p.id) === String(id))
+  const [descInmueble, setDescInmueble] = useState(
+    _propById(initial?.propiedad_id)?.descripcion || ''
+  )
+  const [descInmuebleOrig, setDescInmuebleOrig] = useState(
+    _propById(initial?.propiedad_id)?.descripcion || ''
+  )
+
+  // Cuando cambia la propiedad seleccionada, cargar SU descripción.
+  const onChangePropiedad = (e) => {
+    const id = e.target.value
+    setForm(f => ({ ...f, propiedad_id: id }))
+    const desc = _propById(id)?.descripcion || ''
+    setDescInmueble(desc)
+    setDescInmuebleOrig(desc)
+  }
+
   useEffect(() => { setPropsLocal(propiedades) }, [propiedades])
   useEffect(() => { setClientesLocal(clientes) }, [clientes])
 
@@ -488,10 +514,48 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
     }
     delete payload.inquilinos_ids
     delete payload.inquilinos_lista  // solo lectura
+    delete payload.garantes_lista    // solo lectura
+
+    // Garantes: mandar la lista tal cual (sin filas vacías). Una lista vacía
+    // en un PATCH borra todos los garantes del contrato.
+    payload.garantes = (garantes || [])
+      .filter(g => (g.nombre || '').trim() || (g.razon_social || '').trim())
+      .map(g => ({
+        id: g.id || undefined,
+        nombre: (g.nombre || '').trim(),
+        apellido: g.apellido || null,
+        razon_social: g.razon_social || null,
+        documento: g.documento || null,
+        tipo_documento: g.tipo_documento || null,
+        nacionalidad: g.nacionalidad || null,
+        domicilio: g.domicilio || null,
+        telefono: g.telefono || null,
+        email: g.email || null,
+      }))
 
     try {
-      if (initial) await api.patch(`/api/contratos/${initial.id}`, payload)
-      else await api.post('/api/contratos', payload)
+      let saved
+      if (initial) saved = (await api.patch(`/api/contratos/${initial.id}`, payload)).data
+      else saved = (await api.post('/api/contratos', payload)).data
+
+      // Descripción del inmueble: si cambió respecto a la propiedad, PATCH a
+      // la propiedad (el campo vive en la propiedad, no en el contrato).
+      // OJO: el endpoint valida con PropiedadCreate, que exige `direccion` y
+      // `tipo`; hay que reenviarlos o devuelve 422. Con exclude_unset, sólo
+      // estos campos se aplican (no pisa el resto de la propiedad).
+      const propId = saved?.propiedad_id || payload.propiedad_id
+      if (propId && descInmueble !== descInmuebleOrig) {
+        const prop = _propById(propId)
+        try {
+          await api.patch(`/api/propiedades/${propId}`, {
+            direccion: prop?.direccion,
+            tipo: prop?.tipo || 'departamento',
+            descripcion: descInmueble || null,
+          })
+        } catch (e) {
+          console.warn('No se pudo actualizar la descripción del inmueble:', e)
+        }
+      }
       onSaved()
     } catch (e) {
       setErr(e.response?.data?.detail || 'Error al guardar.')
@@ -524,11 +588,28 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
                 + Nueva propiedad
               </button>
             </div>
-            <select className="input" value={form.propiedad_id || ''} onChange={set('propiedad_id')} required>
+            <select className="input" value={form.propiedad_id || ''} onChange={onChangePropiedad} required>
               <option value="">Seleccionar propiedad…</option>
               {propsLocal.map(p => <option key={p.id} value={p.id}>{p.direccion}</option>)}
             </select>
           </div>
+
+          {/* Descripción del inmueble — se guarda en la PROPIEDAD seleccionada */}
+          {form.propiedad_id && (
+            <div>
+              <label className="label">Descripción del inmueble</label>
+              <textarea
+                className="input resize-none"
+                rows={3}
+                placeholder="Cantidad de habitaciones, m², si tiene cocina, ambientes, comodidades, estado…"
+                value={descInmueble}
+                onChange={e => setDescInmueble(e.target.value)}
+              />
+              <p className="text-[11px] text-muted mt-1">
+                Se guarda en la propiedad. Si reutilizás esta propiedad en otro contrato, la descripción queda asociada y podés actualizarla acá.
+              </p>
+            </div>
+          )}
 
           <InquilinosMulti
             inquilinos_ids={form.inquilinos_ids}
@@ -611,6 +692,9 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
             </div>
           </div>
 
+          <div className="divider !my-1" />
+          <GarantesSection garantes={garantes} onChange={setGarantes} />
+
           <div>
             <label className="label">Notas</label>
             <textarea className="input resize-none" rows={2} value={form.notas || ''} onChange={set('notas')} />
@@ -632,6 +716,8 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
           onSaved={p => {
             setPropsLocal(prev => [p, ...prev])
             setForm(f => ({ ...f, propiedad_id: p.id }))
+            setDescInmueble(p.descripcion || '')
+            setDescInmuebleOrig(p.descripcion || '')
             setCreando(null)
           }}
         />
@@ -766,6 +852,7 @@ function ModalQuickPropiedad({ onClose, onSaved }) {
     direccion: '', tipo: 'departamento', ciudad: '', provincia: '',
     modalidad: 'alquiler', estado: 'disponible',
     precio_alquiler: '', expensas: '',
+    ambientes: '', superficie_m2: '', descripcion: '',
   })
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
@@ -773,9 +860,10 @@ function ModalQuickPropiedad({ onClose, onSaved }) {
   const submit = async e => {
     e.preventDefault(); setLoading(true); setErr('')
     const payload = { ...form }
-    ;['precio_alquiler','expensas'].forEach(k => {
+    ;['precio_alquiler','expensas','ambientes','superficie_m2'].forEach(k => {
       payload[k] = payload[k] === '' ? null : Number(payload[k]) || null
     })
+    if (!payload.descripcion) payload.descripcion = null
     try {
       const r = await api.post('/api/propiedades', payload)
       onSaved(r.data)
@@ -818,12 +906,129 @@ function ModalQuickPropiedad({ onClose, onSaved }) {
               <input className="input" type="number" value={form.expensas} onChange={set('expensas')} />
             </div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label">Ambientes</label>
+              <input className="input" type="number" value={form.ambientes} onChange={set('ambientes')} />
+            </div>
+            <div>
+              <label className="label">Superficie m²</label>
+              <input className="input" type="number" value={form.superficie_m2} onChange={set('superficie_m2')} />
+            </div>
+          </div>
+          <div>
+            <label className="label">Descripción del inmueble</label>
+            <textarea className="input resize-none" rows={2}
+              placeholder="Habitaciones, cocina, comodidades, estado…"
+              value={form.descripcion} onChange={set('descripcion')} />
+          </div>
           {err && <p className="text-[12px] text-danger">{err}</p>}
           <div className="flex gap-3 pt-2">
             <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
             <button className="btn-primary flex-1" disabled={loading}>{loading ? 'Creando…' : 'Crear'}</button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+
+/**
+ * Sección de garantes/fiadores del contrato.
+ *
+ * Los garantes se guardan en su propia tabla (`garantes`), vinculados al
+ * contrato. NO son Clientes — por eso no aparecen en Propietarios/Clientes.
+ * Campos según el contrato típico: nombre, apellido, DNI, tipo doc,
+ * nacionalidad, domicilio y teléfono.
+ */
+function GarantesSection({ garantes, onChange }) {
+  const lista = garantes || []
+  const updateAt = (idx, field, value) =>
+    onChange(lista.map((g, i) => i === idx ? { ...g, [field]: value } : g))
+  const eliminar = (idx) => onChange(lista.filter((_, i) => i !== idx))
+  const agregar = () => onChange([
+    ...lista,
+    { nombre: '', apellido: '', documento: '', tipo_documento: 'DNI',
+      nacionalidad: '', domicilio: '', telefono: '', email: '' },
+  ])
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <label className="label !mb-0">
+          Garantes / Fiadores{lista.length > 0 ? ` (${lista.length})` : ''}
+        </label>
+        <button type="button" onClick={agregar}
+          className="text-[11px] text-primary dark:text-white hover:underline font-medium">
+          + Agregar garante
+        </button>
+      </div>
+
+      {lista.length === 0 && (
+        <p className="text-[11px] text-muted italic">
+          Sin garantes. Agregá uno si el contrato tiene fiadores. Se guardan
+          aparte y no aparecen en la lista de Clientes ni de Propietarios.
+        </p>
+      )}
+
+      <div className="space-y-3">
+        {lista.map((g, idx) => (
+          <div key={idx}
+            className="rounded-2xl bg-neutral-50 dark:bg-[#141414] border border-border dark:border-[#2A2A2A] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[12px] font-semibold">Garante #{idx + 1}</p>
+              <button type="button" onClick={() => eliminar(idx)}
+                className="text-[11px] text-danger hover:underline">Quitar</button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Nombre *</label>
+                <input className="input" value={g.nombre || ''}
+                  onChange={e => updateAt(idx, 'nombre', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Apellido</label>
+                <input className="input" value={g.apellido || ''}
+                  onChange={e => updateAt(idx, 'apellido', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Documento</label>
+                <input className="input" value={g.documento || ''}
+                  placeholder="29.755.136"
+                  onChange={e => updateAt(idx, 'documento', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Tipo doc.</label>
+                <select className="input" value={g.tipo_documento || 'DNI'}
+                  onChange={e => updateAt(idx, 'tipo_documento', e.target.value)}>
+                  {['DNI','CUIT','CUIL','Pasaporte','LE','LC','Otro'].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Nacionalidad</label>
+                <input className="input" value={g.nacionalidad || ''}
+                  onChange={e => updateAt(idx, 'nacionalidad', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Teléfono</label>
+                <input className="input" value={g.telefono || ''}
+                  onChange={e => updateAt(idx, 'telefono', e.target.value)} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="label">Domicilio</label>
+                <input className="input" value={g.domicilio || ''}
+                  placeholder="Chaco N° 475, M. Riglos, La Pampa"
+                  onChange={e => updateAt(idx, 'domicilio', e.target.value)} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="label">Email</label>
+                <input className="input" type="email" value={g.email || ''}
+                  onChange={e => updateAt(idx, 'email', e.target.value)} />
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )

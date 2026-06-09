@@ -342,6 +342,20 @@ def _migrar_storage_path():
             try: db.rollback()
             except Exception: pass
 
+        # garantes: tabla propia para fiadores/garantes de cada contrato.
+        # Se guardan inline (no son Clientes) para que NO aparezcan en los
+        # listados de Clientes/Propietarios. Idempotente.
+        try:
+            ins_fresh = inspect(engine)
+            if "garantes" not in ins_fresh.get_table_names(schema=schema):
+                from app.models import Garante
+                Garante.__table__.create(engine, checkfirst=True)
+                print("[migrar] creada tabla garantes")
+        except Exception as e:
+            print(f"[migrar] crear garantes: {e}")
+            try: db.rollback()
+            except Exception: pass
+
         # pagos: monto_pagado_transferencia (parte abonada por transferencia)
         cols_pagos = {c["name"] for c in ins.get_columns("pagos", schema=schema)}
         if "monto_pagado_transferencia" not in cols_pagos:

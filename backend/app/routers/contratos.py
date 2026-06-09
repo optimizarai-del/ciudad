@@ -64,9 +64,10 @@ def listar(
         q = q.options(
             selectinload(models.Contrato.inquilinos)
                 .joinedload(models.ContratoInquilino.cliente),
+            selectinload(models.Contrato.garantes),
         )
     except Exception as e:
-        print(f"[contratos.listar] selectinload inquilinos falló (fallback sin eager): {e}")
+        print(f"[contratos.listar] selectinload inquilinos/garantes falló (fallback sin eager): {e}")
 
     if not incluir_archivados:
         q = q.filter(models.Contrato.archivado.is_(False))
@@ -180,12 +181,54 @@ def _sync_inquilinos(db: Session, contrato: models.Contrato,
     db.flush()
 
 
+def _sync_garantes(db: Session, contrato: models.Contrato,
+                   garantes_data: list[dict], is_demo: bool) -> None:
+    """Sincroniza las filas `garantes` del contrato a partir de la lista que
+    mandó el frontend. Los garantes se guardan inline (no son Clientes) y
+    pertenecen a este contrato.
+
+    Borra todas las filas previas del contrato y las recrea — pensado para
+    POST (crear) y PATCH (editar) por igual. Usa SAVEPOINT para que un fallo
+    (ej: tabla `garantes` aún no migrada) no rompa la transacción padre.
+    """
+    try:
+        with db.begin_nested():
+            for g in list(contrato.garantes or []):
+                db.delete(g)
+    except Exception as e:
+        print(f"[_sync_garantes] limpiar previos falló (savepoint revertido): {e}")
+
+    if not garantes_data:
+        return
+
+    for idx, item in enumerate(garantes_data):
+        nombre = (item.get("nombre") or item.get("razon_social") or "").strip()
+        if not nombre:
+            raise HTTPException(400, f"Garante #{idx + 1}: falta nombre o razón social.")
+        db.add(models.Garante(
+            contrato_id=contrato.id,
+            nombre=nombre,
+            apellido=item.get("apellido") or None,
+            razon_social=item.get("razon_social") or None,
+            documento=item.get("documento") or None,
+            tipo_documento=item.get("tipo_documento") or None,
+            nacionalidad=item.get("nacionalidad") or None,
+            domicilio=item.get("domicilio") or None,
+            telefono=item.get("telefono") or None,
+            email=item.get("email") or None,
+            notas=item.get("notas") or None,
+            is_demo=is_demo,
+        ))
+    db.flush()
+
+
 @router.post("/", response_model=schemas.ContratoOut)
 def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     # Mensajes de error claros para los validaciones más comunes en vez de
     # un 500 genérico que aparezca como toast rojo sin información.
     payload = data.model_dump()
     inquilinos_data = payload.pop("inquilinos", None)
+    garantes_data = payload.pop("garantes", None)
 
     # Validar propiedad
     if not payload.get("propiedad_id"):
@@ -231,8 +274,9 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
             raise HTTPException(409, f"Ya existe un contrato con el código '{codigo}'.")
     payload["codigo"] = codigo
 
-    # Sacar inquilinos_lista (no es columna del modelo)
+    # Sacar listas de solo-lectura (no son columnas del modelo)
     payload.pop("inquilinos_lista", None)
+    payload.pop("garantes_lista", None)
 
     try:
         obj = models.Contrato(**payload)
@@ -254,6 +298,15 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
             raise
         except Exception as e:
             print(f"[contratos.crear] sync inquilinos falló (continuamos): {e}")
+
+        # Sincronizar garantes (tabla propia, inline). Defensivo igual que arriba.
+        try:
+            if garantes_data:
+                _sync_garantes(db, obj, garantes_data, is_demo)
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[contratos.crear] sync garantes falló (continuamos): {e}")
 
         # Generar pagos pendientes futuros para que el contrato aparezca
         # automáticamente en Cobros y Liquidaciones.
@@ -358,7 +411,9 @@ def editar(id: int, data: schemas.ContratoCreate, db: Session = Depends(get_db),
 
     payload = data.model_dump(exclude_unset=True)
     inquilinos_data = payload.pop("inquilinos", None)
+    garantes_data = payload.pop("garantes", None)
     payload.pop("inquilinos_lista", None)  # solo lectura
+    payload.pop("garantes_lista", None)    # solo lectura
 
     for k, v in payload.items():
         setattr(obj, k, v)
@@ -371,6 +426,16 @@ def editar(id: int, data: schemas.ContratoCreate, db: Session = Depends(get_db),
             db.rollback(); raise
         except Exception as e:
             print(f"[contratos.editar] sync inquilinos: {e}")
+
+    # Si vino la lista de garantes en el PATCH, la sincronizamos (lista vacía
+    # = borrar todos los garantes del contrato).
+    if garantes_data is not None:
+        try:
+            _sync_garantes(db, obj, garantes_data, workspace_flag(user))
+        except HTTPException:
+            db.rollback(); raise
+        except Exception as e:
+            print(f"[contratos.editar] sync garantes: {e}")
 
     historial.registrar(
         db, user,

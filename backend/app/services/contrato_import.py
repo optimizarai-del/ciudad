@@ -89,8 +89,18 @@ Esquema de respuesta:
   ],
   "co_firmantes": [
     // Garantes / codeudores / fiadores que firman el contrato.
-    // Mismo formato que inquilino. Lista vacía si no hay.
-    { ... }
+    // Lista vacía si no hay. Cada item:
+    {
+      "nombre": <string>,
+      "apellido": <string> | null,
+      "razon_social": <string> | null,
+      "documento": <string> | null,
+      "tipo_documento": "DNI" | "CUIT" | "CUIL" | "Pasaporte" | "LE" | "LC" | "Otro" | null,
+      "nacionalidad": <string> | null,
+      "domicilio": <string completo: calle, número, localidad, provincia> | null,
+      "telefono": <string> | null,
+      "email": <string> | null
+    }
   ],
   "propiedad": {
     "direccion": <string>,
@@ -148,9 +158,17 @@ Reglas:
   Si firma uno solo, dejá `inquilinos: []` y completá `inquilino` arriba.
   NO incluir acá a garantes/fiadores — esos van en `co_firmantes`.
 - co_firmantes: garantes, fiadores y codeudores van acá. NO son inquilinos
-  principales pero hay que cargarlos como Clientes para tener su contacto.
+  principales. Se guardan como GARANTES del contrato (entidad propia), por eso
+  incluí su `domicilio` completo (calle, número, localidad, provincia) tal como
+  figura en la cláusula de garantía/fianza.
   Si la cláusula dice "los locatarios serán solidariamente responsables"
   pero el firmante es una sola persona, NO inventes co-firmantes.
+- propiedad.descripcion: redactá una descripción del inmueble lo más completa
+  posible a partir de las comodidades que liste el contrato: cantidad de
+  dormitorios/habitaciones, ambientes (estar, comedor, cocina —separada o no—,
+  baño, lavadero, patio, balcón, cochera), superficie si figura, y si cuenta o
+  no con cocina/instalaciones relevantes. NO repitas acá el inventario de
+  muebles (eso va en `inventario`).
 - inventario: copialo casi completo si está, listando muebles/electrodomésticos.
 - policies: en contratos típicos de vivienda, expensas y servicios son del
   inquilino, e impuesto inmobiliario es del propietario. No asumas si no
@@ -492,39 +510,16 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
     if inquilino:
         resumen["inquilino"] = {"id": inquilino.id, "reutilizado": inquilinos_creados[0][1]}
 
-    # 2bis. Co-firmantes (garantes, codeudores, fiadores).
-    # Se crean como Clientes con rol=inquilino y notas indicando que son
-    # garantes — para tener su contacto cargado en la base. Si querés
-    # vincularlos formalmente al contrato en una tabla pivote, agregalo
-    # como mejora futura (por ahora alcanza con que estén cargados).
-    cofirmantes_data = datos.get("co_firmantes") or []
-    cofirmantes_creados = []
-    for cf in cofirmantes_data:
-        if not (cf.get("nombre") or cf.get("razon_social")):
-            continue
-        ex = _buscar_cliente_existente(db, cf, "inquilino", is_demo)
-        if ex:
-            cofirmantes_creados.append({"id": ex.id, "reutilizado": True,
-                                         "nombre": (ex.razon_social or
-                                                    f"{ex.nombre} {ex.apellido or ''}".strip())})
-        else:
-            nuevo = models.Cliente(
-                nombre=cf.get("nombre") or "Garante",
-                apellido=cf.get("apellido"),
-                razon_social=cf.get("razon_social"),
-                documento=cf.get("documento"),
-                tipo_documento=cf.get("tipo_documento"),
-                nacionalidad=cf.get("nacionalidad"),
-                email=cf.get("email"),
-                telefono=cf.get("telefono"),
-                rol=models.ClienteRol.inquilino,
-                notas="[IMPORTADO desde contrato — GARANTE / CO-FIRMANTE]",
-                is_demo=is_demo,
-            )
-            db.add(nuevo); db.flush()
-            cofirmantes_creados.append({"id": nuevo.id, "reutilizado": False,
-                                         "nombre": f"{nuevo.nombre} {nuevo.apellido or ''}".strip()})
-    resumen["co_firmantes"] = cofirmantes_creados
+    # 2bis. Co-firmantes (garantes, fiadores, codeudores).
+    # Se guardan como GARANTES del contrato (entidad propia, tabla `garantes`)
+    # y NO como Clientes — así no contaminan los listados de Clientes ni de
+    # Propietarios. Como el contrato todavía no existe, sólo recolectamos acá
+    # los datos válidos; las filas Garante se crean en la sección 4bis, una vez
+    # que el contrato tiene id.
+    cofirmantes_data = [
+        cf for cf in (datos.get("co_firmantes") or [])
+        if (cf.get("nombre") or cf.get("razon_social"))
+    ]
 
     # 3. Propiedad
     propd = datos.get("propiedad") or {}
@@ -676,6 +671,41 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
                 ))
     except Exception as e:
         print(f"[contrato_import] filas pivote inquilinos falló (savepoint revertido): {e}")
+
+    # 4ter. Garantes — una fila `Garante` por cada co-firmante detectado,
+    # vinculada a este contrato. SAVEPOINT: si la tabla `garantes` aún no
+    # existe en este deploy, sólo revertimos este sub-bloque.
+    garantes_creados = []
+    try:
+        with db.begin_nested():
+            for cf in cofirmantes_data:
+                g = models.Garante(
+                    contrato_id=contrato.id,
+                    nombre=cf.get("nombre") or (cf.get("razon_social") or "Garante"),
+                    apellido=cf.get("apellido"),
+                    razon_social=cf.get("razon_social"),
+                    documento=cf.get("documento"),
+                    tipo_documento=cf.get("tipo_documento"),
+                    nacionalidad=cf.get("nacionalidad"),
+                    domicilio=cf.get("domicilio"),
+                    telefono=cf.get("telefono"),
+                    email=cf.get("email"),
+                    notas="[IMPORTADO desde contrato]",
+                    is_demo=is_demo,
+                )
+                db.add(g); db.flush()
+                garantes_creados.append({
+                    "id": g.id,
+                    "nombre": (g.razon_social or f"{g.nombre} {g.apellido or ''}".strip()),
+                    "reutilizado": False,
+                })
+    except Exception as e:
+        print(f"[contrato_import] crear garantes falló (savepoint revertido): {e}")
+        garantes_creados = []
+    # `co_firmantes` se mantiene en el resumen por retrocompat con el frontend
+    # (DoneStep los muestra como "Garante N").
+    resumen["co_firmantes"] = garantes_creados
+    resumen["garantes"] = garantes_creados
 
     # 5. Pagos futuros — siempre que el contrato esté vigente y haya fechas.
     # Logueo explícito para diagnosticar por qué no se generan si el usuario
