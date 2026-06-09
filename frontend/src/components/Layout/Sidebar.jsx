@@ -2,7 +2,8 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, FileText, Users, Calculator,
   BarChart2, Bot, TrendingUp, Settings, DollarSign,
-  Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History
+  Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History,
+  ClipboardList, Handshake, Network, LayoutGrid
 } from 'lucide-react'
 import { useRole } from '../../context/RoleContext'
 
@@ -74,12 +75,17 @@ export default function Sidebar({ onNavigate }) {
         </Section>
       )}
 
-      {/* Ventas section */}
+      {/* Ventas — CRM comercial (módulo aislado Fase 1) */}
       {hasVentas && (
         <Section label="Ventas">
-          <NavItem to="/ventas/dashboard"    icon={TrendingUp}  label="Dashboard" />
-          <NavItem to="/ventas/propiedades"  icon={Building2}   label="Propiedades" />
-          <NavItem to="/ventas/clientes"     icon={Users}       label="Clientes Ventas" />
+          <NavItem to="/ventas-crm/dashboard"    icon={TrendingUp}   label="Dashboard" />
+          <NavItem to="/ventas-crm/crm"          icon={LayoutGrid}   label="CRM de Ventas" />
+          <NavItem to="/ventas-crm/pedidos"      icon={ClipboardList} label="Pedidos" />
+          <NavItem to="/ventas-crm/clientes"     icon={Users}        label="Clientes" />
+          <NavItem to="/ventas-crm/propiedades"  icon={Building2}    label="Propiedades" />
+          <NavItem to="/ventas-crm/operaciones"  icon={Handshake}    label="Operaciones" />
+          <NavItem to="/ventas-crm/contactos"    icon={Network}      label="Contactos" />
+          <NavItem to="/ventas-crm/configuracion" icon={Settings}    label="Configuración" />
         </Section>
       )}
 

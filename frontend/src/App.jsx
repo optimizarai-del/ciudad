@@ -25,6 +25,14 @@ import Recordatorios      from './pages/Recordatorios'
 import ActualizarTasas    from './pages/ActualizarTasas'
 import Refacciones        from './pages/Refacciones'
 import ClientesVentas     from './pages/ClientesVentas'
+import VentasDashboardCRM from './pages/ventas/DashboardCRM'
+import VentasCRM          from './pages/ventas/CRMVentas'
+import VentasPedidos      from './pages/ventas/Pedidos'
+import VentasConfig       from './pages/ventas/Configuracion'
+import VentasClientes     from './pages/ventas/Clientes'
+import VentasPropiedades  from './pages/ventas/Propiedades'
+import VentasOperaciones  from './pages/ventas/Operaciones'
+import VentasContactos    from './pages/ventas/Contactos'
 import VersionesLocal     from './pages/VersionesLocal'
 import HistorialAcciones  from './pages/HistorialAcciones'
 
@@ -94,6 +102,32 @@ export default function App() {
         } />
         <Route path="/ventas/clientes" element={
           <ProtectedRoute requireVentas><ClientesVentas /></ProtectedRoute>
+        } />
+
+        {/* Ventas CRM — módulo aislado Fase 1 (tablas ventas_*) */}
+        <Route path="/ventas-crm/dashboard" element={
+          <ProtectedRoute requireVentas><VentasDashboardCRM /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/crm" element={
+          <ProtectedRoute requireVentas><VentasCRM /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/pedidos" element={
+          <ProtectedRoute requireVentas><VentasPedidos /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/configuracion" element={
+          <ProtectedRoute requireVentas><VentasConfig /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/clientes" element={
+          <ProtectedRoute requireVentas><VentasClientes /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/propiedades" element={
+          <ProtectedRoute requireVentas><VentasPropiedades /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/operaciones" element={
+          <ProtectedRoute requireVentas><VentasOperaciones /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/contactos" element={
+          <ProtectedRoute requireVentas><VentasContactos /></ProtectedRoute>
         } />
 
         {/* Legacy / shared routes */}

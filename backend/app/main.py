@@ -9,8 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv(override=True)
 
 from app.database import Base, engine
+# Importar models_ventas para que sus tablas ventas_* se registren en el
+# metadata antes del create_all (módulo Ventas aislado — ver plan sección 15).
+from app import models_ventas  # noqa: F401
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
-from app.routers import cobranza, ventas_router, comprobantes
+from app.routers import cobranza, ventas_router, ventas_crm, comprobantes
 from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr, tasas_mensuales, refacciones, versiones
 from app.routers import historial as historial_router
 
@@ -66,6 +69,7 @@ for r in [auth, users, propiedades, clientes, contratos, calculadora, dashboard,
 app.include_router(agente_router.router)
 app.include_router(cobranza.router)
 app.include_router(ventas_router.router)
+app.include_router(ventas_crm.router)
 app.include_router(comprobantes.router)
 app.include_router(liquidaciones.router)
 app.include_router(finanzas.router)
