@@ -594,22 +594,27 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
             </select>
           </div>
 
-          {/* Descripción del inmueble — se guarda en la PROPIEDAD seleccionada */}
-          {form.propiedad_id && (
-            <div>
-              <label className="label">Descripción del inmueble</label>
-              <textarea
-                className="input resize-none"
-                rows={3}
-                placeholder="Cantidad de habitaciones, m², si tiene cocina, ambientes, comodidades, estado…"
-                value={descInmueble}
-                onChange={e => setDescInmueble(e.target.value)}
-              />
-              <p className="text-[11px] text-muted mt-1">
-                Se guarda en la propiedad. Si reutilizás esta propiedad en otro contrato, la descripción queda asociada y podés actualizarla acá.
-              </p>
-            </div>
-          )}
+          {/* Descripción del inmueble — se guarda en la PROPIEDAD seleccionada.
+              Siempre visible en el menú de creación; se habilita al elegir
+              o crear una propiedad (el texto vive en la propiedad). */}
+          <div>
+            <label className="label">Descripción del inmueble</label>
+            <textarea
+              className="input resize-none"
+              rows={3}
+              disabled={!form.propiedad_id}
+              placeholder={form.propiedad_id
+                ? 'Cantidad de habitaciones, metros cuadrados, si cuenta o no con cocina, ambientes, comodidades, estado y todo detalle del inmueble…'
+                : 'Seleccioná o creá una propiedad arriba para describir el inmueble.'}
+              value={descInmueble}
+              onChange={e => setDescInmueble(e.target.value)}
+            />
+            <p className="text-[11px] text-muted mt-1">
+              {form.propiedad_id
+                ? 'Toda la información del inmueble: habitaciones, m², cocina, ambientes, etc. Se guarda en la propiedad y queda asociada para futuros contratos.'
+                : 'El detalle del inmueble se asocia a la propiedad seleccionada.'}
+            </p>
+          </div>
 
           <InquilinosMulti
             inquilinos_ids={form.inquilinos_ids}
