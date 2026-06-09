@@ -576,8 +576,24 @@ def _persona_dict(c):
         "apellido": c.apellido,
         "razon_social": c.razon_social,
         "documento": c.documento,
+        "tipo_documento": getattr(c, "tipo_documento", None),
+        "nacionalidad": getattr(c, "nacionalidad", None),
         "email": c.email,
         "telefono": c.telefono,
+    }
+
+
+def _garante_dict(g):
+    return {
+        "nombre": g.nombre,
+        "apellido": g.apellido,
+        "razon_social": g.razon_social,
+        "documento": g.documento,
+        "tipo_documento": g.tipo_documento,
+        "nacionalidad": g.nacionalidad,
+        "domicilio": g.domicilio,
+        "telefono": g.telefono,
+        "email": g.email,
     }
 
 
@@ -595,6 +611,8 @@ def docx_contrato(id: int, db: Session = Depends(get_db), user=Depends(get_curre
     if prop and prop.propietario_id:
         propietario = db.query(models.Cliente).filter_by(id=prop.propietario_id).first()
 
+    garantes = [_garante_dict(g) for g in (contrato.garantes or [])]
+
     docx_bytes = generar_docx(
         contrato={
             "tipo": contrato.tipo.value if hasattr(contrato.tipo, "value") else contrato.tipo,
@@ -605,15 +623,22 @@ def docx_contrato(id: int, db: Session = Depends(get_db), user=Depends(get_curre
             "indice_ajuste": contrato.indice_ajuste.value if hasattr(contrato.indice_ajuste, "value") else contrato.indice_ajuste,
             "periodicidad_meses": contrato.periodicidad_meses,
             "comision_porc": contrato.comision_porc,
+            "mora_diaria_porc": getattr(contrato, "mora_diaria_porc", None),
+            "dia_inicio_pago": getattr(contrato, "dia_inicio_pago", None),
+            "dia_vencimiento_pago": getattr(contrato, "dia_vencimiento_pago", None),
+            "inventario": getattr(contrato, "inventario", None),
             "notas": contrato.notas,
         },
         propiedad={
             "direccion": prop.direccion if prop else None,
             "ciudad": prop.ciudad if prop else None,
             "provincia": prop.provincia if prop else None,
+            "tipo": (prop.tipo.value if prop and hasattr(prop.tipo, "value") else (prop.tipo if prop else None)),
+            "descripcion": prop.descripcion if prop else None,
         },
         propietario=_persona_dict(propietario),
         inquilino=_persona_dict(inquilino),
+        garantes=garantes,
     )
 
     filename = f"contrato-{contrato.codigo or contrato.id}.docx"
