@@ -36,6 +36,7 @@ desktop.ini
 *.swo
 
 # Secrets — NUNCA subir .env reales. Usar .env.example como referencia.
+backend/.secret_key
 backend/.env
 backend/.env.local
 backend/.env.production

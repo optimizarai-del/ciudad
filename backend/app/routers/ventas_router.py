@@ -24,7 +24,9 @@ def dashboard_ventas(db: Session = Depends(get_db)):
     contratos_venta = db.query(models.Contrato).filter(
         models.Contrato.tipo == models.ContratoTipo.boleto_compraventa
     ).all()
-    cerradas = [c for c in contratos_venta if c.estado == models.ContratoEstado.cerrado]
+    # Nota: el enum ya no tiene 'cerrado'; la migración en main.py convirtió
+    # los registros viejos a 'vencido' (boleto cumplido == venta concretada).
+    cerradas = [c for c in contratos_venta if c.estado == models.ContratoEstado.vencido]
 
     return {
         "total_en_venta": len(propiedades_venta),

@@ -11,6 +11,7 @@ Cobranza:
           intenta enviarlos por email y los guarda en la base.
 """
 import base64
+import logging
 from datetime import date, datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,6 +29,8 @@ from app.services.pdf_comprobantes import (
 from app.services.email_service import enviar_email, smtp_configurado
 from app.services import supabase_storage
 from app.services import historial
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/cobranza", tags=["cobranza"])
 
@@ -116,8 +119,8 @@ def _last_ajuste_info(c: models.Contrato) -> dict | None:
             "monto_nuevo":    float(ultimo.monto_nuevo or 0),
             "indice_usado":   ultimo.indice_usado,
         }
-    except Exception as e:
-        print(f"[_last_ajuste_info] {type(e).__name__}: {e}")
+    except Exception:
+        logger.exception("[_last_ajuste_info] no se pudo leer el último ajuste del contrato %s", getattr(c, "id", "?"))
         return None
 
 
