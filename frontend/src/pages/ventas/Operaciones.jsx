@@ -69,7 +69,10 @@ function OpModal({ clientes, props, onClose, onSaved }) {
   const [err, setErr] = useState(''); const [loading, setLoading] = useState(false)
   const set = k => e => setForm({ ...form, [k]: e.target.value })
   const submit = async e => {
-    e.preventDefault(); setErr(''); setLoading(true)
+    e.preventDefault(); setErr('')
+    if (!form.cliente_id) { setErr('Elegí un cliente.'); return }
+    if (!form.monto_cierre_usd) { setErr('Ingresá el monto de cierre.'); return }
+    setLoading(true)
     const payload = {
       cliente_id: num(form.cliente_id), propiedad_id: num(form.propiedad_id),
       estado: form.estado, monto_cierre_usd: num(form.monto_cierre_usd),

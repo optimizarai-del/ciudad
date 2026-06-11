@@ -422,3 +422,135 @@ class VentasAuditLog(Base):
     accion = Column(SQLEnum(AuditAccion))
     detalle = Column(Text)          # JSON con el diff / payload
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  FASE 2 — Tokko + Telegram + Notificaciones
+# ═══════════════════════════════════════════════════════════════════════
+
+class VentasTokkoConfig(Base):
+    """Config de la integración Tokko (Fase 2). Single-tenant: una fila.
+    `ciudades_json` segmenta el scraping a ciertas ciudades (Mod #7)."""
+    __tablename__ = "ventas_tokko_config"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    api_key = Column(String)              # API key Tokko (cifrar en prod)
+    activo = Column(Boolean, default=False)
+    ciudades_json = Column(Text)          # JSON: ["Santa Rosa", "General Pico"]
+    sync_cada_horas = Column(Integer, default=4)
+    ultima_sync = Column(DateTime)
+    ultima_sync_resultado = Column(Text)  # resumen de la última corrida
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class VentasTelegramLink(Base):
+    """Vinculación vendedor ↔ chat de Telegram (Fase 2). La vinculación se
+    hace con un token one-time generado desde la web (TTL 10 min)."""
+    __tablename__ = "ventas_telegram_links"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"), unique=True, index=True)
+    chat_id = Column(String, index=True)         # null hasta que confirma /start
+    token = Column(String, index=True)           # token one-time
+    token_expira = Column(DateTime)
+    vinculado = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class NotifTipo(str, Enum):
+    match = "match"
+    tarea = "tarea"
+    asignacion = "asignacion"
+    sistema = "sistema"
+
+
+class VentasNotificacion(Base):
+    """Histórico de notificaciones al vendedor (Fase 2/3). Persistido incluso
+    si todavía no tiene Telegram vinculado."""
+    __tablename__ = "ventas_notificaciones"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"), index=True)
+    tipo = Column(SQLEnum(NotifTipo), default=NotifTipo.sistema)
+    titulo = Column(String)
+    cuerpo = Column(Text)
+    payload_json = Column(Text)           # data extra (ids, links)
+    leida = Column(Boolean, default=False)
+    enviada_telegram = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  FASE 3 — Post-venta (tareas) + Motor de match
+# ═══════════════════════════════════════════════════════════════════════
+
+class TareaTipo(str, Enum):
+    seguimiento_postventa = "seguimiento_postventa"
+    llamado = "llamado"
+    visita = "visita"
+    otro = "otro"
+
+
+class TareaEstado(str, Enum):
+    pendiente = "pendiente"
+    hecha = "hecha"
+    vencida = "vencida"
+
+
+class VentasPlantillaSeguimiento(Base):
+    """Plantilla de seguimiento post-venta configurable (Fase 3). Cada fila es
+    un recordatorio a `offset_dias` desde el cierre de la operación."""
+    __tablename__ = "ventas_plantillas_seguimiento"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    nombre = Column(String, nullable=False)
+    offset_dias = Column(Integer, nullable=False)   # 30, 180, 365…
+    activa = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class VentasTarea(Base):
+    """Tarea / recordatorio (Fase 3). Generada por plantillas post-venta o a
+    mano. El cron diario marca las vencidas y notifica."""
+    __tablename__ = "ventas_tareas"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"), index=True)
+    cliente_id = Column(Integer, ForeignKey("ventas_clientes.id"))
+    operacion_id = Column(Integer, ForeignKey("ventas_operaciones.id"))
+
+    tipo = Column(SQLEnum(TareaTipo), default=TareaTipo.seguimiento_postventa)
+    descripcion = Column(String, nullable=False)
+    vencimiento = Column(Date, index=True)
+    estado = Column(SQLEnum(TareaEstado), default=TareaEstado.pendiente, index=True)
+    notificada = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class MatchEstado(str, Enum):
+    pendiente = "pendiente"
+    mostrado = "mostrado"
+    descartado = "descartado"
+
+
+class VentasMatch(Base):
+    """Match pedido ↔ propiedad (Fase 3). Único por (pedido, propiedad)."""
+    __tablename__ = "ventas_matches"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    pedido_id = Column(Integer, ForeignKey("ventas_pedidos.id"), index=True, nullable=False)
+    propiedad_id = Column(Integer, ForeignKey("ventas_propiedades.id"), index=True, nullable=False)
+    vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"), index=True)
+
+    score = Column(Integer, default=0)
+    razones_json = Column(Text)           # JSON: [{"motivo":..,"puntos":..}]
+    estado = Column(SQLEnum(MatchEstado), default=MatchEstado.pendiente, index=True)
+    notificado = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

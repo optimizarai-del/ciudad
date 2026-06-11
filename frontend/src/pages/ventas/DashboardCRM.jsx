@@ -51,7 +51,7 @@ export default function DashboardCRM() {
             Funnel de pedidos
           </p>
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-            {Object.entries(d.pedidos_por_estado).map(([est, n]) => (
+            {Object.entries(d.pedidos_por_estado || {}).map(([est, n]) => (
               <div key={est} className="text-center p-3 rounded-xl bg-neutral-50 dark:bg-[#141414]">
                 <p className="stat-value text-xl">{n}</p>
                 <p className="text-[10px] text-muted mt-0.5">{ESTADO_LABEL[est] || est}</p>

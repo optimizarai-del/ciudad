@@ -330,3 +330,75 @@ class TasacionOut(BaseModel):
     informe_texto: Optional[str] = None
     created_at: datetime
     class Config(_Cfg): ...
+
+
+# ═══════════════ FASE 2/3 ═══════════════
+
+# ── Tareas (Fase 3) ──
+class TareaCreate(BaseModel):
+    cliente_id: Optional[int] = None
+    tipo: str = "otro"
+    descripcion: str
+    vencimiento: Optional[date] = None
+
+
+class TareaOut(BaseModel):
+    id: int
+    vendedor_id: Optional[int] = None
+    cliente_id: Optional[int] = None
+    operacion_id: Optional[int] = None
+    tipo: str
+    descripcion: str
+    vencimiento: Optional[date] = None
+    estado: str
+    created_at: datetime
+    class Config(_Cfg): ...
+
+
+# ── Plantillas de seguimiento (Fase 3) ──
+class PlantillaCreate(BaseModel):
+    nombre: str
+    offset_dias: int
+    activa: bool = True
+
+
+class PlantillaOut(BaseModel):
+    id: int
+    nombre: str
+    offset_dias: int
+    activa: bool
+    class Config(_Cfg): ...
+
+
+# ── Tokko config (Fase 2, Mod #7) ──
+class TokkoConfigIn(BaseModel):
+    api_key: Optional[str] = None
+    activo: Optional[bool] = None
+    ciudades: Optional[List[str]] = None
+    sync_cada_horas: Optional[int] = None
+
+
+class TokkoConfigOut(BaseModel):
+    activo: bool
+    tiene_api_key: bool
+    ciudades: List[str] = []
+    sync_cada_horas: int
+    ultima_sync: Optional[datetime] = None
+    ultima_sync_resultado: Optional[str] = None
+
+
+# ── NLU (Fase 2) ──
+class NLURequest(BaseModel):
+    texto: str
+
+
+# ── Notificaciones (Fase 2/3) ──
+class NotificacionOut(BaseModel):
+    id: int
+    tipo: str
+    titulo: Optional[str] = None
+    cuerpo: Optional[str] = None
+    leida: bool
+    enviada_telegram: bool
+    created_at: datetime
+    class Config(_Cfg): ...

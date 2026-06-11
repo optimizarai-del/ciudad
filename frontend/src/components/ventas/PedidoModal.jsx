@@ -166,7 +166,7 @@ function ClienteResumen({ ficha }) {
           <Sparkles size={11} /> Acciones recomendadas
         </p>
         <ul className="space-y-1">
-          {ficha.recomendaciones.map((r, i) => (
+          {(ficha.recomendaciones || []).map((r, i) => (
             <li key={i} className="text-[13px] flex items-start gap-1.5">
               <span className="text-[#B8893A] mt-0.5">→</span> {r}
             </li>

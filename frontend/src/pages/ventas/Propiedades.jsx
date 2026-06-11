@@ -229,7 +229,8 @@ function TasarModal({ onClose }) {
       setRes(r.data)
     } catch (e) { setErr(e.response?.data?.detail || 'Error.') } finally { setLoading(false) }
   }
-  const comps = res?.comparables_json ? JSON.parse(res.comparables_json) : []
+  let comps = []
+  try { comps = res?.comparables_json ? JSON.parse(res.comparables_json) : [] } catch { comps = [] }
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto" onClick={onClose}>
       <div className="card p-6 sm:p-8 w-full max-w-lg shadow-lift animate-scale-in my-6" onClick={e => e.stopPropagation()}>

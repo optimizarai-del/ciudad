@@ -20,9 +20,11 @@ from app.database import get_db
 from app.security import get_current_user
 from app import models, models_ventas as mv, schemas_ventas as sv
 from app.services.ventas_tasacion import tasar
-from app.services import ventas_geo
+from app.services import ventas_geo, ventas_matching, ventas_tareas
 
 router = APIRouter(prefix="/api/ventas-crm", tags=["ventas-crm"])
+
+_ESTADOS_VINCULO = ("sugerida", "mostrada", "descartada")
 
 
 # ───────────────────── Helpers de vendedor / scoping ─────────────────────
@@ -156,6 +158,20 @@ def eliminar_cliente(cid: int, db: Session = Depends(get_db), user=Depends(get_c
     obj = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).filter_by(id=cid).first()
     if not obj:
         raise HTTPException(404, "Cliente no encontrado")
+    # Limpiar dependientes (FK sin cascade declarado). Los pedidos del cliente
+    # arrastran sus matches/vínculos/ofertas.
+    pedido_ids = [p.id for p in db.query(mv.VentasPedido).filter_by(cliente_id=cid).all()]
+    if pedido_ids:
+        db.query(mv.VentasMatch).filter(mv.VentasMatch.pedido_id.in_(pedido_ids)).delete(synchronize_session=False)
+        db.query(mv.VentasPedidoPropiedad).filter(mv.VentasPedidoPropiedad.pedido_id.in_(pedido_ids)).delete(synchronize_session=False)
+        # Desreferenciar pedido_id en ofertas/operaciones que apuntan a esos
+        # pedidos (antes de borrarlos), si no quedarían colgando en Postgres.
+        db.query(mv.VentasOferta).filter(mv.VentasOferta.pedido_id.in_(pedido_ids)).update({"pedido_id": None}, synchronize_session=False)
+        db.query(mv.VentasOperacion).filter(mv.VentasOperacion.pedido_id.in_(pedido_ids)).update({"pedido_id": None}, synchronize_session=False)
+    db.query(mv.VentasOferta).filter_by(cliente_id=cid).update({"cliente_id": None}, synchronize_session=False)
+    db.query(mv.VentasPedido).filter_by(cliente_id=cid).delete(synchronize_session=False)
+    db.query(mv.VentasTarea).filter_by(cliente_id=cid).update({"cliente_id": None}, synchronize_session=False)
+    db.query(mv.VentasOperacion).filter_by(cliente_id=cid).update({"cliente_id": None}, synchronize_session=False)
     _audit(db, v, "ventas_clientes", cid, mv.AuditAccion.delete)
     db.delete(obj); db.commit()
     return {"ok": True}
@@ -339,6 +355,10 @@ def crear_propiedad(data: sv.PropiedadCreate,
             print(f"[ventas_crm] geocoding propiedad fallback: {e}")
     db.add(obj); db.flush()
     _audit(db, v, "ventas_propiedades", obj.id, mv.AuditAccion.create, data.model_dump())
+    try:
+        ventas_matching.evaluar_propiedad(db, obj)
+    except Exception as e:
+        print(f"[ventas_crm] matching propiedad fallback: {e}")
     db.commit(); db.refresh(obj)
     return obj
 
@@ -357,6 +377,10 @@ def editar_propiedad(pid: int, data: sv.PropiedadCreate,
     for k, val in payload.items():
         setattr(obj, k, val)
     _audit(db, v, "ventas_propiedades", pid, mv.AuditAccion.update, data.model_dump(exclude_unset=True))
+    try:
+        ventas_matching.evaluar_propiedad(db, obj)
+    except Exception as e:
+        print(f"[ventas_crm] matching propiedad fallback: {e}")
     db.commit(); db.refresh(obj)
     return obj
 
@@ -367,6 +391,11 @@ def eliminar_propiedad(pid: int, db: Session = Depends(get_db), user=Depends(get
     obj = db.query(mv.VentasPropiedad).filter_by(id=pid).first()
     if not obj:
         raise HTTPException(404, "Propiedad no encontrada")
+    # Limpiar dependientes (FK sin cascade declarado)
+    db.query(mv.VentasMatch).filter_by(propiedad_id=pid).delete(synchronize_session=False)
+    db.query(mv.VentasPedidoPropiedad).filter_by(propiedad_id=pid).delete(synchronize_session=False)
+    db.query(mv.VentasOferta).filter_by(propiedad_id=pid).delete(synchronize_session=False)
+    db.query(mv.VentasOperacion).filter_by(propiedad_id=pid).update({"propiedad_id": None})
     _audit(db, v, "ventas_propiedades", pid, mv.AuditAccion.delete)
     db.delete(obj); db.commit()
     return {"ok": True}
@@ -396,10 +425,12 @@ def crear_oferta(data: sv.OfertaCreate,
 @router.patch("/ofertas/{oid}", response_model=sv.OfertaOut)
 def cambiar_estado_oferta(oid: int, estado: str = Query(...),
                           db: Session = Depends(get_db), user=Depends(get_current_user)):
-    get_vendedor(db, user)
+    v = get_vendedor(db, user)
     obj = db.query(mv.VentasOferta).filter_by(id=oid).first()
     if not obj:
         raise HTTPException(404, "Oferta no encontrada")
+    if not v.es_admin and obj.vendedor_id != v.id:
+        raise HTTPException(403, "No es tu oferta")
     obj.estado = _enum(mv.OfertaEstado, estado, "estado")
     db.commit(); db.refresh(obj)
     return obj
@@ -434,6 +465,10 @@ def crear_pedido(data: sv.PedidoCreate,
     obj = mv.VentasPedido(**payload, vendedor_id=v.id)
     db.add(obj); db.flush()
     _audit(db, v, "ventas_pedidos", obj.id, mv.AuditAccion.create, data.model_dump())
+    try:
+        ventas_matching.evaluar_pedido(db, obj)
+    except Exception as e:
+        print(f"[ventas_crm] matching pedido fallback: {e}")
     db.commit(); db.refresh(obj)
     return obj
 
@@ -451,6 +486,10 @@ def editar_pedido(pid: int, data: sv.PedidoUpdate,
     if "tipo" in payload: payload["tipo"] = _enum(mv.VPropiedadTipo, payload["tipo"], "tipo")
     for k, val in payload.items():
         setattr(obj, k, val)
+    try:
+        ventas_matching.evaluar_pedido(db, obj)
+    except Exception as e:
+        print(f"[ventas_crm] matching pedido fallback: {e}")
     db.commit(); db.refresh(obj)
     return obj
 
@@ -475,6 +514,12 @@ def eliminar_pedido(pid: int, db: Session = Depends(get_db), user=Depends(get_cu
     obj = _scope(db.query(mv.VentasPedido), mv.VentasPedido, v).filter_by(id=pid).first()
     if not obj:
         raise HTTPException(404, "Pedido no encontrado")
+    # Limpiar dependientes (sin cascade declarado → evitar IntegrityError en Postgres)
+    db.query(mv.VentasMatch).filter_by(pedido_id=pid).delete(synchronize_session=False)
+    db.query(mv.VentasPedidoPropiedad).filter_by(pedido_id=pid).delete(synchronize_session=False)
+    db.query(mv.VentasOferta).filter(mv.VentasOferta.pedido_id == pid).update({"pedido_id": None}, synchronize_session=False)
+    db.query(mv.VentasOperacion).filter(mv.VentasOperacion.pedido_id == pid).update({"pedido_id": None}, synchronize_session=False)
+    _audit(db, v, "ventas_pedidos", pid, mv.AuditAccion.delete)
     db.delete(obj); db.commit()
     return {"ok": True}
 
@@ -536,6 +581,13 @@ def crear_operacion(data: sv.OperacionCreate,
         if cli:
             cli.es_operado = True
 
+    # Post-venta (Fase 3): generar tareas de seguimiento si la operación cerró.
+    if obj.estado == mv.OperacionEstado.cerrada:
+        try:
+            ventas_tareas.generar_tareas_postventa(db, obj)
+        except Exception as e:
+            print(f"[ventas_crm] tareas postventa fallback: {e}")
+
     _audit(db, v, "ventas_operaciones", obj.id, mv.AuditAccion.create, data.model_dump())
     db.commit(); db.refresh(obj)
     return obj
@@ -555,6 +607,32 @@ def editar_operacion(oid: int, data: sv.OperacionCreate,
         obj.comision_manual = True
     for k, val in payload.items():
         setattr(obj, k, val)
+
+    # Recalcular comisión: automática si no es manual; si es manual y solo
+    # vino el %, derivar el monto desde el monto de cierre.
+    if not obj.comision_manual and obj.monto_cierre_usd:
+        tipo_prop = None
+        if obj.propiedad_id:
+            prop = db.query(mv.VentasPropiedad).filter_by(id=obj.propiedad_id).first()
+            tipo_prop = prop.tipo if prop else None
+        pct, monto_com = _calcular_comision(db, obj.vendedor_id, tipo_prop, obj.monto_cierre_usd)
+        obj.comision_pct = pct
+        obj.comision_monto_usd = monto_com
+    elif obj.comision_manual and obj.comision_pct is not None and obj.comision_monto_usd is None and obj.monto_cierre_usd:
+        obj.comision_monto_usd = round(obj.monto_cierre_usd * obj.comision_pct / 100.0, 2)
+
+    # Si la edición cierra la operación, replicar la lógica de cierre.
+    if obj.estado in (mv.OperacionEstado.cerrada, mv.OperacionEstado.sena) and obj.cliente_id:
+        cli = db.query(mv.VentasCliente).filter_by(id=obj.cliente_id).first()
+        if cli:
+            cli.es_operado = True
+    if obj.estado == mv.OperacionEstado.cerrada:
+        try:
+            ventas_tareas.generar_tareas_postventa(db, obj)
+        except Exception as e:
+            print(f"[ventas_crm] tareas postventa (edit) fallback: {e}")
+
+    _audit(db, v, "ventas_operaciones", obj.id, mv.AuditAccion.update, data.model_dump(exclude_unset=True))
     db.commit(); db.refresh(obj)
     return obj
 
@@ -774,6 +852,11 @@ def vincular_propiedad(pid: int, data: sv.PedidoPropCreate,
     ped = _scope(db.query(mv.VentasPedido), mv.VentasPedido, v).filter_by(id=pid).first()
     if not ped:
         raise HTTPException(404, "Pedido no encontrado")
+    # Validar que la propiedad exista
+    if not db.query(mv.VentasPropiedad).filter_by(id=data.propiedad_id).first():
+        raise HTTPException(404, "Propiedad no encontrada")
+    if data.estado not in _ESTADOS_VINCULO:
+        raise HTTPException(400, f"estado inválido: opciones {', '.join(_ESTADOS_VINCULO)}")
     ya = (db.query(mv.VentasPedidoPropiedad)
           .filter_by(pedido_id=pid, propiedad_id=data.propiedad_id).first())
     if ya:
@@ -783,13 +866,24 @@ def vincular_propiedad(pid: int, data: sv.PedidoPropCreate,
     return obj
 
 
-@router.patch("/pedido-propiedad/{ppid}", response_model=sv.PedidoPropOut)
-def cambiar_estado_vinculo(ppid: int, estado: str = Query(...),
-                           db: Session = Depends(get_db), user=Depends(get_current_user)):
-    get_vendedor(db, user)
+def _vinculo_propio(db, ppid, v):
+    """Devuelve el vínculo si el pedido pertenece al vendedor (o es admin)."""
     obj = db.query(mv.VentasPedidoPropiedad).filter_by(id=ppid).first()
     if not obj:
         raise HTTPException(404, "Vínculo no encontrado")
+    ped = db.query(mv.VentasPedido).filter_by(id=obj.pedido_id).first()
+    if not v.es_admin and (not ped or ped.vendedor_id != v.id):
+        raise HTTPException(403, "No es tu pedido")
+    return obj
+
+
+@router.patch("/pedido-propiedad/{ppid}", response_model=sv.PedidoPropOut)
+def cambiar_estado_vinculo(ppid: int, estado: str = Query(...),
+                           db: Session = Depends(get_db), user=Depends(get_current_user)):
+    v = get_vendedor(db, user)
+    obj = _vinculo_propio(db, ppid, v)
+    if estado not in _ESTADOS_VINCULO:
+        raise HTTPException(400, f"estado inválido: opciones {', '.join(_ESTADOS_VINCULO)}")
     obj.estado = estado
     db.commit(); db.refresh(obj)
     return obj
@@ -797,10 +891,8 @@ def cambiar_estado_vinculo(ppid: int, estado: str = Query(...),
 
 @router.delete("/pedido-propiedad/{ppid}")
 def desvincular_propiedad(ppid: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    get_vendedor(db, user)
-    obj = db.query(mv.VentasPedidoPropiedad).filter_by(id=ppid).first()
-    if not obj:
-        raise HTTPException(404, "Vínculo no encontrado")
+    v = get_vendedor(db, user)
+    obj = _vinculo_propio(db, ppid, v)
     db.delete(obj); db.commit()
     return {"ok": True}
 

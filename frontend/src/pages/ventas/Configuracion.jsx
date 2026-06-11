@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Settings, Percent, MapPinned, Ruler, Plus, Trash2, Lock } from 'lucide-react'
+import { Settings, Percent, MapPinned, Ruler, Plus, Trash2, Lock, Send, Store, CalendarClock, RefreshCw, Power } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
 import api from '../../utils/api'
 
@@ -7,7 +7,10 @@ const TIPOS = ['casa', 'departamento', 'lote', 'local', 'oficina', 'galpon', 'ca
 const TABS = [
   { key: 'comisiones', label: 'Comisiones', icon: Percent },
   { key: 'barrios', label: 'Barrios', icon: MapPinned },
-  { key: 'valorm2', label: 'Valor m² referencia', icon: Ruler },
+  { key: 'valorm2', label: 'Valor m²', icon: Ruler },
+  { key: 'telegram', label: 'Telegram', icon: Send },
+  { key: 'tokko', label: 'Tokko', icon: Store },
+  { key: 'plantillas', label: 'Seguimiento', icon: CalendarClock },
 ]
 
 export default function Configuracion() {
@@ -44,8 +47,170 @@ export default function Configuracion() {
         {tab === 'comisiones' && <Comisiones admin={me?.es_admin} />}
         {tab === 'barrios' && <Barrios admin={me?.es_admin} />}
         {tab === 'valorm2' && <ValorM2 admin={me?.es_admin} />}
+        {tab === 'telegram' && <Telegram />}
+        {tab === 'tokko' && <Tokko admin={me?.es_admin} />}
+        {tab === 'plantillas' && <Plantillas admin={me?.es_admin} />}
       </div>
     </Layout>
+  )
+}
+
+function Telegram() {
+  const [estado, setEstado] = useState(null)
+  const [link, setLink] = useState(null)
+  const load = () => api.get('/api/ventas-crm/telegram/estado').then(r => setEstado(r.data))
+  useEffect(() => { load() }, [])
+  const generar = async () => {
+    const r = await api.post('/api/ventas-crm/telegram/generar-token')
+    setLink(r.data)
+  }
+  return (
+    <div>
+      <p className="text-[13px] text-muted mb-4">
+        Vinculá tu Telegram para recibir las notificaciones (matches, tareas vencidas) por chat.
+      </p>
+      <div className="card p-5">
+        <div className="flex items-center gap-3 mb-4">
+          <span className={`w-2.5 h-2.5 rounded-full ${estado?.vinculado ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+          <p className="text-[14px] font-medium">{estado?.vinculado ? 'Telegram vinculado' : 'No vinculado'}</p>
+        </div>
+        {!estado?.bot_disponible && (
+          <p className="text-[12px] text-amber-600 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-3 py-2 mb-3">
+            El bot todavía no tiene token configurado en el servidor (VENTAS_TELEGRAM_BOT_TOKEN). Podés generar el código igual; se activará cuando se conecte el bot.
+          </p>
+        )}
+        {!estado?.vinculado && (
+          <>
+            <button className="btn-primary" onClick={generar}><Send size={14} /> Generar código de vinculación</button>
+            {link && (
+              <div className="mt-4 bg-neutral-50 dark:bg-[#141414] rounded-xl p-4">
+                <p className="text-[12px] text-muted mb-1">Mandale esto al bot de Telegram (vence en 10 min):</p>
+                <code className="text-[14px] font-mono text-[#B8893A]">{link.instruccion}</code>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Tokko({ admin }) {
+  const [cfg, setCfg] = useState(null)
+  const [apiKey, setApiKey] = useState('')
+  const [ciudades, setCiudades] = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const load = () => api.get('/api/ventas-crm/tokko-config').then(r => {
+    setCfg(r.data); setCiudades((r.data.ciudades || []).join(', '))
+  })
+  useEffect(() => { load() }, [])
+
+  const guardar = async (patch) => {
+    const body = {
+      ciudades: ciudades.split(',').map(s => s.trim()).filter(Boolean),
+      ...patch,
+    }
+    if (apiKey) body.api_key = apiKey
+    await api.put('/api/ventas-crm/tokko-config', body)
+    setApiKey(''); load()
+  }
+  const sync = async () => {
+    setSyncing(true); setMsg('')
+    try {
+      const r = await api.post('/api/ventas-crm/tokko-sync')
+      setMsg(r.data.ok ? `Sync OK: ${r.data.nuevas} nuevas, ${r.data.actualizadas} actualizadas.` : r.data.motivo)
+    } catch (e) { setMsg(e.response?.data?.detail || 'Error') } finally { setSyncing(false); load() }
+  }
+
+  if (!cfg) return null
+  return (
+    <div>
+      <p className="text-[13px] text-muted mb-4">
+        Integración con Tokko Broker. La segmentación por ciudades limita el sync a esas zonas (Mod #7).
+      </p>
+      <div className="card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className={`w-2.5 h-2.5 rounded-full ${cfg.activo ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+            <span className="text-[14px] font-medium">{cfg.activo ? 'Activa' : 'Inactiva'}</span>
+          </div>
+          {admin && (
+            <button className="btn-secondary text-[12px]" onClick={() => guardar({ activo: !cfg.activo })}>
+              <Power size={13} /> {cfg.activo ? 'Desactivar' : 'Activar'}
+            </button>
+          )}
+        </div>
+
+        <div>
+          <label className="label">API Key {cfg.tiene_api_key && <span className="text-emerald-600">(configurada)</span>}</label>
+          <input className="input" type="password" placeholder={cfg.tiene_api_key ? '•••••• (dejá vacío para no cambiar)' : 'pegá la API key de Tokko'}
+            value={apiKey} onChange={e => setApiKey(e.target.value)} disabled={!admin} />
+        </div>
+        <div>
+          <label className="label">Ciudades a sincronizar (separadas por coma)</label>
+          <input className="input" placeholder="Santa Rosa, General Pico" value={ciudades} onChange={e => setCiudades(e.target.value)} disabled={!admin} />
+        </div>
+
+        {admin && (
+          <div className="flex gap-2">
+            <button className="btn-primary" onClick={() => guardar({})}>Guardar</button>
+            <button className="btn-secondary" onClick={sync} disabled={syncing}>
+              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Sincronizando…' : 'Sincronizar ahora'}
+            </button>
+          </div>
+        )}
+        {msg && <p className="text-[12px] text-muted bg-neutral-50 dark:bg-[#141414] rounded-xl px-3 py-2">{msg}</p>}
+        {cfg.ultima_sync && <p className="text-[11px] text-muted">Última sync: {new Date(cfg.ultima_sync).toLocaleString('es-AR')}</p>}
+      </div>
+    </div>
+  )
+}
+
+function Plantillas({ admin }) {
+  const [list, setList] = useState([])
+  const [form, setForm] = useState({ nombre: '', offset_dias: '' })
+  const load = () => api.get('/api/ventas-crm/plantillas').then(r => setList(r.data || []))
+  useEffect(() => { load() }, [])
+  const guardar = async e => {
+    e.preventDefault()
+    if (!form.nombre.trim() || !form.offset_dias) return
+    await api.post('/api/ventas-crm/plantillas', { nombre: form.nombre, offset_dias: Number(form.offset_dias), activa: true })
+    setForm({ nombre: '', offset_dias: '' }); load()
+  }
+  const toggle = async (p) => { await api.patch(`/api/ventas-crm/plantillas/${p.id}`, { nombre: p.nombre, offset_dias: p.offset_dias, activa: !p.activa }); load() }
+  const borrar = async (p) => { await api.delete(`/api/ventas-crm/plantillas/${p.id}`); load() }
+  return (
+    <div>
+      <p className="text-[13px] text-muted mb-4">
+        Plantillas de seguimiento post-venta. Al cerrar una operación se crean tareas a estos días desde el cierre.
+      </p>
+      {admin && (
+        <form onSubmit={guardar} className="card p-4 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 items-end">
+            <div className="sm:col-span-1"><label className="label">Nombre</label><input className="input" value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} /></div>
+            <div><label className="label">Días desde el cierre</label><input className="input" type="number" value={form.offset_dias} onChange={e => setForm({ ...form, offset_dias: e.target.value })} /></div>
+            <button className="btn-primary"><Plus size={14} /> Agregar</button>
+          </div>
+        </form>
+      )}
+      <div className="space-y-2">
+        {list.map(p => (
+          <div key={p.id} className="card p-3 flex items-center gap-3">
+            <span className={`w-2.5 h-2.5 rounded-full ${p.activa ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+            <div className="flex-1">
+              <p className="text-[14px] font-medium">{p.nombre}</p>
+              <p className="text-[11px] text-muted">{p.offset_dias} días desde el cierre</p>
+            </div>
+            {admin && <>
+              <button onClick={() => toggle(p)} className="text-[12px] text-muted underline">{p.activa ? 'Desactivar' : 'Activar'}</button>
+              <button onClick={() => borrar(p)} className="p-1 text-muted hover:text-danger"><Trash2 size={13} /></button>
+            </>}
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -132,7 +297,11 @@ function Comisiones({ admin }) {
 
 function VendedorDefault({ v, admin, onSaved }) {
   const [pct, setPct] = useState(v.comision_default_pct ?? '')
-  const save = async () => { await api.patch(`/api/ventas-crm/vendedores/${v.id}`, { comision_default_pct: Number(pct) }); onSaved() }
+  const save = async () => {
+    await api.patch(`/api/ventas-crm/vendedores/${v.id}`,
+      { comision_default_pct: pct === '' ? null : Number(pct) })
+    onSaved()
+  }
   return (
     <div className="flex items-center gap-3">
       <span className="text-[13px] flex-1">{v.nombre} {v.es_admin && <span className="chip-muted ml-1">admin</span>}</span>

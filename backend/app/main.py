@@ -1,7 +1,10 @@
+import logging
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+logger = logging.getLogger(__name__)
 
 # override=True: si hay una variable previa en el shell (vacía o con otro valor),
 # el .env del proyecto manda. Importante en entornos donde el shell hereda
@@ -13,9 +16,10 @@ from app.database import Base, engine
 # metadata antes del create_all (módulo Ventas aislado — ver plan sección 15).
 from app import models_ventas  # noqa: F401
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
-from app.routers import cobranza, ventas_router, ventas_crm, comprobantes
+from app.routers import cobranza, ventas_router, ventas_crm, ventas_fase23, comprobantes
 from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr, tasas_mensuales, refacciones, versiones
 from app.routers import historial as historial_router
+from app.security import get_current_user
 
 Base.metadata.create_all(bind=engine)
 
@@ -70,6 +74,7 @@ app.include_router(agente_router.router)
 app.include_router(cobranza.router)
 app.include_router(ventas_router.router)
 app.include_router(ventas_crm.router)
+app.include_router(ventas_fase23.router)
 app.include_router(comprobantes.router)
 app.include_router(liquidaciones.router)
 app.include_router(finanzas.router)
@@ -98,11 +103,14 @@ def health():
 
 
 @app.get("/api/debug/contratos-vigentes")
-def debug_contratos_vigentes(db = None):
-    """Endpoint público de diagnóstico — SIN AUTH — para verificar qué
-    contratos vigentes y pagos hay en la DB del deploy actual.
-    No expone PII ni datos sensibles. Solo conteos y códigos.
+def debug_contratos_vigentes(user=Depends(get_current_user)):
+    """Endpoint de diagnóstico — requiere usuario autenticado con rol admin —
+    para verificar qué contratos vigentes y pagos hay en la DB del deploy
+    actual. No expone PII ni datos sensibles. Solo conteos y códigos.
     Quitar cuando el bug esté resuelto."""
+    from app import models
+    if user.role != models.UserRole.admin:
+        raise HTTPException(403, "Solo admin")
     from app.database import SessionLocal
     from sqlalchemy import text, inspect
     from app.database import IS_POSTGRES, CIUDAD_SCHEMA
@@ -217,6 +225,7 @@ def _migrar_tokko_a_venta():
             db.execute(text("INSERT INTO ciudad_settings (key, value) VALUES ('tokko_es_venta', '1')"))
             db.commit()
     except Exception:
+        logger.exception("[migrar] _migrar_tokko_a_venta falló; se hace rollback y se continúa el arranque")
         db.rollback()
     finally:
         db.close()
@@ -263,6 +272,7 @@ def _migrar_schema():
             db.execute(text("INSERT INTO ciudad_settings (key, value) VALUES ('tasas_unificadas', '1')"))
             db.commit()
     except Exception:
+        logger.exception("[migrar] _migrar_schema falló; se hace rollback y se continúa el arranque")
         db.rollback()
     finally:
         db.close()
@@ -328,8 +338,8 @@ def _migrar_storage_path():
                 try:
                     db.execute(text(f"ALTER TABLE {qual}contratos ADD COLUMN {col} {ddl}"))
                     db.commit()
-                except Exception as e:
-                    print(f"[migrar] contratos.{col}: {e}")
+                except Exception:
+                    logger.exception("[migrar] contratos.%s: falló el ALTER TABLE; rollback y se continúa", col)
                     db.rollback()
 
         # contrato_inquilinos: tabla pivote para múltiples inquilinos por contrato.
@@ -341,8 +351,8 @@ def _migrar_storage_path():
                 from app.models import ContratoInquilino
                 ContratoInquilino.__table__.create(engine, checkfirst=True)
                 print("[migrar] creada tabla contrato_inquilinos")
-        except Exception as e:
-            print(f"[migrar] crear contrato_inquilinos: {e}")
+        except Exception:
+            logger.exception("[migrar] crear contrato_inquilinos falló; se continúa")
             try: db.rollback()
             except Exception: pass
 
@@ -355,8 +365,8 @@ def _migrar_storage_path():
                 from app.models import Garante
                 Garante.__table__.create(engine, checkfirst=True)
                 print("[migrar] creada tabla garantes")
-        except Exception as e:
-            print(f"[migrar] crear garantes: {e}")
+        except Exception:
+            logger.exception("[migrar] crear garantes falló; se continúa")
             try: db.rollback()
             except Exception: pass
 
@@ -366,8 +376,8 @@ def _migrar_storage_path():
             try:
                 db.execute(text(f"ALTER TABLE {qual}pagos ADD COLUMN monto_pagado_transferencia FLOAT DEFAULT 0"))
                 db.commit()
-            except Exception as e:
-                print(f"[migrar] pagos.monto_pagado_transferencia: {e}")
+            except Exception:
+                logger.exception("[migrar] pagos.monto_pagado_transferencia: falló el ALTER TABLE; rollback y se continúa")
                 db.rollback()
 
         # clientes: tipo_documento y nacionalidad (para extracción IA)
@@ -381,8 +391,8 @@ def _migrar_storage_path():
                 try:
                     db.execute(text(f"ALTER TABLE {qual}clientes ADD COLUMN {col} {ddl}"))
                     db.commit()
-                except Exception as e:
-                    print(f"[migrar] clientes.{col}: {e}")
+                except Exception:
+                    logger.exception("[migrar] clientes.%s: falló el ALTER TABLE; rollback y se continúa", col)
                     db.rollback()
 
         # Agregar valores al enum propiedadtipo si Postgres no los tiene.
@@ -396,10 +406,10 @@ def _migrar_storage_path():
                             raw.execute(text(
                                 f"ALTER TYPE {qual}propiedadtipo ADD VALUE IF NOT EXISTS '{nuevo_tipo}'"
                             ))
-                        except Exception as e:
-                            print(f"[migrar] enum propiedadtipo += {nuevo_tipo}: {e}")
-            except Exception as e:
-                print(f"[migrar] enum propiedadtipo conn: {e}")
+                        except Exception:
+                            logger.exception("[migrar] enum propiedadtipo += %s falló; se continúa", nuevo_tipo)
+            except Exception:
+                logger.exception("[migrar] enum propiedadtipo: falló la conexión AUTOCOMMIT; se continúa")
 
         # blob_b64 antes era NOT NULL. Con Storage habilitado, los uploads
         # nuevos guardan en Storage y dejan blob_b64 = NULL. Hacer la columna
@@ -415,8 +425,8 @@ def _migrar_storage_path():
                     f"ALTER TABLE {qual}propiedad_adjuntos ALTER COLUMN blob_b64 DROP NOT NULL"
                 ))
                 db.commit()
-    except Exception as e:
-        print(f"[_migrar_storage_path] {e}")
+    except Exception:
+        logger.exception("[migrar] _migrar_storage_path falló; rollback y se continúa el arranque")
         db.rollback()
     finally:
         db.close()
@@ -461,9 +471,9 @@ def _migrar_workspace_demo():
                     ))
                     db.commit()
                     print(f"[migrar] {tabla}.is_demo agregada")
-            except Exception as e:
+            except Exception:
                 db.rollback()
-                print(f"[migrar] {tabla}.is_demo falló: {e}")
+                logger.exception("[migrar] %s.is_demo falló; rollback y se continúa", tabla)
 
         # Postgres: agregar valor admin_demo al enum userrole
         if IS_POSTGRES:
@@ -472,10 +482,10 @@ def _migrar_workspace_demo():
                     raw.execute(text(
                         f"ALTER TYPE {qual}userrole ADD VALUE IF NOT EXISTS 'admin_demo'"
                     ))
-            except Exception as e:
-                print(f"[migrar] enum userrole += admin_demo: {e}")
-    except Exception as e:
-        print(f"[_migrar_workspace_demo] {e}")
+            except Exception:
+                logger.exception("[migrar] enum userrole += admin_demo falló; se continúa")
+    except Exception:
+        logger.exception("[migrar] _migrar_workspace_demo falló; se continúa el arranque")
     finally:
         db.close()
 
@@ -502,9 +512,9 @@ def _limpiar_codigos_contrato_vacios():
         if res.rowcount:
             print(f"[migrar] contratos.codigo='' → NULL en {res.rowcount} fila(s)")
         db.commit()
-    except Exception as e:
+    except Exception:
         db.rollback()
-        print(f"[migrar] limpiar codigos vacíos: {e}")
+        logger.exception("[migrar] limpiar codigos vacíos falló; rollback y se continúa")
     finally:
         db.close()
 
@@ -531,9 +541,9 @@ def _migrar_contrato_archivado():
             ))
             db.commit()
             print("[migrar] contratos.archivado + fecha_archivado agregadas")
-    except Exception as e:
+    except Exception:
         db.rollback()
-        print(f"[migrar] contratos.archivado: {e}")
+        logger.exception("[migrar] contratos.archivado falló; rollback y se continúa")
     finally:
         db.close()
 
@@ -552,9 +562,9 @@ def _migrar_detalle_conceptos():
             db.execute(text(f"ALTER TABLE {qual}pagos ADD COLUMN detalle_conceptos TEXT"))
             db.commit()
             print("[migrar] pagos.detalle_conceptos agregada")
-    except Exception as e:
+    except Exception:
         db.rollback()
-        print(f"[migrar] detalle_conceptos: {e}")
+        logger.exception("[migrar] pagos.detalle_conceptos falló; rollback y se continúa")
     finally:
         db.close()
 
@@ -586,9 +596,9 @@ def _migrar_liquidacion_propietario():
                 f"CREATE INDEX IF NOT EXISTS ix_pagos_liquidado_propietario ON {qual}pagos(liquidado_propietario)"
             ))
             db.commit()
-    except Exception as e:
+    except Exception:
         db.rollback()
-        print(f"[migrar] pagos.liquidacion: {e}")
+        logger.exception("[migrar] pagos.liquidacion falló; rollback y se continúa")
     finally:
         db.close()
 
@@ -621,8 +631,8 @@ def _migrar_etapa_venta():
                         f"('prospecto','seguimiento','sena','comprador','no_interesado')"
                     ))
                     print("[migrar] enum clienteetapaventa creado")
-        except Exception as e:
-            print(f"[migrar] enum clienteetapaventa: {e}")
+        except Exception:
+            logger.exception("[migrar] enum clienteetapaventa falló; se continúa")
 
     # 2. ALTER TABLE clientes ADD COLUMN etapa_venta
     db = SessionLocal()
@@ -639,9 +649,9 @@ def _migrar_etapa_venta():
             ))
             db.commit()
             print("[migrar] clientes.etapa_venta agregada")
-    except Exception as e:
+    except Exception:
         db.rollback()
-        print(f"[migrar] clientes.etapa_venta: {e}")
+        logger.exception("[migrar] clientes.etapa_venta falló; rollback y se continúa")
     finally:
         db.close()
 
@@ -679,9 +689,9 @@ def _crear_tabla_propiedad_propietarios():
               )
         """))
         db.commit()
-    except Exception as e:
+    except Exception:
         db.rollback()
-        print(f"[migrar] propiedad_propietarios: {e}")
+        logger.exception("[migrar] propiedad_propietarios falló; rollback y se continúa")
     finally:
         db.close()
 
@@ -697,8 +707,8 @@ def _crear_tabla_versiones_local():
             from app.models import VersionLocal  # noqa
             VersionLocal.__table__.create(engine, checkfirst=True)
             print("[migrar] tabla `versiones_local` creada")
-    except Exception as e:
-        print(f"[migrar] crear versiones_local: {e}")
+    except Exception:
+        logger.exception("[migrar] crear versiones_local falló; se continúa")
 
 
 @app.on_event("startup")
@@ -713,8 +723,8 @@ def _crear_tabla_refacciones():
             from app.models import Refaccion  # noqa
             Refaccion.__table__.create(engine, checkfirst=True)
             print("[migrar] tabla `refacciones` creada")
-    except Exception as e:
-        print(f"[migrar] crear refacciones: {e}")
+    except Exception:
+        logger.exception("[migrar] crear refacciones falló; se continúa")
 
 
 @app.on_event("startup")
