@@ -228,6 +228,17 @@ def tokko_sync(db: Session = Depends(get_db), user=Depends(get_current_user)):
     if not v.es_admin:
         raise HTTPException(403, "Solo el admin sincroniza Tokko")
     resultado = ventas_tokko.sincronizar(db)
+    # Tras el sync, recalcular matches: las propiedades nuevas de Tokko deben
+    # cruzarse con los pedidos activos (el sync no pasa por el endpoint que
+    # dispara el trigger de matching).
+    if resultado.get("ok"):
+        from app.services import ventas_matching
+        nuevos_match = 0
+        pedidos = (db.query(mv.VentasPedido)
+                   .filter(mv.VentasPedido.estado.in_(ventas_matching.ESTADOS_PEDIDO_ACTIVO)).all())
+        for ped in pedidos:
+            nuevos_match += ventas_matching.evaluar_pedido(db, ped)
+        resultado["matches_nuevos"] = nuevos_match
     db.commit()
     return resultado
 
