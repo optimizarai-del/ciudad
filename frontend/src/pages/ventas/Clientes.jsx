@@ -160,6 +160,11 @@ function NotasModal({ cliente, onClose }) {
     await api.post(`/api/ventas-crm/clientes/${cliente.id}/notas`, { texto, origen: 'web' })
     setTexto(''); load()
   }
+  const borrar = async (nid) => {
+    if (!confirm('¿Eliminar esta nota?')) return
+    try { await api.delete(`/api/ventas-crm/clientes/${cliente.id}/notas/${nid}`); load() }
+    catch { /* noop */ }
+  }
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto" onClick={onClose}>
       <div className="card p-6 sm:p-8 w-full max-w-lg shadow-lift animate-scale-in my-6 flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
@@ -173,11 +178,15 @@ function NotasModal({ cliente, onClose }) {
         <div className="flex-1 overflow-auto space-y-2 mb-4">
           {notas.length === 0 && <p className="text-muted text-[13px] text-center py-8">Sin notas todavía.</p>}
           {notas.map(n => (
-            <div key={n.id} className="bg-neutral-50 dark:bg-[#141414] rounded-xl p-3">
-              <p className="text-[13px]">{n.texto}</p>
-              <p className="text-[10px] text-muted mt-1">
-                {new Date(n.created_at).toLocaleString('es-AR')} · {n.origen}
-              </p>
+            <div key={n.id} className="bg-neutral-50 dark:bg-[#141414] rounded-xl p-3 flex items-start gap-2 group">
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px]">{n.texto}</p>
+                <p className="text-[10px] text-muted mt-1">
+                  {new Date(n.created_at).toLocaleString('es-AR')} · {n.origen}
+                </p>
+              </div>
+              <button onClick={() => borrar(n.id)} title="Eliminar nota"
+                className="p-1 text-muted hover:text-danger shrink-0"><Trash2 size={13} /></button>
             </div>
           ))}
         </div>

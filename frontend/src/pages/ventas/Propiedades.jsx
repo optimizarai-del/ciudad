@@ -77,7 +77,7 @@ export default function Propiedades() {
                 {p.fuente !== 'propia' && <span className="chip-muted mt-2 w-fit capitalize">{p.fuente}</span>}
                 <div className="flex gap-1 mt-3 pt-3 border-t border-border">
                   <button onClick={() => setOfertasDe(p)} className="flex-1 flex items-center justify-center gap-1 text-[12px] text-[#B8893A]"><Handshake size={13} /> Negociación</button>
-                  <button onClick={() => { setEditing(p); setOpen(true) }} className="p-1.5 text-muted hover:text-primary"><Pencil size={13} /></button>
+                  <button onClick={() => { setEditing(p); setOpen(true) }} className="p-1.5 text-muted hover:text-[#B8893A]"><Pencil size={13} /></button>
                   <button onClick={() => del(p)} className="p-1.5 text-muted hover:text-danger"><Trash2 size={13} /></button>
                 </div>
               </div>

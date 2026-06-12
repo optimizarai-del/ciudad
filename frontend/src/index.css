@@ -89,10 +89,10 @@ body {
   .input {
     @apply w-full bg-[#F5F5F5] border border-transparent rounded-2xl px-4 py-3
            text-[#0A0A0A] text-sm placeholder:text-[#9A9A9A]
-           focus:outline-none focus:border-[#0A0A0A]/20 focus:bg-white
-           focus:ring-4 focus:ring-[#0A0A0A]/5 transition
+           focus:outline-none focus:border-[#B8893A] focus:bg-white
+           focus:ring-4 focus:ring-[#B8893A]/20 transition
            dark:bg-[#1E1E1E] dark:text-[#F5F5F5] dark:placeholder:text-[#555555]
-           dark:focus:bg-[#252525] dark:focus:border-[#555555]/40 dark:focus:ring-white/5;
+           dark:focus:bg-[#2A2A2A] dark:focus:border-[#B8893A] dark:focus:ring-[#B8893A]/30;
   }
   .select {
     @apply input appearance-none cursor-pointer;

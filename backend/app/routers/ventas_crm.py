@@ -10,6 +10,7 @@ El router legacy ventas_router.py (/api/ventas/*) queda como compatibilidad
 para las pantallas viejas que leen de las tablas compartidas.
 """
 import json
+import time
 from datetime import date
 from typing import List, Optional
 
@@ -399,6 +400,129 @@ def eliminar_propiedad(pid: int, db: Session = Depends(get_db), user=Depends(get
     _audit(db, v, "ventas_propiedades", pid, mv.AuditAccion.delete)
     db.delete(obj); db.commit()
     return {"ok": True}
+
+
+# ───────────────────── Mapa interactivo (Mod #5 — geo) ─────────────────────
+
+# Centro por defecto de las ciudades de cobertura (Santa Rosa / Toay, La Pampa).
+_CENTRO_DEFAULT = {"lat": -36.6203, "lng": -64.2906, "zoom": 13}
+
+
+@router.get("/propiedades/mapa")
+def propiedades_mapa(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Datos livianos para el mapa: propiedades georreferenciadas + polígonos de
+    barrio. Incluye el conteo de propiedades sin coordenadas (pendientes de
+    geocodificar) para mostrar el aviso de backfill en el front."""
+    get_vendedor(db, user)
+    props = db.query(mv.VentasPropiedad).all()
+    con_geo, sin_geo = [], 0
+    for p in props:
+        if p.lat is not None and p.lng is not None:
+            con_geo.append({
+                "id": p.id,
+                "titulo": p.titulo,
+                "tipo": p.tipo.value if p.tipo else None,
+                "estado": p.estado.value if p.estado else None,
+                "fuente": p.fuente.value if p.fuente else None,
+                "direccion": p.direccion,
+                "ciudad": p.ciudad,
+                "barrio_id": p.barrio_id,
+                "lat": p.lat,
+                "lng": p.lng,
+                "precio_usd": p.precio_usd,
+                "superficie_m2": p.superficie_m2,
+                "dormitorios": p.dormitorios,
+                "banos": p.banos,
+                "link_externo": p.link_externo,
+            })
+        elif p.direccion:
+            sin_geo += 1
+
+    barrios = []
+    for b in db.query(mv.VentasBarrio).all():
+        geo = None
+        if b.poligono_geojson:
+            try:
+                geo = json.loads(b.poligono_geojson)
+            except Exception:
+                geo = None
+        barrios.append({
+            "id": b.id, "nombre": b.nombre, "ciudad": b.ciudad,
+            "color": b.color or "#B8893A", "poligono": geo,
+        })
+
+    # Centrar en el promedio de las propiedades si las hay; si no, default.
+    if con_geo:
+        centro = {
+            "lat": sum(p["lat"] for p in con_geo) / len(con_geo),
+            "lng": sum(p["lng"] for p in con_geo) / len(con_geo),
+            "zoom": 13,
+        }
+    else:
+        centro = dict(_CENTRO_DEFAULT)
+
+    return {
+        "centro": centro,
+        "propiedades": con_geo,
+        "barrios": barrios,
+        "sin_geo": sin_geo,
+        "total": len(props),
+    }
+
+
+@router.patch("/propiedades/{pid}/ubicacion", response_model=sv.PropiedadOut)
+def reubicar_propiedad(pid: int, lat: float = Query(...), lng: float = Query(...),
+                       db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Mueve el pin de una propiedad (drag & drop en el mapa). Guarda las nuevas
+    coordenadas y reasigna automáticamente el barrio según el polígono que
+    contiene el punto."""
+    v = get_vendedor(db, user)
+    obj = db.query(mv.VentasPropiedad).filter_by(id=pid).first()
+    if not obj:
+        raise HTTPException(404, "Propiedad no encontrada")
+    if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+        raise HTTPException(422, "Coordenadas fuera de rango")
+    obj.lat, obj.lng = lat, lng
+    barrio = ventas_geo.barrio_de_punto(db, lat, lng)
+    obj.barrio_id = barrio.id if barrio else None
+    _audit(db, v, "ventas_propiedades", pid, mv.AuditAccion.update,
+           {"lat": lat, "lng": lng, "barrio_id": obj.barrio_id})
+    db.commit(); db.refresh(obj)
+    return obj
+
+
+@router.post("/propiedades/geocodificar-faltantes")
+def geocodificar_faltantes(limite: int = Query(15, le=50),
+                           db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Backfill: geocodifica propiedades que tienen dirección pero no coordenadas
+    (típico de las importadas de Tokko). Nominatim pide ~1 req/seg, así que se
+    procesa un lote acotado por llamada. Devuelve cuántas resolvió."""
+    v = get_vendedor(db, user)
+    pendientes = (db.query(mv.VentasPropiedad)
+                  .filter(mv.VentasPropiedad.lat.is_(None),
+                          mv.VentasPropiedad.direccion.isnot(None))
+                  .limit(limite).all())
+    resueltas, fallidas = 0, 0
+    for i, p in enumerate(pendientes):
+        if i > 0:
+            time.sleep(1)  # rate-limit Nominatim
+        try:
+            geo = ventas_geo.resolver(db, p.direccion, p.ciudad)
+            if geo["lat"] is not None:
+                p.lat, p.lng = geo["lat"], geo["lng"]
+                if geo["barrio_id"]:
+                    p.barrio_id = geo["barrio_id"]
+                resueltas += 1
+            else:
+                fallidas += 1
+        except Exception as e:
+            print(f"[ventas_crm] geocodificar-faltantes fallback: {e}")
+            fallidas += 1
+    db.commit()
+    restantes = (db.query(mv.VentasPropiedad)
+                 .filter(mv.VentasPropiedad.lat.is_(None),
+                         mv.VentasPropiedad.direccion.isnot(None)).count())
+    return {"resueltas": resueltas, "fallidas": fallidas, "restantes": restantes}
 
 
 # ───────────────────── Ofertas / Contraofertas (Mod #2) ─────────────────────

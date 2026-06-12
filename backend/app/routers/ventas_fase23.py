@@ -15,6 +15,7 @@ from app import models_ventas as mv, schemas_ventas as sv
 from app.routers.ventas_crm import get_vendedor, _scope
 from app.services import (
     ventas_tokko, ventas_telegram, ventas_nlu, ventas_jobs, ventas_tareas,
+    ventas_portal,
 )
 
 router = APIRouter(prefix="/api/ventas-crm", tags=["ventas-fase23"])
@@ -222,15 +223,53 @@ def set_tokko_config(data: sv.TokkoConfigIn, db: Session = Depends(get_db), user
     return _tokko_out(cfg)
 
 
+@router.get("/tokko-ciudades")
+def tokko_ciudades(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Ciudades disponibles en la cuenta Tokko (con conteo) para el selector de
+    importación. No escribe nada: sólo consulta la API en vivo."""
+    get_vendedor(db, user)
+    return ventas_tokko.ciudades_disponibles(db)
+
+
 @router.post("/tokko-sync")
-def tokko_sync(db: Session = Depends(get_db), user=Depends(get_current_user)):
+def tokko_sync(ciudad: str | None = None,
+               db: Session = Depends(get_db), user=Depends(get_current_user)):
     v = get_vendedor(db, user)
     if not v.es_admin:
         raise HTTPException(403, "Solo el admin sincroniza Tokko")
-    resultado = ventas_tokko.sincronizar(db)
+    # `ciudad` delimita la importación a una sola ciudad. Sin él, usa las
+    # ciudades configuradas (comportamiento por defecto).
+    override = [ciudad] if ciudad else None
+    resultado = ventas_tokko.sincronizar(db, ciudades_override=override)
     # Tras el sync, recalcular matches: las propiedades nuevas de Tokko deben
     # cruzarse con los pedidos activos (el sync no pasa por el endpoint que
     # dispara el trigger de matching).
+    if resultado.get("ok"):
+        from app.services import ventas_matching
+        nuevos_match = 0
+        pedidos = (db.query(mv.VentasPedido)
+                   .filter(mv.VentasPedido.estado.in_(ventas_matching.ESTADOS_PEDIDO_ACTIVO)).all())
+        for ped in pedidos:
+            nuevos_match += ventas_matching.evaluar_pedido(db, ped)
+        resultado["matches_nuevos"] = nuevos_match
+    db.commit()
+    return resultado
+
+
+# ═══════════════ Portales públicos (scraping · Argenprop) ═══════════════
+
+@router.post("/portal-sync")
+def portal_sync(ciudad: str, provincia: str = "La Pampa", portal: str = "argenprop",
+                db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Importa propiedades en venta de una ciudad desde un portal público
+    (hoy Argenprop). Trae lo publicado por cualquier inmobiliaria, no sólo la
+    propia. Luego recalcula matches con los pedidos activos."""
+    v = get_vendedor(db, user)
+    if not v.es_admin:
+        raise HTTPException(403, "Solo el admin importa de portales")
+    if portal != "argenprop":
+        raise HTTPException(422, f"Portal no soportado: {portal}")
+    resultado = ventas_portal.sincronizar(db, ciudad=ciudad, provincia=provincia)
     if resultado.get("ok"):
         from app.services import ventas_matching
         nuevos_match = 0

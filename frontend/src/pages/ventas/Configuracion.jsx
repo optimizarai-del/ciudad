@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Settings, Percent, MapPinned, Ruler, Plus, Trash2, Lock, Send, Store, CalendarClock, RefreshCw, Power } from 'lucide-react'
+import { Settings, Percent, MapPinned, Ruler, Plus, Trash2, Lock, Send, Store, CalendarClock, RefreshCw, Power, Globe } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
 import api from '../../utils/api'
 
@@ -10,6 +10,7 @@ const TABS = [
   { key: 'valorm2', label: 'Valor m²', icon: Ruler },
   { key: 'telegram', label: 'Telegram', icon: Send },
   { key: 'tokko', label: 'Tokko', icon: Store },
+  { key: 'portales', label: 'Portales', icon: Globe },
   { key: 'plantillas', label: 'Seguimiento', icon: CalendarClock },
 ]
 
@@ -36,8 +37,10 @@ export default function Configuracion() {
         <div className="flex gap-2 mb-6 border-b border-border">
           {TABS.map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-4 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition ${
-                tab === t.key ? 'border-[#B8893A] text-primary' : 'border-transparent text-muted hover:text-primary'
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-[13px] font-semibold border-b-2 -mb-px transition ${
+                tab === t.key
+                  ? 'border-[#B8893A] text-[#B8893A]'
+                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
               }`}>
               <t.icon size={15} /> {t.label}
             </button>
@@ -49,6 +52,7 @@ export default function Configuracion() {
         {tab === 'valorm2' && <ValorM2 admin={me?.es_admin} />}
         {tab === 'telegram' && <Telegram />}
         {tab === 'tokko' && <Tokko admin={me?.es_admin} />}
+        {tab === 'portales' && <Portales admin={me?.es_admin} />}
         {tab === 'plantillas' && <Plantillas admin={me?.es_admin} />}
       </div>
     </Layout>
@@ -101,6 +105,8 @@ function Tokko({ admin }) {
   const [ciudades, setCiudades] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [msg, setMsg] = useState('')
+  const [disp, setDisp] = useState(null)      // ciudades disponibles en Tokko
+  const [cargandoDisp, setCargandoDisp] = useState(false)
 
   const load = () => api.get('/api/ventas-crm/tokko-config').then(r => {
     setCfg(r.data); setCiudades((r.data.ciudades || []).join(', '))
@@ -116,11 +122,23 @@ function Tokko({ admin }) {
     await api.put('/api/ventas-crm/tokko-config', body)
     setApiKey(''); load()
   }
-  const sync = async () => {
+  const descubrir = async () => {
+    setCargandoDisp(true); setMsg('')
+    try {
+      const r = await api.get('/api/ventas-crm/tokko-ciudades')
+      if (r.data.ok) setDisp(r.data.ciudades || [])
+      else setMsg(r.data.motivo)
+    } catch (e) { setMsg(e.response?.data?.detail || 'Error al consultar Tokko') }
+    finally { setCargandoDisp(false) }
+  }
+  const sync = async (ciudad) => {
     setSyncing(true); setMsg('')
     try {
-      const r = await api.post('/api/ventas-crm/tokko-sync')
-      setMsg(r.data.ok ? `Sync OK: ${r.data.nuevas} nuevas, ${r.data.actualizadas} actualizadas.` : r.data.motivo)
+      const url = '/api/ventas-crm/tokko-sync' + (ciudad ? `?ciudad=${encodeURIComponent(ciudad)}` : '')
+      const r = await api.post(url)
+      setMsg(r.data.ok
+        ? `Sync${ciudad ? ` de ${ciudad}` : ''} OK: ${r.data.nuevas} nuevas, ${r.data.actualizadas} actualizadas${r.data.saltadas_por_ciudad ? `, ${r.data.saltadas_por_ciudad} de otras ciudades` : ''}.`
+        : r.data.motivo)
     } catch (e) { setMsg(e.response?.data?.detail || 'Error') } finally { setSyncing(false); load() }
   }
 
@@ -128,7 +146,8 @@ function Tokko({ admin }) {
   return (
     <div>
       <p className="text-[13px] text-muted mb-4">
-        Integración con Tokko Broker. La segmentación por ciudades limita el sync a esas zonas (Mod #7).
+        Integración con Tokko Broker. Trae <b>todos</b> los inmuebles en venta de la cuenta —
+        incluidos los cargados por otras personas de la inmobiliaria. Podés delimitar qué ciudad importar.
       </p>
       <div className="card p-5 space-y-4">
         <div className="flex items-center justify-between">
@@ -154,15 +173,94 @@ function Tokko({ admin }) {
         </div>
 
         {admin && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button className="btn-primary" onClick={() => guardar({})}>Guardar</button>
-            <button className="btn-secondary" onClick={sync} disabled={syncing}>
-              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Sincronizando…' : 'Sincronizar ahora'}
+            <button className="btn-secondary" onClick={() => sync()} disabled={syncing}>
+              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Sincronizando…' : 'Sincronizar (ciudades configuradas)'}
             </button>
           </div>
         )}
         {msg && <p className="text-[12px] text-muted bg-neutral-50 dark:bg-[#141414] rounded-xl px-3 py-2">{msg}</p>}
         {cfg.ultima_sync && <p className="text-[11px] text-muted">Última sync: {new Date(cfg.ultima_sync).toLocaleString('es-AR')}</p>}
+      </div>
+
+      {/* Delimitar e importar por ciudad puntual */}
+      {admin && (
+        <div className="card p-5 mt-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-[14px] font-medium">Importar una ciudad puntual</p>
+              <p className="text-[12px] text-muted">Consultá qué ciudades hay en la cuenta Tokko y traé sólo la que quieras.</p>
+            </div>
+            <button className="btn-secondary text-[12px]" onClick={descubrir} disabled={cargandoDisp}>
+              <RefreshCw size={13} className={cargandoDisp ? 'animate-spin' : ''} /> {cargandoDisp ? 'Buscando…' : 'Ver ciudades'}
+            </button>
+          </div>
+          {disp && (disp.length === 0 ? (
+            <p className="text-[12px] text-muted">No se encontraron ciudades en la cuenta.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {disp.map(c => (
+                <button key={c.ciudad} onClick={() => sync(c.ciudad)} disabled={syncing}
+                  className="inline-flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-[13px] hover:border-[#B8893A] hover:text-[#B8893A] transition disabled:opacity-50">
+                  <span className="font-medium">{c.ciudad}</span>
+                  <span className="text-[11px] text-muted">{c.cantidad}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Portales({ admin }) {
+  const [ciudad, setCiudad] = useState('Santa Rosa')
+  const [provincia, setProvincia] = useState('La Pampa')
+  const [importando, setImportando] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const importar = async () => {
+    if (!ciudad.trim()) return
+    setImportando(true); setMsg('')
+    try {
+      const qs = new URLSearchParams({ ciudad: ciudad.trim(), provincia: provincia.trim(), portal: 'argenprop' })
+      const r = await api.post(`/api/ventas-crm/portal-sync?${qs}`)
+      setMsg(r.data.ok
+        ? `Importadas de Argenprop: ${r.data.nuevas} nuevas, ${r.data.actualizadas} actualizadas (de ${r.data.vistas} vistas).`
+        : (r.data.motivo || 'No se pudo importar.'))
+    } catch (e) { setMsg(e.response?.data?.detail || 'Error al importar.') }
+    finally { setImportando(false) }
+  }
+
+  return (
+    <div>
+      <p className="text-[13px] text-muted mb-4">
+        Importá propiedades en venta publicadas en <b>portales públicos</b> por cualquier inmobiliaria de la ciudad
+        (no sólo las tuyas). Hoy: <b>Argenprop</b>. Entran al catálogo como fuente <i>scraping</i> y se geocodifican
+        desde el mapa («Ubicar pendientes»).
+      </p>
+      <div className="card p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="label">Ciudad</label>
+            <input className="input" value={ciudad} onChange={e => setCiudad(e.target.value)} disabled={!admin} /></div>
+          <div><label className="label">Provincia</label>
+            <input className="input" value={provincia} onChange={e => setProvincia(e.target.value)} disabled={!admin} /></div>
+        </div>
+        {admin ? (
+          <button className="btn-primary" onClick={importar} disabled={importando}>
+            <RefreshCw size={14} className={importando ? 'animate-spin' : ''} />
+            {importando ? 'Importando…' : 'Importar de Argenprop'}
+          </button>
+        ) : (
+          <p className="text-[12px] text-muted flex items-center gap-1.5"><Lock size={13} /> Solo el admin puede importar.</p>
+        )}
+        {msg && <p className="text-[12px] text-muted bg-neutral-50 dark:bg-[#141414] rounded-xl px-3 py-2">{msg}</p>}
+        <p className="text-[11px] text-muted">
+          Nota: los portales prohíben el scraping en sus términos. Es una zona gris legal; usalo con criterio.
+          La importación es manual (no automática) y a un ritmo prudente.
+        </p>
       </div>
     </div>
   )

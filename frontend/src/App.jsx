@@ -34,6 +34,7 @@ import VentasTareas       from './pages/ventas/Tareas'
 import VentasNotificaciones from './pages/ventas/Notificaciones'
 import VentasClientes     from './pages/ventas/Clientes'
 import VentasPropiedades  from './pages/ventas/Propiedades'
+import VentasMapas        from './pages/ventas/Mapas'
 import VentasOperaciones  from './pages/ventas/Operaciones'
 import VentasContactos    from './pages/ventas/Contactos'
 import VersionesLocal     from './pages/VersionesLocal'
@@ -134,6 +135,9 @@ export default function App() {
         } />
         <Route path="/ventas-crm/propiedades" element={
           <ProtectedRoute requireVentas><VentasPropiedades /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/mapas" element={
+          <ProtectedRoute requireVentas><VentasMapas /></ProtectedRoute>
         } />
         <Route path="/ventas-crm/operaciones" element={
           <ProtectedRoute requireVentas><VentasOperaciones /></ProtectedRoute>

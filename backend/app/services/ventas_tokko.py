@@ -16,6 +16,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app import models_ventas as mv
+from app.services import ventas_geo
 
 TOKKO_BASE = "https://www.tokkobroker.com/api/v1/property/"
 
@@ -113,6 +114,22 @@ def _normalizar(raw: dict, ciudades_cfg=None) -> dict:
         if precio:
             break
 
+    # Coordenadas reales que ya provee Tokko (geo_lat/geo_long como strings).
+    # Evita tener que geocodificar con Nominatim: la propiedad cae en el mapa al
+    # instante. Si Tokko no las trae, quedan en None y el backfill las resuelve.
+    lat = _to_float(raw.get("geo_lat"))
+    lng = _to_float(raw.get("geo_long"))
+
+    # De quién es la propiedad. Cuando se activa la Red Tokko Broker, entran
+    # propiedades compartidas por colegas de OTRAS inmobiliarias: en ese caso el
+    # `branch` (la agencia/sucursal) es el dato que identifica al colega. Para
+    # las propias, `branch` es la agencia de la cuenta y `producer` distingue
+    # quién la cargó. Guardamos agencia → productor para que en el catálogo y el
+    # mapa se vea siempre de qué inmobiliaria/colega proviene.
+    agencia = (raw.get("branch") or {}).get("name")
+    productor = (raw.get("producer") or {}).get("name")
+    inmobiliaria = " · ".join([x for x in (agencia, productor) if x]) or None
+
     return {
         "titulo": raw.get("publication_title") or raw.get("address"),
         "tipo": tipo,
@@ -120,35 +137,82 @@ def _normalizar(raw: dict, ciudades_cfg=None) -> dict:
         "fuente": mv.VPropiedadFuente.tokko,
         "direccion": raw.get("address"),
         "ciudad": ciudad,
+        "lat": lat,
+        "lng": lng,
         "precio_usd": _to_float(precio),
         "superficie_m2": _to_float(raw.get("total_surface") or raw.get("roofed_surface")),
         "dormitorios": _to_int(raw.get("suite_amount") or raw.get("room_amount")),
         "banos": _to_int(raw.get("bathroom_amount")),
         "descripcion": raw.get("description"),
         "link_externo": raw.get("public_url"),
+        "inmobiliaria": inmobiliaria,
         "_es_venta": es_venta,
         "_full_location": full_low,
         "tokko_id": str(raw.get("id")) if raw.get("id") else None,
     }
 
 
-def _fetch(api_key: str, limit=50) -> list:
-    params = urllib.parse.urlencode({"key": api_key, "limit": limit, "format": "json"})
-    req = urllib.request.Request(f"{TOKKO_BASE}?{params}")
-    with urllib.request.urlopen(req, timeout=15) as r:
-        data = json.loads(r.read())
-    return data.get("objects", data if isinstance(data, list) else [])
+def _fetch(api_key: str, limit=50, max_paginas=20) -> list:
+    """Trae TODAS las propiedades de la cuenta paginando con meta.next. Tokko
+    devuelve `meta.total_count` y un offset; iteramos hasta agotar (con un tope
+    de seguridad). Antes sólo traía las primeras `limit` — perdía inventario si
+    la agencia tenía más de 50 propiedades."""
+    objetos, offset = [], 0
+    for _ in range(max_paginas):
+        params = urllib.parse.urlencode({
+            "key": api_key, "limit": limit, "offset": offset, "format": "json",
+        })
+        req = urllib.request.Request(f"{TOKKO_BASE}?{params}")
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.loads(r.read())
+        page = data.get("objects", data if isinstance(data, list) else [])
+        objetos.extend(page)
+        total = (data.get("meta") or {}).get("total_count")
+        offset += limit
+        if not page or total is None or offset >= total:
+            break
+    return objetos
 
 
-def sincronizar(db: Session) -> dict:
+def ciudades_disponibles(db: Session) -> dict:
+    """Descubre en vivo qué ciudades tiene la cuenta Tokko y cuántos inmuebles en
+    venta hay en cada una. Alimenta el selector «delimitar ciudad» del front."""
+    cfg = get_config(db)
+    if not cfg.api_key:
+        return {"ok": False, "motivo": "Falta api_key de Tokko.", "ciudades": []}
+    try:
+        objetos = _fetch(cfg.api_key)
+    except Exception as e:
+        return {"ok": False, "motivo": f"Error al consultar Tokko: {e}", "ciudades": []}
+    conteo = {}
+    for raw in objetos:
+        es_venta = any((op.get("operation_type") or "").lower() == "sale"
+                       for op in raw.get("operations", []) or [])
+        if not es_venta:
+            continue
+        ciudad, _ = _ciudad_de_location(raw.get("location") or {}, _ciudades(cfg))
+        if not ciudad:
+            continue
+        conteo[ciudad] = conteo.get(ciudad, 0) + 1
+    ciudades = sorted(({"ciudad": c, "cantidad": n} for c, n in conteo.items()),
+                      key=lambda x: -x["cantidad"])
+    return {"ok": True, "ciudades": ciudades, "total": len(objetos)}
+
+
+def sincronizar(db: Session, ciudades_override=None) -> dict:
     """Trae propiedades de Tokko (filtradas por ciudades) y las upsertea en el
-    catálogo. Devuelve un resumen de la corrida (también usado por Mod #4)."""
+    catálogo. Devuelve un resumen de la corrida (también usado por Mod #4).
+
+    `ciudades_override`: si se pasa una lista de ciudades, se sincroniza SOLO
+    esas (delimitar la importación a una ciudad puntual desde el front). Si es
+    None, se usan las ciudades configuradas. Una lista vacía [] significa «sin
+    filtro»: importa todas las ciudades que devuelva la cuenta."""
     cfg = get_config(db)
     if not cfg.activo or not cfg.api_key:
         return {"ok": False, "motivo": "Tokko no configurado (falta api_key o está inactivo).",
                 "nuevas": 0, "actualizadas": 0}
 
-    ciudades_cfg = _ciudades(cfg)
+    ciudades_cfg = ciudades_override if ciudades_override is not None else _ciudades(cfg)
     ciudades = [c.lower() for c in ciudades_cfg]
     try:
         objetos = _fetch(cfg.api_key)
@@ -175,6 +239,10 @@ def sincronizar(db: Session) -> dict:
             saltadas += 1
             continue
         norm.pop("tokko_id", None)
+        # Barrio por point-in-polygon usando las coords que ya trae Tokko.
+        if norm.get("lat") is not None:
+            b = ventas_geo.barrio_de_punto(db, norm["lat"], norm["lng"])
+            norm["barrio_id"] = b.id if b else None
         # Dedup por link_externo (URL pública de Tokko). Solo deduplicamos si
         # hay link Y la propiedad existente también es de fuente Tokko, para no
         # pisar nunca una propiedad cargada a mano con link vacío/igual.

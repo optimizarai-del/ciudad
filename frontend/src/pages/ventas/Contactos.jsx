@@ -49,7 +49,7 @@ export default function Contactos() {
                     <span className="chip-muted capitalize mt-1">{c.tipo}</span>
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => { setEditing(c); setOpen(true) }} className="p-1.5 text-muted hover:text-primary"><Pencil size={13} /></button>
+                    <button onClick={() => { setEditing(c); setOpen(true) }} className="p-1.5 text-muted hover:text-[#B8893A]"><Pencil size={13} /></button>
                     <button onClick={() => del(c)} className="p-1.5 text-muted hover:text-danger"><Trash2 size={13} /></button>
                   </div>
                 </div>
