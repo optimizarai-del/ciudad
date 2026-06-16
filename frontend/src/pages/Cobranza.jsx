@@ -144,7 +144,7 @@ export default function Cobranza() {
                   const cfg = ESTADO_CONFIG[p.estado] || ESTADO_CONFIG.pendiente
                   const Icon = cfg.icon
                   return (
-                    <tr key={p.contrato_id} className="border-b border-gray-50 dark:border-gray-900 hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors">
+                    <tr key={p.pago_id ?? `${p.contrato_id}-${p.periodo}`} className="border-b border-gray-50 dark:border-gray-900 hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors">
                       <td className="td">
                         <p className="font-medium text-sm">{p.propiedad}</p>
                         <p className="text-xs text-gray-400 dark:text-gray-500">{p.contrato_codigo} · {p.propiedad_ciudad}</p>
@@ -712,7 +712,10 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
 
           <div className="flex gap-3 pt-1">
             <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
-            <button className="btn-primary flex-1" disabled={loading || (form.conceptos || []).filter(c => c.estado).every(c => (Number(c.monto) || 0) === 0)}>
+            <button className="btn-primary flex-1"
+              disabled={loading
+                || (form.conceptos || []).filter(c => c.estado).every(c => (Number(c.monto) || 0) === 0)
+                || Math.max(0, aCobrarInq - descuentoRefs) <= 0}>
               {loading ? 'Procesando…' : 'Confirmar y emitir comprobantes'}
             </button>
           </div>

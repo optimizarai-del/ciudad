@@ -2,6 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body, Query
 from fastapi.responses import Response, RedirectResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from typing import List, Optional
 
 from app.database import get_db
@@ -259,6 +260,12 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
             opciones = ", ".join(e.value for e in cls)
             raise HTTPException(400, f"Valor inválido para {campo}: '{val}'. Opciones: {opciones}")
 
+    # Validación de fechas: fin no puede ser anterior al inicio (si no, no se
+    # generan pagos —cursor > end— y el contrato "vigente" queda sin cobros).
+    fi, ff = payload.get("fecha_inicio"), payload.get("fecha_fin")
+    if fi and ff and ff < fi:
+        raise HTTPException(400, "La fecha de fin no puede ser anterior a la de inicio.")
+
     # La propiedad seleccionada debe estar en el mismo workspace que el usuario
     if bool(prop.is_demo) != workspace_flag(user):
         raise HTTPException(403, "La propiedad no pertenece a tu workspace.")
@@ -296,8 +303,10 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
                 ))
         except HTTPException:
             raise
-        except Exception as e:
-            print(f"[contratos.crear] sync inquilinos falló (continuamos): {e}")
+        except (OperationalError, ProgrammingError) as e:
+            # Schema drift (tabla pivote aún no migrada): seguir sin romper.
+            print(f"[contratos.crear] sync inquilinos — schema drift, se omite: {e}")
+        # Cualquier otro error sí debe propagar (no guardar un contrato a medias).
 
         # Sincronizar garantes (tabla propia, inline). Defensivo igual que arriba.
         try:
@@ -305,8 +314,8 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
                 _sync_garantes(db, obj, garantes_data, is_demo)
         except HTTPException:
             raise
-        except Exception as e:
-            print(f"[contratos.crear] sync garantes falló (continuamos): {e}")
+        except (OperationalError, ProgrammingError) as e:
+            print(f"[contratos.crear] sync garantes — schema drift, se omite: {e}")
 
         # Generar pagos pendientes futuros para que el contrato aparezca
         # automáticamente en Cobros y Liquidaciones.
@@ -345,43 +354,18 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
 
         db.commit(); db.refresh(obj)
 
-        # Verificación post-commit: SELECT explícito a la DB para confirmar
-        # que los pagos quedaron persistidos. Si la transacción falló
-        # silenciosamente, intentamos UNA VEZ MÁS en transacción nueva.
+        # Verificación post-commit (solo lectura/log). Ya NO hay retry con
+        # db.rollback() acá: la generación de pagos corre pre-commit dentro de
+        # la misma transacción y _generar_pagos_futuros usa savepoints, así que
+        # si el commit fue ok los pagos están. Un rollback después del commit
+        # sería peligroso (dejaría la sesión inconsistente).
         try:
             count_db = db.query(models.Pago).filter_by(contrato_id=obj.id).count()
-            print(f"[contratos.crear] ✅ contrato #{obj.id} CREADO en DB. "
+            print(f"[contratos.crear] ✅ contrato #{obj.id} CREADO. "
                   f"Pagos en DB: {count_db} (esperados: {pagos_n})")
-
-            # GARANTIZADOR: si esperábamos pagos y no hay ninguno, retry
-            # en transacción independiente. Esto cubre el caso de que la
-            # transacción principal haya hecho rollback parcial sin avisar.
             if pagos_n > 0 and count_db == 0:
-                print(f"[contratos.crear] ⚠ retry en tx nueva — pagos no persistieron")
-                from app.services.contrato_import import _generar_pagos_futuros
-                try:
-                    retry_n = _generar_pagos_futuros(db, obj)
-                    db.commit()
-                    final = db.query(models.Pago).filter_by(contrato_id=obj.id).count()
-                    print(f"[contratos.crear] retry: generó {retry_n}, final en DB: {final}")
-                except Exception as e:
-                    print(f"[contratos.crear] retry falló: {e}")
-                    try: db.rollback()
-                    except Exception: pass
-            elif estado_v == "vigente" and obj.fecha_inicio and obj.fecha_fin and count_db == 0:
-                # Caso raro: contrato vigente con fechas pero pagos_n=0
-                # (probablemente excepción silenciada arriba). Forzar generación.
-                print(f"[contratos.crear] ⚠ contrato vigente sin pagos — forzando generación")
-                from app.services.contrato_import import _generar_pagos_futuros
-                try:
-                    retry_n = _generar_pagos_futuros(db, obj)
-                    db.commit()
-                    final = db.query(models.Pago).filter_by(contrato_id=obj.id).count()
-                    print(f"[contratos.crear] forzado: generó {retry_n}, final en DB: {final}")
-                except Exception as e:
-                    print(f"[contratos.crear] forzado falló: {e}")
-                    try: db.rollback()
-                    except Exception: pass
+                print(f"[contratos.crear] ⚠ ADVERTENCIA: se esperaban {pagos_n} pagos "
+                      f"y no hay ninguno. Revisar logs de _generar_pagos_futuros.")
         except Exception as e:
             print(f"[contratos.crear] post-commit count falló: {e}")
 
@@ -418,14 +402,22 @@ def editar(id: int, data: schemas.ContratoCreate, db: Session = Depends(get_db),
     for k, v in payload.items():
         setattr(obj, k, v)
 
+    # Validación de fechas (con los valores ya aplicados).
+    if obj.fecha_inicio and obj.fecha_fin and obj.fecha_fin < obj.fecha_inicio:
+        db.rollback()
+        raise HTTPException(400, "La fecha de fin no puede ser anterior a la de inicio.")
+
     # Si vino la lista de inquilinos en el PATCH, la sincronizamos.
     if inquilinos_data is not None:
         try:
             _sync_inquilinos(db, obj, inquilinos_data, workspace_flag(user))
         except HTTPException:
             db.rollback(); raise
+        except (OperationalError, ProgrammingError) as e:
+            print(f"[contratos.editar] sync inquilinos — schema drift, se omite: {e}")
         except Exception as e:
-            print(f"[contratos.editar] sync inquilinos: {e}")
+            db.rollback()
+            raise HTTPException(400, f"No se pudieron guardar los inquilinos: {type(e).__name__}: {str(e)[:200]}")
 
     # Si vino la lista de garantes en el PATCH, la sincronizamos (lista vacía
     # = borrar todos los garantes del contrato).
@@ -434,8 +426,11 @@ def editar(id: int, data: schemas.ContratoCreate, db: Session = Depends(get_db),
             _sync_garantes(db, obj, garantes_data, workspace_flag(user))
         except HTTPException:
             db.rollback(); raise
+        except (OperationalError, ProgrammingError) as e:
+            print(f"[contratos.editar] sync garantes — schema drift, se omite: {e}")
         except Exception as e:
-            print(f"[contratos.editar] sync garantes: {e}")
+            db.rollback()
+            raise HTTPException(400, f"No se pudieron guardar los garantes: {type(e).__name__}: {str(e)[:200]}")
 
     historial.registrar(
         db, user,

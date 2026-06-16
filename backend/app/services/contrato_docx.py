@@ -107,7 +107,20 @@ def _hasta_999(n: int) -> str:
     return (pre + " " if pre else "") + _hasta_99(r)
 
 
+def _grupo_miles(n: int) -> str:
+    """0..999.999 → 'X mil Y' (sin millones)."""
+    miles, cien = divmod(n, 1000)
+    partes = []
+    if miles:
+        partes.append("mil" if miles == 1 else _hasta_999(miles) + " mil")
+    if cien:
+        partes.append(_hasta_999(cien))
+    return " ".join(partes)
+
+
 def _entero_a_letras(n) -> str:
+    """Entero a palabras en español. Soporta hasta ~1 billón (10^12), suficiente
+    para montos de alquiler, depósitos y precios de venta altos."""
     try:
         n = int(round(float(n)))
     except Exception:
@@ -117,14 +130,13 @@ def _entero_a_letras(n) -> str:
     if n < 0:
         return "menos " + _entero_a_letras(-n)
     millones, resto = divmod(n, 1_000_000)
-    miles, cien = divmod(resto, 1000)
     partes = []
     if millones:
-        partes.append("un millón" if millones == 1 else _hasta_999(millones) + " millones")
-    if miles:
-        partes.append("mil" if miles == 1 else _hasta_999(miles) + " mil")
-    if cien:
-        partes.append(_hasta_999(cien))
+        # `millones` puede ser hasta 999.999 → se redacta con su propio grupo
+        # de miles (ej. 2.500.000.000 → "dos mil quinientos millones").
+        partes.append("un millón" if millones == 1 else _grupo_miles(millones) + " millones")
+    if resto:
+        partes.append(_grupo_miles(resto))
     return " ".join(partes)
 
 

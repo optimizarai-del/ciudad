@@ -8,8 +8,17 @@ from app.database import get_db
 from app.security import get_current_user
 from app import models
 from app.services import historial
+from app.services.workspace import apply_workspace_filter, workspace_flag
 
 router = APIRouter(tags=["pagos"])
+
+
+def _contrato_scope(db, user):
+    return apply_workspace_filter(db.query(models.Contrato), models.Contrato, user)
+
+
+def _pago_scope(db, user):
+    return apply_workspace_filter(db.query(models.Pago), models.Pago, user)
 
 
 class PagoCreate(BaseModel):
@@ -50,15 +59,15 @@ class PagoOut(BaseModel):
 
 @router.get("/api/contratos/{contrato_id}/pagos", response_model=List[PagoOut])
 def listar_pagos(contrato_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    contrato = db.query(models.Contrato).filter_by(id=contrato_id).first()
+    contrato = _contrato_scope(db, user).filter_by(id=contrato_id).first()
     if not contrato:
         raise HTTPException(404, "Contrato no encontrado")
-    return db.query(models.Pago).filter_by(contrato_id=contrato_id).order_by(models.Pago.fecha_vencimiento).all()
+    return _pago_scope(db, user).filter_by(contrato_id=contrato_id).order_by(models.Pago.fecha_vencimiento).all()
 
 
 @router.post("/api/contratos/{contrato_id}/pagos", response_model=PagoOut)
 def crear_pago(contrato_id: int, data: PagoCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    contrato = db.query(models.Contrato).filter_by(id=contrato_id).first()
+    contrato = _contrato_scope(db, user).filter_by(id=contrato_id).first()
     if not contrato:
         raise HTTPException(404, "Contrato no encontrado")
 
@@ -83,6 +92,7 @@ def crear_pago(contrato_id: int, data: PagoCreate, db: Session = Depends(get_db)
         monto_total=total,
         estado=data.estado or "pendiente",
         notas=data.notas,
+        is_demo=workspace_flag(user),
     )
     db.add(pago)
     db.flush()
@@ -102,7 +112,7 @@ def crear_pago(contrato_id: int, data: PagoCreate, db: Session = Depends(get_db)
 
 @router.patch("/api/pagos/{pago_id}", response_model=PagoOut)
 def actualizar_pago(pago_id: int, data: PagoCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    pago = db.query(models.Pago).filter_by(id=pago_id).first()
+    pago = _pago_scope(db, user).filter_by(id=pago_id).first()
     if not pago:
         raise HTTPException(404, "Pago no encontrado")
     snap_antes = historial.snapshot(pago)
@@ -125,7 +135,7 @@ def actualizar_pago(pago_id: int, data: PagoCreate, db: Session = Depends(get_db
 
 @router.delete("/api/pagos/{pago_id}")
 def eliminar_pago(pago_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    pago = db.query(models.Pago).filter_by(id=pago_id).first()
+    pago = _pago_scope(db, user).filter_by(id=pago_id).first()
     if not pago:
         raise HTTPException(404, "Pago no encontrado")
     snap_antes = historial.snapshot(pago)

@@ -16,7 +16,7 @@ from datetime import date, datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.database import get_db
 from app.security import get_current_user
@@ -34,49 +34,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/cobranza", tags=["cobranza"])
 
-
-def _conceptos_pendientes_arrastrados(db: Session, contrato_id: int, mes_actual: str) -> list[dict]:
-    """
-    Mira todos los pagos previos del contrato y devuelve los conceptos que
-    quedaron en estado 'pendiente' y NO se cobraron/pagaron en períodos
-    posteriores. Cada item viene con `label`, `monto`, `desde_periodo` para
-    que el frontend muestre de dónde viene el arrastre.
-    """
-    import json as _json
-    pagos = (
-        db.query(models.Pago)
-        .filter(models.Pago.contrato_id == contrato_id, models.Pago.periodo < mes_actual)
-        .order_by(models.Pago.periodo.asc())
-        .all()
-    )
-    # Acumulador por label en minúsculas. Cada concepto puede aparecer
-    # `pendiente` en un mes y `cobrar`/`pagado_directo` en otro posterior,
-    # en cuyo caso se considera saldado.
-    pendientes: dict[str, dict] = {}
-    for p in pagos:
-        raw = p.detalle_conceptos
-        if not raw:
-            continue
-        try:
-            arr = _json.loads(raw) if isinstance(raw, str) else raw
-        except Exception:
-            continue
-        for c in (arr or []):
-            label = (c.get("label") or "").strip()
-            if not label:
-                continue
-            key = label.lower()
-            estado = c.get("estado") or _legacy_paga_to_estado(c.get("paga"))
-            if estado == "pendiente":
-                pendientes[key] = {
-                    "label": label,
-                    "monto": float(c.get("monto") or 0),
-                    "desde_periodo": p.periodo,
-                }
-            elif estado in ("cobrar", "pagado_directo"):
-                # Saldó la deuda — lo sacamos del acumulador.
-                pendientes.pop(key, None)
-    return list(pendientes.values())
 
 
 def _legacy_paga_to_estado(paga: str | None) -> str:
@@ -324,7 +281,7 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
 
 @router.patch("/{pago_id}/cobrar")
 def marcar_cobrado(pago_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    pago = db.query(models.Pago).get(pago_id)
+    pago = apply_workspace_filter(db.query(models.Pago), models.Pago, user).filter_by(id=pago_id).first()
     if not pago:
         raise HTTPException(404, "Pago no encontrado")
     snap_antes = historial.snapshot(pago)
@@ -410,21 +367,21 @@ def resumen_cobranza(mes: Optional[str] = None, db: Session = Depends(get_db), u
 class RegistrarPagoIn(BaseModel):
     periodo: Optional[str] = None             # YYYY-MM
     fecha_pago: Optional[date] = None
-    monto_alquiler: float = 0
+    monto_alquiler: float = Field(0, ge=0)
     # Legacy: si vienen estos campos individuales se asume `paga=inquilino`.
     # El frontend nuevo manda `conceptos` (lista granular).
-    monto_expensas: float = 0
-    monto_impuestos: float = 0
-    monto_municipal: float = 0
-    monto_otros: float = 0
+    monto_expensas: float = Field(0, ge=0)
+    monto_impuestos: float = Field(0, ge=0)
+    monto_municipal: float = Field(0, ge=0)
+    monto_otros: float = Field(0, ge=0)
     # NUEVO: lista de conceptos extra con quién paga cada uno.
     # [{"label": "Luz", "monto": 15000, "paga": "inquilino"|"propietario"}, ...]
     # Si paga el inquilino, suma al total cobrado. Si paga el propietario,
     # queda informativo en el comprobante pero no se cobra.
     conceptos: list[dict] = []
-    monto_descuento_refacciones: float = 0     # se resta del total
+    monto_descuento_refacciones: float = Field(0, ge=0)  # se resta del total
     refacciones_aplicadas: list[int] = []       # IDs a marcar como aplicadas
-    monto_pagado_transferencia: float = 0      # parte abonada por transferencia (se resta del cobro en caja)
+    monto_pagado_transferencia: float = Field(0, ge=0)   # parte abonada por transferencia
     monto_total: Optional[float] = None
     notas: Optional[str] = None
 
@@ -554,6 +511,11 @@ def _registrar_pago_impl(
         data.monto_total if data.monto_total is not None
         else sum(v for _, v in items_no_cero)
     )
+    # Nunca persistir un total negativo (ej. descuento de refacciones mayor al
+    # alquiler): se clampa a 0 para no corromper los KPIs de dinero.
+    if monto_total is not None and monto_total < 0:
+        logger.warning("[cobranza] monto_total negativo (%.2f) — se clampa a 0", monto_total)
+        monto_total = 0.0
 
     # Informativos: conceptos que el inquilino ya pagó directo al ente
     # (no se cobran acá, no van al propietario, solo se asientan).

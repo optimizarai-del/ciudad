@@ -204,7 +204,7 @@ function Modal({ initial, onClose, onSaved }) {
   const [form, setForm] = useState(initial ? { ...initial } : { ...empty })
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
-  const set = k => e => setForm({ ...form, [k]: e.target.value })
+  const set = k => e => { const v = e.target.value; setForm(f => ({ ...f, [k]: v })) }
 
   const submit = async e => {
     e.preventDefault(); setLoading(true); setErr('')

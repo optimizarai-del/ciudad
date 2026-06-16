@@ -139,13 +139,14 @@ def _split_neto_por_copropietarios(pago: models.Pago, neto_total: float) -> list
                 "porcentaje_efectivo": round(porc_norm, 2),
                 "neto_parte": round(neto_total * porc_norm / 100.0, 2),
             })
+        _ajustar_residuo(partes, neto_total)
         return partes
 
     # Sin porcentajes (o mezclados) → división equitativa
     n = len(co_props)
     porc_cada = 100.0 / n
     parte = round(neto_total / n, 2)
-    return [
+    partes = [
         {
             "cliente_id": pp.cliente.id if pp.cliente else None,
             "nombre": (pp.cliente.razon_social or
@@ -156,6 +157,20 @@ def _split_neto_por_copropietarios(pago: models.Pago, neto_total: float) -> list
         }
         for pp in co_props
     ]
+    _ajustar_residuo(partes, neto_total)
+    return partes
+
+
+def _ajustar_residuo(partes: list, neto_total: float) -> None:
+    """Corrige los centavos perdidos por redondeo: el residuo (neto_total menos
+    la suma de las partes redondeadas) se asigna a la última parte, garantizando
+    que la suma de las partes sea exactamente el neto total."""
+    if not partes:
+        return
+    suma_partes = round(sum(p["neto_parte"] for p in partes), 2)
+    residuo = round(neto_total - suma_partes, 2)
+    if residuo:
+        partes[-1]["neto_parte"] = round(partes[-1]["neto_parte"] + residuo, 2)
 
 
 def _serializar_pago(pago: models.Pago) -> dict:
@@ -381,6 +396,8 @@ def marcar_liquidado(
         monto = float(monto)
     except Exception:
         raise HTTPException(400, "monto inválido")
+    if monto < 0:
+        raise HTTPException(400, "El monto liquidado no puede ser negativo.")
 
     pago.liquidado_propietario = True
     pago.fecha_liquidacion_propietario = fecha

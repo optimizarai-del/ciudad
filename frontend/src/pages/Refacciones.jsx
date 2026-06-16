@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Wrench, Plus, X, Trash2, Pencil, Filter, RefreshCw,
   User, Home as HomeIcon, AlertCircle, CheckCircle2,
@@ -263,7 +263,7 @@ function Modal({ initial, propiedades, contratos, onClose, onSaved }) {
   const [form, setForm] = useState(initial ? { ...initial, fecha: initial.fecha || '' } : { ...empty })
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
-  const set = k => e => setForm({ ...form, [k]: e.target.value })
+  const set = k => e => { const v = e.target.value; setForm(f => ({ ...f, [k]: v })) }
 
   // Contratos sugeridos: los vigentes de la propiedad seleccionada.
   const contratosDePropiedad = useMemo(() => {
@@ -274,8 +274,13 @@ function Modal({ initial, propiedades, contratos, onClose, onSaved }) {
     )
   }, [contratos, form.propiedad_id])
 
-  // Si solo hay 1 contrato vigente, lo seleccionamos automáticamente.
+  // Auto-selección del único contrato vigente: SOLO una vez por propiedad.
+  // Así, si el usuario elige "Sin asignar" a propósito, no se lo volvemos a
+  // forzar en el siguiente render.
+  const autoSelProp = useRef(null)
   useEffect(() => {
+    if (autoSelProp.current === form.propiedad_id) return
+    autoSelProp.current = form.propiedad_id
     if (form.propiedad_id && !form.contrato_id && contratosDePropiedad.length === 1) {
       setForm(f => ({ ...f, contrato_id: contratosDePropiedad[0].id }))
     }

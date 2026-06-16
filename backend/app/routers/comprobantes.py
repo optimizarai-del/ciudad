@@ -10,8 +10,18 @@ from app.security import get_current_user
 from app import models
 from app.services.email_service import enviar_email, smtp_configurado
 from app.services import supabase_storage
+from app.services.workspace import is_demo_user
 
 router = APIRouter(prefix="/api/comprobantes", tags=["comprobantes"])
+
+
+def _comprobante_scope(db, user):
+    """Comprobantes del workspace del usuario: se resuelve por el `is_demo`
+    del Pago al que pertenecen (Comprobante no tiene is_demo propio)."""
+    flag = is_demo_user(user)
+    return (db.query(models.Comprobante)
+              .join(models.Pago, models.Comprobante.pago_id == models.Pago.id)
+              .filter(models.Pago.is_demo == flag))
 
 
 def _serialize(c: models.Comprobante) -> dict:
@@ -38,25 +48,24 @@ def listar(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    q = db.query(models.Comprobante).order_by(models.Comprobante.id.desc())
+    q = _comprobante_scope(db, user).order_by(models.Comprobante.id.desc())
     if pago_id:
         q = q.filter(models.Comprobante.pago_id == pago_id)
     if contrato_id:
-        pago_ids = [p.id for p in db.query(models.Pago.id).filter(models.Pago.contrato_id == contrato_id).all()]
-        q = q.filter(models.Comprobante.pago_id.in_(pago_ids or [-1]))
+        q = q.filter(models.Pago.contrato_id == contrato_id)
     return [_serialize(c) for c in q.all()]
 
 
 @router.get("/{id}/pdf")
 def descargar(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    c = db.query(models.Comprobante).filter_by(id=id).first()
+    c = _comprobante_scope(db, user).filter(models.Comprobante.id == id).first()
     if not c:
         raise HTTPException(404, "Comprobante no encontrado")
 
     # Modo Storage
     if c.storage_path and supabase_storage.enabled():
         ok, signed = supabase_storage.get_signed_url(
-            supabase_storage.BUCKET_COMPROBANTES, c.storage_path, expires_in=3600,
+            supabase_storage.BUCKET_COMPROBANTES, c.storage_path, expires_in=120,
         )
         if ok:
             return RedirectResponse(url=signed, status_code=307)
@@ -75,7 +84,7 @@ def descargar(id: int, db: Session = Depends(get_db), user=Depends(get_current_u
 
 @router.post("/{id}/reenviar")
 def reenviar(id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    c = db.query(models.Comprobante).filter_by(id=id).first()
+    c = _comprobante_scope(db, user).filter(models.Comprobante.id == id).first()
     if not c:
         raise HTTPException(404, "Comprobante no encontrado")
     if not c.destinatario_email:

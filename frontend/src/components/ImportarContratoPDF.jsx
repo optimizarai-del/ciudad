@@ -309,18 +309,16 @@ function PreviewStep({ datos, setNested, loading, err, onConfirm }) {
         </div>
       </Seccion>
 
-      {/* Inventario */}
-      {(datos.inventario || datos.inventario === '') && (
-        <Seccion titulo="Inventario de bienes muebles">
-          <textarea
-            className="input resize-none"
-            rows={3}
-            placeholder="Listado de muebles, electrodomésticos, luminarias…"
-            value={datos.inventario ?? ''}
-            onChange={e => setNested('inventario', e.target.value)}
-          />
-        </Seccion>
-      )}
+      {/* Inventario — siempre editable, aunque la IA no haya detectado nada */}
+      <Seccion titulo="Inventario de bienes muebles">
+        <textarea
+          className="input resize-none"
+          rows={3}
+          placeholder="Listado de muebles, electrodomésticos, luminarias…"
+          value={datos.inventario ?? ''}
+          onChange={e => setNested('inventario', e.target.value)}
+        />
+      </Seccion>
 
       {/* Pagos futuros */}
       <Seccion titulo="Pagos del período">

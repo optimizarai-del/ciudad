@@ -616,6 +616,11 @@ def crear_desde_parsed(db: Session, datos: dict, user) -> dict:
     # Determinar estado automáticamente según fechas si no vino explícito.
     fi = _parse_date(datos.get("fecha_inicio"))
     ff = _parse_date(datos.get("fecha_fin"))
+    # Fechas incoherentes: descartar la fecha_fin invertida para no generar un
+    # contrato "vigente" sin pagos (cursor > end) ni un Word con plazo falso.
+    if fi and ff and ff < fi:
+        print(f"[contrato_import] fecha_fin {ff} < fecha_inicio {fi}: se ignora la fecha_fin")
+        ff = None
     if not datos.get("estado"):
         from datetime import date as _date_today
         today = _date_today.today()
@@ -844,43 +849,48 @@ def _generar_pagos_futuros(db: Session, contrato: models.Contrato) -> int:
         for (periodo, fecha_venc) in a_insertar
     ]
 
+    # CRÍTICO: nunca llamar db.rollback() acá (revierte la transacción raíz y
+    # se pierde el contrato/propiedad/clientes recién creados). Usamos
+    # SAVEPOINTS (db.begin_nested): si el bulk insert falla, solo se revierte
+    # ese sub-bloque y caemos al fallback por fila, cada una en su savepoint.
+    bulk_ok = False
     try:
-        db.execute(_insert(models.Pago.__table__), rows)
+        with db.begin_nested():
+            db.execute(_insert(models.Pago.__table__), rows)
         db.flush()
         creados = len(rows)
+        bulk_ok = True
         print(f"[_generar_pagos_futuros] contrato {contrato_id}: "
               f"INSERTaron {creados} pagos pendientes")
     except Exception as e:
-        # Fallback: si el bulk insert falla por schema drift, intentamos
-        # uno por uno con SQL todavía más mínimo.
-        print(f"[_generar_pagos_futuros] bulk insert falló: {type(e).__name__}: {e}")
-        try: db.rollback()
-        except Exception: pass
+        # El savepoint ya revirtió SOLO el bulk insert; la transacción raíz
+        # (contrato/propiedad/clientes) sigue intacta.
+        print(f"[_generar_pagos_futuros] bulk insert falló (savepoint revertido): {type(e).__name__}: {e}")
 
+    if not bulk_ok:
+        # Fallback: uno por uno con SQL mínimo, cada insert en su propio
+        # savepoint para que un fallo aislado no tumbe el resto ni la raíz.
         from sqlalchemy import text
+        from app.database import IS_POSTGRES, CIUDAD_SCHEMA
+        qual = f'"{CIUDAD_SCHEMA}".pagos' if IS_POSTGRES else "pagos"
         for periodo, fecha_venc in a_insertar:
             try:
-                # Usar :param para no exponer SQL injection.
-                # Schema de Postgres: tabla vive en schema 'ciudad'. SQLite: sin schema.
-                from app.database import IS_POSTGRES, CIUDAD_SCHEMA
-                qual = f'"{CIUDAD_SCHEMA}".pagos' if IS_POSTGRES else "pagos"
-                db.execute(text(f"""
-                    INSERT INTO {qual}
-                      (contrato_id, periodo, fecha_vencimiento, monto_alquiler,
-                       monto_total, estado, is_demo, created_at)
-                    VALUES
-                      (:cid, :per, :fv, :ma, :mt, 'pendiente', :demo, :now)
-                """), {
-                    "cid": contrato_id, "per": periodo, "fv": fecha_venc,
-                    "ma": float(monto), "mt": float(monto),
-                    "demo": bool(is_demo), "now": _dt.utcnow(),
-                })
+                with db.begin_nested():
+                    db.execute(text(f"""
+                        INSERT INTO {qual}
+                          (contrato_id, periodo, fecha_vencimiento, monto_alquiler,
+                           monto_total, estado, is_demo, created_at)
+                        VALUES
+                          (:cid, :per, :fv, :ma, :mt, 'pendiente', :demo, :now)
+                    """), {
+                        "cid": contrato_id, "per": periodo, "fv": fecha_venc,
+                        "ma": float(monto), "mt": float(monto),
+                        "demo": bool(is_demo), "now": _dt.utcnow(),
+                    })
                 creados += 1
             except Exception as e2:
                 fallidos += 1
                 print(f"[_generar_pagos_futuros] fallback {periodo}: {e2}")
-                try: db.rollback()
-                except Exception: pass
 
     print(f"[_generar_pagos_futuros] contrato {contrato_id}: "
           f"{creados} creados, {fallidos} fallidos")

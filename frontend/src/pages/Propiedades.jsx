@@ -798,7 +798,7 @@ function Modal({ initial, clientes, onClose, onSaved }) {
     ;['superficie_m2','ambientes','precio_alquiler','precio_venta','expensas',
       'tasa_municipal','propietario_id'].forEach(k => {
       if (payload[k] === '' || payload[k] === null) payload[k] = null
-      else payload[k] = Number(payload[k]) || null
+      else { const n = Number(payload[k]); payload[k] = Number.isFinite(n) ? n : null }
     })
     // Limpiar la lista de propietarios: solo enviar cliente_id, porcentaje,
     // es_principal (el resto es para UI). Si está vacía, enviar [] explícito
@@ -990,7 +990,7 @@ function ModalNuevoPropietario({ onClose, onSaved }) {
   })
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
-  const set = k => e => setForm({ ...form, [k]: e.target.value })
+  const set = k => e => { const v = e.target.value; setForm(f => ({ ...f, [k]: v })) }
 
   const submit = async e => {
     e.preventDefault(); setLoading(true); setErr('')

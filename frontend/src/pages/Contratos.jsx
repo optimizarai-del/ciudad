@@ -440,7 +440,7 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
   const [propsLocal, setPropsLocal] = useState(propiedades)
   const [clientesLocal, setClientesLocal] = useState(clientes)
   const [creando, setCreando] = useState(null)  // 'propiedad' | 'propietario' | 'inquilino' | null
-  const set = k => e => setForm({ ...form, [k]: e.target.value })
+  const set = k => e => { const v = e.target.value; setForm(f => ({ ...f, [k]: v })) }
 
   // Garantes del contrato (entidad propia — se guardan inline, no son Clientes).
   // Se inicializan desde garantes_lista al editar.
@@ -493,8 +493,14 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
 
     const payload = { ...form }
     ;['propiedad_id','inquilino_id','monto_inicial','deposito','periodicidad_meses','porcentaje_fijo','comision_porc'].forEach(k => {
-      if (payload[k] === '' || payload[k] == null) payload[k] = null
-      else payload[k] = Number(payload[k]) || null
+      if (payload[k] === '' || payload[k] == null) {
+        payload[k] = null
+      } else {
+        // Number.isFinite preserva el 0 legítimo (ej. comisión 0%, depósito 0),
+        // que `Number(x) || null` convertiría erróneamente en null.
+        const n = Number(payload[k])
+        payload[k] = Number.isFinite(n) ? n : null
+      }
     })
     if (!payload.fecha_inicio) payload.fecha_inicio = null
     if (!payload.fecha_fin)    payload.fecha_fin    = null
@@ -546,14 +552,26 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
       const propId = saved?.propiedad_id || payload.propiedad_id
       if (propId && descInmueble !== descInmuebleOrig) {
         const prop = _propById(propId)
-        try {
-          await api.patch(`/api/propiedades/${propId}`, {
-            direccion: prop?.direccion,
-            tipo: prop?.tipo || 'departamento',
-            descripcion: descInmueble || null,
-          })
-        } catch (e) {
-          console.warn('No se pudo actualizar la descripción del inmueble:', e)
+        if (prop?.direccion) {
+          try {
+            await api.patch(`/api/propiedades/${propId}`, {
+              direccion: prop.direccion,
+              tipo: prop.tipo || 'departamento',
+              descripcion: descInmueble || null,
+            })
+          } catch (e) {
+            console.warn('No se pudo actualizar la descripción del inmueble:', e)
+            setErr('El contrato se guardó, pero no se pudo guardar la descripción del inmueble. Editala desde Propiedades.')
+            setLoading(false)
+            return  // no cerrar el modal: el usuario ve el aviso
+          }
+        } else {
+          // Sin la propiedad en memoria no podemos hacer el PATCH (faltaría
+          // direccion/tipo y daría 422). Avisamos en vez de fallar en silencio.
+          console.warn('Propiedad no disponible localmente; descripción no guardada')
+          setErr('El contrato se guardó. La descripción del inmueble se podrá cargar desde Propiedades.')
+          setLoading(false)
+          return
         }
       }
       onSaved()
@@ -861,12 +879,13 @@ function ModalQuickPropiedad({ onClose, onSaved }) {
   })
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
-  const set = k => e => setForm({ ...form, [k]: e.target.value })
+  const set = k => e => { const v = e.target.value; setForm(f => ({ ...f, [k]: v })) }
   const submit = async e => {
     e.preventDefault(); setLoading(true); setErr('')
     const payload = { ...form }
     ;['precio_alquiler','expensas','ambientes','superficie_m2'].forEach(k => {
-      payload[k] = payload[k] === '' ? null : Number(payload[k]) || null
+      if (payload[k] === '' || payload[k] == null) { payload[k] = null }
+      else { const n = Number(payload[k]); payload[k] = Number.isFinite(n) ? n : null }
     })
     if (!payload.descripcion) payload.descripcion = null
     try {
@@ -1047,7 +1066,7 @@ function ModalQuickCliente({ rol, onClose, onSaved }) {
   })
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
-  const set = k => e => setForm({ ...form, [k]: e.target.value })
+  const set = k => e => { const v = e.target.value; setForm(f => ({ ...f, [k]: v })) }
   const submit = async e => {
     e.preventDefault(); setLoading(true); setErr('')
     try {

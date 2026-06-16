@@ -70,12 +70,19 @@ export default function ActualizarTasas() {
   }
 
   const guardar = async () => {
+    // Solo enviar cambios reales: ignorar inputs vacíos/inválidos y los que
+    // quedaron igual al valor actual. Evita pisar una tasa válida con $0
+    // cuando el operador vacía un campo sin querer.
     const items = Object.entries(draft)
-      .map(([id, monto]) => ({
-        propiedad_id: Number(id),
-        monto: Number(monto) || 0,
-      }))
-      .filter(it => it.monto >= 0)
+      .map(([id, monto]) => {
+        const prop = props.find(p => p.id === Number(id))
+        const actual = prop?.tasa_municipal || 0
+        const n = Number(monto)
+        const valido = monto !== '' && monto != null && Number.isFinite(n) && n >= 0
+        return { propiedad_id: Number(id), monto: n, valido, actual }
+      })
+      .filter(it => it.valido && it.monto !== it.actual)
+      .map(({ propiedad_id, monto }) => ({ propiedad_id, monto }))
     if (items.length === 0) {
       setMsg({ kind: 'warn', text: 'No cargaste ningún cambio. Editá las tasas y volvé a tocar Guardar.' })
       return

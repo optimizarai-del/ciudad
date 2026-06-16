@@ -8,6 +8,8 @@ Adjuntos por propiedad (fotos / documentos / planos).
   DELETE /api/propiedades/{id}/adjuntos/{aid}
 """
 import base64
+import re
+import unicodedata
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import Response, RedirectResponse
@@ -18,6 +20,7 @@ from app.database import get_db
 from app.security import get_current_user
 from app import models
 from app.services import supabase_storage
+from app.services.workspace import apply_workspace_filter
 
 
 router = APIRouter(prefix="/api/propiedades", tags=["adjuntos"])
@@ -25,6 +28,32 @@ router = APIRouter(prefix="/api/propiedades", tags=["adjuntos"])
 
 # Límite por archivo (MB). Suficiente para fotos comprimidas y PDFs livianos.
 MAX_BYTES = 8 * 1024 * 1024
+
+# Tipos de archivo permitidos. Bloquea HTML/SVG/JS para evitar XSS almacenado
+# cuando el archivo se sirve desde el mismo origen.
+_MIME_PERMITIDOS = {
+    "image/jpeg", "image/png", "image/webp", "image/gif", "image/heic",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+def _mime_permitido(mime: Optional[str]) -> bool:
+    return (mime or "").split(";")[0].strip().lower() in _MIME_PERMITIDOS
+
+
+def _safe_filename(nombre: Optional[str]) -> str:
+    """Filename ASCII saneado para usar en el header Content-Disposition,
+    evitando inyección de headers y caracteres de control."""
+    base = (nombre or "archivo").replace("\\", "/").split("/")[-1]
+    base = unicodedata.normalize("NFKD", base).encode("ascii", "ignore").decode("ascii")
+    base = re.sub(r'[^A-Za-z0-9._-]', "_", base).strip("._") or "archivo"
+    return base[:120]
+
+
+def _prop_scope(db, user):
+    return apply_workspace_filter(db.query(models.Propiedad), models.Propiedad, user)
 
 
 def _serialize(a: models.PropiedadAdjunto, incluir_url: bool = False) -> dict:
@@ -50,7 +79,7 @@ def _url_directa(a: models.PropiedadAdjunto) -> str | None:
     backend (que requiere Authorization header)."""
     if a.storage_path and supabase_storage.enabled():
         ok, signed = supabase_storage.get_signed_url(
-            supabase_storage.BUCKET_ADJUNTOS, a.storage_path, expires_in=3600,
+            supabase_storage.BUCKET_ADJUNTOS, a.storage_path, expires_in=120,
         )
         if ok:
             return signed
@@ -74,7 +103,7 @@ def listar(
     para previsualizar thumbnails en el frontend sin tener que pasar por el
     backend con auth header en cada <img src>.
     """
-    prop = db.query(models.Propiedad).filter_by(id=prop_id).first()
+    prop = _prop_scope(db, user).filter_by(id=prop_id).first()
     if not prop:
         raise HTTPException(404, "Propiedad no encontrada")
     adj = (
@@ -107,7 +136,7 @@ async def subir(
     json_data: Optional[AdjuntoCreateJSON] = None,
 ):
     """Acepta multipart/form-data (archivo) o JSON con contenido_b64."""
-    prop = db.query(models.Propiedad).filter_by(id=prop_id).first()
+    prop = _prop_scope(db, user).filter_by(id=prop_id).first()
     if not prop:
         raise HTTPException(404, "Propiedad no encontrada")
 
@@ -137,6 +166,12 @@ async def subir(
         desc = json_data.descripcion or descripcion
     else:
         raise HTTPException(400, "Falta archivo (multipart) o body JSON con contenido_b64")
+
+    if not _mime_permitido(mime):
+        raise HTTPException(
+            415,
+            "Tipo de archivo no permitido. Aceptados: imágenes (JPG/PNG/WEBP/GIF), PDF y Word.",
+        )
 
     valido = [t.value for t in models.AdjuntoTipo]
     if tipo not in valido:
@@ -184,28 +219,33 @@ async def subir(
 
 @router.get("/{prop_id}/adjuntos/{aid}")
 def descargar(prop_id: int, aid: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    prop = _prop_scope(db, user).filter_by(id=prop_id).first()
+    if not prop:
+        raise HTTPException(404, "Propiedad no encontrada")
     a = db.query(models.PropiedadAdjunto).filter_by(id=aid, propiedad_id=prop_id).first()
     if not a:
         raise HTTPException(404, "Adjunto no encontrado")
 
-    # Modo Storage: redirigir a una URL firmada (1h)
+    # Modo Storage: redirigir a una URL firmada (corta duración)
     if a.storage_path and supabase_storage.enabled():
         ok, signed = supabase_storage.get_signed_url(
-            supabase_storage.BUCKET_ADJUNTOS, a.storage_path, expires_in=3600,
+            supabase_storage.BUCKET_ADJUNTOS, a.storage_path, expires_in=120,
         )
         if ok:
             return RedirectResponse(url=signed, status_code=307)
         # Si falla el sign, intentamos legacy si todavía está el blob
         print(f"[adjuntos] sign falló: {signed} — intentando blob legacy")
 
-    # Modo legacy: blob inline en la DB
+    # Modo legacy: blob en la DB. Se sirve como ATTACHMENT (no inline) y con
+    # filename saneado para evitar XSS almacenado e inyección de headers.
     if not a.blob_b64:
         raise HTTPException(404, "Contenido no disponible")
     raw = base64.b64decode(a.blob_b64)
+    mime = a.mime if _mime_permitido(a.mime) else "application/octet-stream"
     return Response(
         content=raw,
-        media_type=a.mime or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{a.nombre_archivo}"'},
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{_safe_filename(a.nombre_archivo)}"'},
     )
 
 
@@ -218,6 +258,8 @@ class AdjuntoPatchIn(BaseModel):
 @router.patch("/{prop_id}/adjuntos/{aid}")
 def editar(prop_id: int, aid: int, data: AdjuntoPatchIn,
            db: Session = Depends(get_db), user=Depends(get_current_user)):
+    if not _prop_scope(db, user).filter_by(id=prop_id).first():
+        raise HTTPException(404, "Propiedad no encontrada")
     a = db.query(models.PropiedadAdjunto).filter_by(id=aid, propiedad_id=prop_id).first()
     if not a:
         raise HTTPException(404, "Adjunto no encontrado")
@@ -241,6 +283,8 @@ def editar(prop_id: int, aid: int, data: AdjuntoPatchIn,
 
 @router.delete("/{prop_id}/adjuntos/{aid}")
 def eliminar(prop_id: int, aid: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    if not _prop_scope(db, user).filter_by(id=prop_id).first():
+        raise HTTPException(404, "Propiedad no encontrada")
     a = db.query(models.PropiedadAdjunto).filter_by(id=aid, propiedad_id=prop_id).first()
     if not a:
         raise HTTPException(404, "Adjunto no encontrado")

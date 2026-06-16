@@ -55,6 +55,8 @@ class UserUpdate(BaseModel):
 
 @router.get("/", response_model=List[schemas.UserOut])
 def listar(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    # Solo admin: el listado expone email/teléfono/rol de todo el equipo (PII).
+    _require_admin(user)
     return db.query(models.User).order_by(models.User.id).all()
 
 
@@ -108,7 +110,33 @@ def editar(id: int, data: UserUpdate, db: Session = Depends(get_db), user=Depend
     obj = db.query(models.User).filter_by(id=id).first()
     if not obj:
         raise HTTPException(404, "Usuario no encontrado")
-    for k, v in data.model_dump(exclude_unset=True).items():
+
+    cambios = data.model_dump(exclude_unset=True)
+
+    # Guarda anti-lockout: no dejar el sistema sin ningún admin activo.
+    # Se dispara si se está degradando el rol del último admin o
+    # desactivándolo (incluido el caso de editarse a sí mismo).
+    quita_admin = (
+        (obj.role == models.UserRole.admin) and (
+            ("role" in cambios and cambios["role"] != models.UserRole.admin.value)
+            or (cambios.get("is_active") is False)
+        )
+    )
+    if quita_admin:
+        otros_admins = (
+            db.query(models.User)
+              .filter(models.User.role == models.UserRole.admin,
+                      models.User.id != id,
+                      models.User.is_active.is_(True))
+              .count()
+        )
+        if otros_admins == 0:
+            raise HTTPException(
+                400,
+                "No podés quitar admin o desactivar al último administrador activo del sistema",
+            )
+
+    for k, v in cambios.items():
         if k == "role":
             setattr(obj, k, models.UserRole(v))
         else:

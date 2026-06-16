@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 # override=True: si hay una variable previa en el shell (vacía o con otro valor),
@@ -13,6 +13,7 @@ from app.routers import auth, users, propiedades, clientes, contratos, calculado
 from app.routers import cobranza, ventas_router, comprobantes
 from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr, tasas_mensuales, refacciones, versiones
 from app.routers import historial as historial_router
+from app.security import get_current_user
 
 Base.metadata.create_all(bind=engine)
 
@@ -52,8 +53,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     # Acepta también CUALQUIER subdominio https://*.optimizar-ia.com
-    # Esto es safety-net por si en el futuro se mueve a otro subdominio.
-    allow_origin_regex=r"https?://(.*\.)?optimizar-ia\.com$",
+    # Solo HTTPS (con allow_credentials no se debe permitir http en producción).
+    allow_origin_regex=r"https://([a-z0-9-]+\.)*optimizar-ia\.com$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -94,11 +95,12 @@ def health():
 
 
 @app.get("/api/debug/contratos-vigentes")
-def debug_contratos_vigentes(db = None):
-    """Endpoint público de diagnóstico — SIN AUTH — para verificar qué
-    contratos vigentes y pagos hay en la DB del deploy actual.
-    No expone PII ni datos sensibles. Solo conteos y códigos.
-    Quitar cuando el bug esté resuelto."""
+def debug_contratos_vigentes(user=Depends(get_current_user)):
+    """Endpoint de diagnóstico — SOLO ADMIN — para verificar qué contratos
+    vigentes y pagos hay en la DB del deploy actual. Conteos y códigos."""
+    role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    if role != "admin":
+        raise HTTPException(403, "Solo admin")
     from app.database import SessionLocal
     from sqlalchemy import text, inspect
     from app.database import IS_POSTGRES, CIUDAD_SCHEMA

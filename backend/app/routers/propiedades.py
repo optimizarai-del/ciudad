@@ -75,6 +75,13 @@ def _sincronizar_propietarios(
                 cid = item.get("cliente_id") or item.get("id")
                 if not cid:
                     continue
+                # Validar existencia y workspace del cliente (evita vincular
+                # clientes de otro workspace o ids inexistentes → IntegrityError).
+                cli = db.query(models.Cliente).filter_by(id=int(cid)).first()
+                if not cli:
+                    raise HTTPException(404, f"El cliente #{cid} no existe.")
+                if bool(cli.is_demo) != bool(propiedad.is_demo):
+                    raise HTTPException(403, f"El cliente #{cid} no pertenece a este workspace.")
                 porc = item.get("porcentaje")
                 if porc in ("", None):
                     porc = None
