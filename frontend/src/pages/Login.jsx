@@ -19,8 +19,17 @@ export default function Login() {
     try {
       await login(form.email, form.password)
       nav('/dashboard')
-    } catch {
-      setErr('Email o contraseña incorrectos.')
+    } catch (e) {
+      // Distinguir credenciales inválidas (el server respondió 401) de un
+      // fallo de red/CORS (no hubo respuesta). Antes ambos casos mostraban
+      // "credenciales incorrectas", lo cual confundía al diagnosticar.
+      if (e?.response?.status === 401) {
+        setErr('Email o contraseña incorrectos.')
+      } else if (e?.response) {
+        setErr(`Error del servidor (${e.response.status}). Intentá de nuevo.`)
+      } else {
+        setErr('No se pudo conectar con el servidor. Revisá tu conexión.')
+      }
     } finally {
       setLoading(false)
     }
@@ -79,12 +88,12 @@ export default function Login() {
           <form onSubmit={handle} className="space-y-5">
             <div>
               <label className="label">Email</label>
-              <input className="input" type="email" placeholder="admin@ciudad.com"
+              <input className="input" type="email" placeholder="admin@ciudad.com" autoComplete="username"
                 value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
             </div>
             <div>
               <label className="label">Contraseña</label>
-              <input className="input" type="password" placeholder="••••••••"
+              <input className="input" type="password" placeholder="••••••••" autoComplete="current-password"
                 value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required />
             </div>
 
