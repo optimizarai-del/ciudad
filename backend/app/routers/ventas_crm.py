@@ -259,32 +259,37 @@ def ficha_cliente(cid: int, db: Session = Depends(get_db), user=Depends(get_curr
     dias_sin_contacto = (datetime.utcnow() - ultima).days if ultima else None
 
     # Pedidos activos (no cerrados/perdidos)
-    activos = [p for p in pedidos
-               if (p.estado.value if hasattr(p.estado, "value") else p.estado) not in ("cerrado", "perdido")]
-    estados_activos = {(p.estado.value if hasattr(p.estado, "value") else p.estado) for p in activos}
-
-    # Acciones recomendadas (reglas simples)
-    recs = []
-    if not notas:
-        recs.append("Registrar el primer contacto y dejar una nota.")
-    if "nuevo" in estados_activos:
-        recs.append("Contactar al cliente — tiene un pedido sin contactar.")
-    if "esperando_respuesta" in estados_activos:
-        recs.append("Hacer seguimiento: el cliente está esperando respuesta.")
-    if "negociando" in estados_activos:
-        recs.append("Avanzar la negociación o registrar una oferta.")
-    if "en_seguimiento" in estados_activos:
-        recs.append("Continuar el seguimiento periódico.")
-    if cli.es_operado:
-        recs.append("Agendar seguimiento post-venta.")
-    if dias_sin_contacto is not None and dias_sin_contacto >= 14 and activos:
-        recs.append(f"Pasaron {dias_sin_contacto} días sin contacto — conviene retomar.")
-    if not recs:
-        recs.append("Sin acciones pendientes. Mantené el seguimiento.")
+    def _estado(p):
+        return p.estado.value if hasattr(p.estado, "value") else p.estado
+    activos = [p for p in pedidos if _estado(p) not in ("cerrado", "perdido")]
 
     # Rango de presupuesto buscado (de los pedidos activos)
     maxs = [p.precio_max_usd for p in activos if p.precio_max_usd]
     presupuesto = _fmt_usd(max(maxs)) if maxs else None
+
+    # Acciones recomendadas — agente IA personalizado por cliente.
+    # Usa Claude si hay ANTHROPIC_API_KEY; si no, cae a reglas determinísticas.
+    from app.services.ventas_recomendaciones import recomendar_acciones
+    _ctx = {
+        "nombre": cli.nombre,
+        "es_operado": cli.es_operado,
+        "dias_sin_contacto": dias_sin_contacto,
+        "presupuesto_max": presupuesto,
+        "operaciones": len(ops),
+        "pedidos": [{
+            "tipo": (p.tipo.value if p.tipo and hasattr(p.tipo, "value") else p.tipo),
+            "zona": p.zona,
+            "estado": _estado(p),
+            "precio_max": p.precio_max_usd,
+        } for p in pedidos],
+        "notas": [{
+            "texto": n.texto,
+            "fecha": n.created_at.strftime("%d/%m/%Y") if n.created_at else None,
+        } for n in sorted(notas, key=lambda x: x.created_at or datetime.min, reverse=True)],
+    }
+    _rec = recomendar_acciones(_ctx)
+    recs = _rec["recomendaciones"]
+    motor_recs = _rec["motor"]
 
     return {
         "cliente": {
@@ -303,6 +308,7 @@ def ficha_cliente(cid: int, db: Session = Depends(get_db), user=Depends(get_curr
             "notas": len(notas),
         },
         "recomendaciones": recs,
+        "recomendaciones_motor": motor_recs,
         "historial": [
             {"id": t.get("id"), "tipo": t["tipo"], "texto": t["texto"], "origen": t["origen"],
              "fecha": t["fecha"].isoformat()}
