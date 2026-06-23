@@ -22,3 +22,7 @@ python-docx==1.1.2
 olefile>=0.46
 # Cálculo de relativedelta para generar pagos mensuales.
 python-dateutil>=2.8.0
+# Fase 4.1 — cola de scraping de webs inmobiliarias (Redis + RQ).
+# El worker corre como servicio aparte: python -m app.services.ventas_scraping.worker
+redis==5.0.4
+rq==1.16.2

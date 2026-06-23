@@ -554,3 +554,96 @@ class VentasMatch(Base):
     notificado = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  FASE 4 — Scraping multi-fuente (webs inmobiliarias)
+# ═══════════════════════════════════════════════════════════════════════
+
+class ScrapingJobEstado(str, Enum):
+    encolado = "encolado"
+    corriendo = "corriendo"
+    ok = "ok"
+    error = "error"
+
+
+class VentasScrapingConfig(Base):
+    """Config por fuente de scraping (Fase 4.1). Una fila por sitio target
+    (argenprop, zonaprop, ...). El admin la prende/apaga y define los
+    parámetros de búsqueda (ciudad, operación) desde la web."""
+    __tablename__ = "ventas_scraping_config"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    fuente = Column(String, index=True)        # "argenprop" | "zonaprop"
+    activo = Column(Boolean, default=False)
+    ciudad = Column(String)                     # ej "santa-rosa-la-pampa"
+    operacion = Column(String, default="venta") # "venta" | "alquiler"
+    max_paginas = Column(Integer, default=5)
+    sync_cada_horas = Column(Integer, default=12)
+    motor = Column(String, default="httpx")     # "httpx" | "playwright"
+    ultima_sync = Column(DateTime)
+    ultima_sync_resultado = Column(Text)        # JSON resumen última corrida
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class VentasScrapingProp(Base):
+    """Propiedad scrapeada de una web externa (Fase 4.1). Espejo del patrón
+    Red Tokko: formato numérico para filtros/cálculos + display para mostrar.
+    Dedup cross-fuente por `link_externo`. `content_hash` permite detectar
+    cambios (precio, baja) entre corridas sin reescribir filas idénticas."""
+    __tablename__ = "ventas_scraping_propiedades"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    fuente = Column(String, index=True)         # "argenprop" | "zonaprop"
+    referencia = Column(String, index=True)     # id interno del sitio
+
+    direccion = Column(String)
+    ubicacion = Column(String)                  # zona/barrio/ciudad
+    tipo = Column(String)
+    operacion = Column(String)
+
+    # Numérico (filtros + cálculos)
+    precio_num = Column(Float)
+    moneda = Column(String, default="USD")
+    m2_cubierta_num = Column(Float)
+    m2_total_num = Column(Float)
+    ambientes_num = Column(Integer)
+    dormitorios_num = Column(Integer)
+    banos_num = Column(Integer)
+    lat = Column(Float)
+    lng = Column(Float)
+
+    # Display (formato del portal)
+    precio_display = Column(String)
+
+    detalles = Column(Text)
+    publicado_por = Column(String)              # quién la publicó (inmobiliaria)
+    ficha_url = Column(String, unique=True, index=True)   # link_externo / dedup
+    foto = Column(String)
+
+    content_hash = Column(String, index=True)   # detección de cambios
+    activa = Column(Boolean, default=True)       # false = bajada del portal
+    importada = Column(Boolean, default=False)   # ya está en ventas_propiedades
+    primera_vez = Column(DateTime, default=datetime.utcnow)
+    ultima_vez = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class VentasScrapingJob(Base):
+    """Registro de una corrida de scraping encolada (Fase 4.1). Permite
+    seguir el estado del job de la cola Redis desde la web."""
+    __tablename__ = "ventas_scraping_jobs"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    rq_job_id = Column(String, index=True)      # id del job en RQ
+    fuente = Column(String, index=True)
+    ciudad = Column(String)
+    operacion = Column(String)
+    estado = Column(SQLEnum(ScrapingJobEstado), default=ScrapingJobEstado.encolado, index=True)
+    resultado = Column(Text)                    # JSON: {nuevas, actualizadas, ...}
+    error = Column(Text)
+    encolado_por = Column(Integer, ForeignKey("ventas_vendedores.id"))
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    finalizado_at = Column(DateTime)
