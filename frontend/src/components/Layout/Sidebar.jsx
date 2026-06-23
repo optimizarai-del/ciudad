@@ -84,6 +84,7 @@ export default function Sidebar({ onNavigate }) {
           <NavItem to="/ventas-crm/clientes"     icon={Users}        label="Clientes" />
           <NavItem to="/ventas-crm/propiedades"  icon={Building2}    label="Propiedades" />
           <NavItem to="/ventas-crm/red-tokko"    icon={Globe}        label="Red Tokko" />
+          <NavItem to="/ventas-crm/webs"         icon={Network}      label="Webs" />
           <NavItem to="/ventas-crm/mapas"        icon={Map}          label="Mapas" />
           <NavItem to="/ventas-crm/operaciones"  icon={Handshake}    label="Operaciones" />
           <NavItem to="/ventas-crm/matches"      icon={Sparkles}     label="Matches" />
