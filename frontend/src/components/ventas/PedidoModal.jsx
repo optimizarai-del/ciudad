@@ -286,7 +286,7 @@ function PropiedadesVinculadas({ pedidoId }) {
   return (
     <div className="mt-6 pt-5 border-t border-border">
       <p className="text-[11px] uppercase tracking-[0.12em] text-muted font-semibold mb-3 flex items-center gap-1.5">
-        <Link2 size={13} /> Propiedades vinculadas
+        <Link2 size={13} /> Propiedades que le interesan
       </p>
       <div className="flex gap-2 mb-3">
         <select className="input flex-1" value={sel} onChange={e => setSel(e.target.value)}>

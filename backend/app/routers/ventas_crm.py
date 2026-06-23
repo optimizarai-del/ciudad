@@ -16,8 +16,9 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import text, bindparam
 
-from app.database import get_db
+from app.database import get_db, IS_POSTGRES
 from app.security import get_current_user
 from app import models, models_ventas as mv, schemas_ventas as sv
 from app.services.ventas_tasacion import tasar
@@ -1080,3 +1081,105 @@ def dashboard(db: Session = Depends(get_db), user=Depends(get_current_user)):
         "monto_cerrado_usd": sum(o.monto_cierre_usd or 0 for o in cerradas),
         "comisiones_usd": round(comisiones, 2),
     }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  RED TOKKO — navegar la red (Supabase) e importar al catálogo por petición
+#  Lee public.red_tokko_propiedades (poblada por la CLI tokko) y permite
+#  importar propiedades seleccionadas a ventas_propiedades (fuente=tokko).
+# ════════════════════════════════════════════════════════════════════════════
+_TOKKO_TIPO_MAP = {
+    "casa": "casa", "departamento": "departamento", "depto": "departamento",
+    "ph": "departamento", "terreno": "lote", "lote": "lote", "local": "local",
+    "oficina": "oficina", "galpón": "galpon", "galpon": "galpon",
+    "campo": "campo", "cochera": "otro",
+}
+
+
+def _map_tokko_tipo(t: str) -> str:
+    return _TOKKO_TIPO_MAP.get((t or "").strip().lower(), "otro")
+
+
+_RED_COLS = ("referencia, direccion, ubicacion, tipo, operacion, precio_num, moneda, "
+             "precio_display, m2_cubierta_num, m2_total_num, ambientes_num, "
+             "dormitorios_num, banos_num, lat, lng, detalles, publicado_por, "
+             "ficha_url, foto")
+
+
+@router.get("/red-tokko")
+def red_tokko_listar(
+    zona: Optional[str] = Query(None),
+    operacion: Optional[str] = Query(None),
+    precio_min: Optional[int] = Query(None),
+    precio_max: Optional[int] = Query(None),
+    dorm_min: Optional[int] = Query(None),
+    limit: int = Query(40),
+    db: Session = Depends(get_db), user=Depends(get_current_user),
+):
+    """Lista propiedades de la red Tokko guardadas en la base (con filtros)."""
+    get_vendedor(db, user)  # auth/scope
+    where, params = ["1=1"], {}
+    # `ilike` es Postgres; en SQLite usamos `like` (case-insensitive por default).
+    like_op = "ilike" if IS_POSTGRES else "like"
+    if operacion:  where.append("operacion = :op");                 params["op"] = operacion
+    if zona:       where.append(f"ubicacion {like_op} :z");         params["z"] = f"%{zona}%"
+    if precio_min: where.append("precio_num >= :pmin");             params["pmin"] = precio_min
+    if precio_max: where.append("precio_num <= :pmax");             params["pmax"] = precio_max
+    if dorm_min:   where.append("dormitorios_num >= :dmin");        params["dmin"] = dorm_min
+    params["lim"] = min(int(limit or 40), 200)
+    sql = text(f"select {_RED_COLS} from red_tokko_propiedades "
+               f"where {' and '.join(where)} order by precio_num asc limit :lim")
+    try:
+        rows = [dict(r._mapping) for r in db.execute(sql, params)]
+    except Exception:
+        # Tabla aún no creada / sin datos en esta base.
+        return {"total": 0, "propiedades": [],
+                "nota": "No hay datos de la red Tokko en esta base. Corré la CLI tokko para poblarla."}
+
+    # Marcar las que ya fueron importadas (dedup por ficha_url == link_externo)
+    urls = [r["ficha_url"] for r in rows if r.get("ficha_url")]
+    importadas = set()
+    if urls:
+        q = (db.query(mv.VentasPropiedad.link_externo)
+             .filter(mv.VentasPropiedad.link_externo.in_(urls)))
+        importadas = {x[0] for x in q}
+    for r in rows:
+        r["ya_importada"] = r.get("ficha_url") in importadas
+    return {"total": len(rows), "propiedades": rows}
+
+
+@router.post("/red-tokko/importar")
+def red_tokko_importar(payload: dict,
+                       db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Importa al catálogo (ventas_propiedades) las referencias indicadas."""
+    v = get_vendedor(db, user)
+    refs = payload.get("referencias") or []
+    if not refs:
+        raise HTTPException(400, "Enviá una lista 'referencias'.")
+    sql = (text(f"select {_RED_COLS} from red_tokko_propiedades "
+                "where referencia in :refs")
+           .bindparams(bindparam("refs", expanding=True)))
+    rows = [dict(r._mapping) for r in db.execute(sql, {"refs": refs})]
+
+    creadas, saltadas = 0, 0
+    for r in rows:
+        url = r.get("ficha_url")
+        if url and db.query(mv.VentasPropiedad.id).filter_by(link_externo=url).first():
+            saltadas += 1
+            continue
+        obj = mv.VentasPropiedad(
+            titulo=r.get("direccion") or f"{r.get('tipo') or 'Propiedad'} en {r.get('ubicacion') or ''}".strip(),
+            tipo=_enum(mv.VPropiedadTipo, _map_tokko_tipo(r.get("tipo")), "tipo"),
+            estado=mv.VPropiedadEstado.disponible,
+            fuente=mv.VPropiedadFuente.tokko,
+            direccion=r.get("direccion"), ciudad=r.get("ubicacion"),
+            lat=r.get("lat"), lng=r.get("lng"),
+            precio_usd=r.get("precio_num"),
+            dormitorios=r.get("dormitorios_num"), banos=r.get("banos_num"),
+            descripcion=r.get("detalles"), inmobiliaria=r.get("publicado_por"),
+            link_externo=url, cargada_por=v.id,
+        )
+        db.add(obj)
+        creadas += 1
+    db.commit()
+    return {"creadas": creadas, "saltadas_ya_existentes": saltadas, "pedidas": len(refs)}

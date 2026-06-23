@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Building2, FileText, Users, Calculator,
   BarChart2, Bot, TrendingUp, Settings, DollarSign,
   Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History,
-  ClipboardList, Handshake, Network, LayoutGrid, Sparkles, CalendarClock, Map
+  ClipboardList, Handshake, Network, LayoutGrid, Sparkles, CalendarClock, Map, Globe
 } from 'lucide-react'
 import { useRole } from '../../context/RoleContext'
 
@@ -83,6 +83,7 @@ export default function Sidebar({ onNavigate }) {
           <NavItem to="/ventas-crm/pedidos"      icon={ClipboardList} label="Pedidos" />
           <NavItem to="/ventas-crm/clientes"     icon={Users}        label="Clientes" />
           <NavItem to="/ventas-crm/propiedades"  icon={Building2}    label="Propiedades" />
+          <NavItem to="/ventas-crm/red-tokko"    icon={Globe}        label="Red Tokko" />
           <NavItem to="/ventas-crm/mapas"        icon={Map}          label="Mapas" />
           <NavItem to="/ventas-crm/operaciones"  icon={Handshake}    label="Operaciones" />
           <NavItem to="/ventas-crm/matches"      icon={Sparkles}     label="Matches" />
@@ -95,6 +96,7 @@ export default function Sidebar({ onNavigate }) {
 
       {/* Herramientas */}
       <Section label="Herramientas">
+        <NavItem to="/asistente"                       icon={Sparkles}   label="Asistente IA" />
         <NavItem to="/indices"                         icon={BarChart2}  label="Índices" />
         <NavItem to="/agente"                          icon={Bot}        label="Agente IA" />
         <NavItem to="/recordatorios"                   icon={Bell}       label="Recordatorios" />

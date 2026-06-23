@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { MapPin, Layers, Building2, Loader2, Navigation, X, ExternalLink, RefreshCw } from 'lucide-react'
+import { MapPin, Layers, Building2, Loader2, Navigation, X, ExternalLink, RefreshCw, SlidersHorizontal } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
+import SearchBar from '../../components/SearchBar'
 import api from '../../utils/api'
 
 const fmtUSD = n => n ? 'USD ' + n.toLocaleString('es-AR') : '—'
+const ESTADOS = ['disponible', 'reservada', 'vendida', 'inactiva']
 
 // Color por tipo de propiedad (mismo lenguaje cromático del resto del módulo).
 const TIPO_COLOR = {
@@ -52,9 +54,36 @@ export default function Mapas() {
   const [loading, setLoading] = useState(true)
   const [capa, setCapa] = useState('mapa')
   const [sel, setSel] = useState(null)        // propiedad seleccionada
-  const [filtroTipo, setFiltroTipo] = useState('')
   const [geocoding, setGeocoding] = useState(false)
   const [aviso, setAviso] = useState('')
+
+  // ── Filtros (mismos criterios que la sección Propiedades + búsqueda) ──
+  const [busqueda, setBusqueda] = useState('')
+  const [filtroTipo, setFiltroTipo] = useState('')
+  const [filtroEstado, setFiltroEstado] = useState('')
+  const [precioMin, setPrecioMin] = useState('')
+  const [precioMax, setPrecioMax] = useState('')
+  const [dormMin, setDormMin] = useState('')
+  const [showFiltros, setShowFiltros] = useState(false)
+
+  const cumpleFiltros = (p) => {
+    if (filtroTipo && p.tipo !== filtroTipo) return false
+    if (filtroEstado && p.estado !== filtroEstado) return false
+    if (precioMin && (p.precio_usd == null || p.precio_usd < Number(precioMin))) return false
+    if (precioMax && (p.precio_usd == null || p.precio_usd > Number(precioMax))) return false
+    if (dormMin && (p.dormitorios == null || p.dormitorios < Number(dormMin))) return false
+    if (busqueda.trim()) {
+      const b = busqueda.toLowerCase()
+      const ok = [p.titulo, p.direccion, p.ciudad].some(v => (v || '').toLowerCase().includes(b))
+      if (!ok) return false
+    }
+    return true
+  }
+  const limpiarFiltros = () => {
+    setBusqueda(''); setFiltroTipo(''); setFiltroEstado('')
+    setPrecioMin(''); setPrecioMax(''); setDormMin('')
+  }
+  const filtrosActivos = !!(busqueda || filtroTipo || filtroEstado || precioMin || precioMax || dormMin)
 
   const cargar = () => {
     setLoading(true)
@@ -108,7 +137,7 @@ export default function Mapas() {
     markersRef.current.forEach(m => map.removeLayer(m))
     markersRef.current.clear()
 
-    const visibles = data.propiedades.filter(p => !filtroTipo || p.tipo === filtroTipo)
+    const visibles = data.propiedades.filter(cumpleFiltros)
     visibles.forEach(p => {
       const m = L.marker([p.lat, p.lng], {
         icon: pinIcon(colorDe(p.tipo), sel?.id === p.id),
@@ -137,7 +166,7 @@ export default function Mapas() {
       m.addTo(map)
       markersRef.current.set(p.id, m)
     })
-  }, [data.propiedades, filtroTipo, sel])
+  }, [data.propiedades, filtroTipo, filtroEstado, precioMin, precioMax, dormMin, busqueda, sel])
 
   const irA = p => {
     setSel(p)
@@ -159,7 +188,8 @@ export default function Mapas() {
   }
 
   const tiposPresentes = [...new Set(data.propiedades.map(p => p.tipo).filter(Boolean))]
-  const visiblesCount = data.propiedades.filter(p => !filtroTipo || p.tipo === filtroTipo).length
+  const visiblesFiltradas = data.propiedades.filter(cumpleFiltros)
+  const visiblesCount = visiblesFiltradas.length
 
   return (
     <Layout fullWidth>
@@ -176,12 +206,12 @@ export default function Mapas() {
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              {/* Filtro por tipo */}
-              <select className="input !py-2 !w-auto text-[13px]" value={filtroTipo}
-                onChange={e => setFiltroTipo(e.target.value)}>
-                <option value="">Todos los tipos</option>
-                {tiposPresentes.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+              {/* Toggle panel de filtros */}
+              <button onClick={() => setShowFiltros(v => !v)}
+                className={`btn-secondary !py-2 text-[12px] ${showFiltros || filtrosActivos ? '!border-[#B8893A] !text-[#B8893A]' : ''}`}>
+                <SlidersHorizontal size={13} /> Filtros
+                {filtrosActivos && <span className="ml-1 w-4 h-4 grid place-items-center rounded-full bg-[#B8893A] text-white text-[10px] font-bold">!</span>}
+              </button>
               {/* Toggle capa */}
               <div className="inline-flex rounded-xl border border-border overflow-hidden">
                 {['mapa', 'satelite'].map(c => (
@@ -203,6 +233,50 @@ export default function Mapas() {
             </div>
           </div>
         </header>
+
+        {/* Panel de filtros (mismos criterios que la sección Propiedades) */}
+        {showFiltros && (
+          <div className="mx-4 sm:mx-6 mb-2 p-3 rounded-2xl border border-border bg-black/[0.02] dark:bg-white/[0.03] shrink-0">
+            <div className="mb-2.5">
+              <SearchBar value={busqueda} onChange={setBusqueda} placeholder="Buscar por título, dirección o ciudad…" />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+              <div>
+                <label className="label">Tipo</label>
+                <select className="input !py-2 text-[13px]" value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
+                  <option value="">Todos</option>
+                  {tiposPresentes.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Estado</label>
+                <select className="input !py-2 text-[13px]" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}>
+                  <option value="">Todos</option>
+                  {ESTADOS.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">USD mín</label>
+                <input className="input !py-2 text-[13px]" type="number" value={precioMin} onChange={e => setPrecioMin(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">USD máx</label>
+                <input className="input !py-2 text-[13px]" type="number" value={precioMax} onChange={e => setPrecioMax(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Dorm. mín</label>
+                <input className="input !py-2 text-[13px]" type="number" value={dormMin} onChange={e => setDormMin(e.target.value)} />
+              </div>
+            </div>
+            {filtrosActivos && (
+              <div className="flex justify-end mt-2.5">
+                <button onClick={limpiarFiltros} className="btn-ghost !py-1.5 text-[12px] text-muted">
+                  <X size={13} /> Limpiar filtros
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {aviso && (
           <div className="mx-4 sm:mx-6 mb-2 px-4 py-2 rounded-xl bg-[#B8893A]/10 border border-[#B8893A]/30 text-[13px] text-[#B8893A] shrink-0">
@@ -248,7 +322,10 @@ export default function Mapas() {
                     </p>
                   </div>
                   <div className="flex-1 overflow-y-auto divide-y divide-border">
-                    {data.propiedades.filter(p => !filtroTipo || p.tipo === filtroTipo).map(p => (
+                    {visiblesFiltradas.length === 0 && (
+                      <p className="text-[12px] text-muted text-center px-4 py-8">Ninguna propiedad cumple los filtros.</p>
+                    )}
+                    {visiblesFiltradas.map(p => (
                       <button key={p.id} onClick={() => irA(p)}
                         className="w-full text-left px-4 py-3 hover:bg-black/5 dark:hover:bg-white/5 transition flex items-start gap-2.5">
                         <span className="w-2.5 h-2.5 rounded-full mt-1.5 shrink-0" style={{ background: colorDe(p.tipo) }} />
