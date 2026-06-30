@@ -1100,6 +1100,43 @@ def _map_tokko_tipo(t: str) -> str:
     return _TOKKO_TIPO_MAP.get((t or "").strip().lower(), "otro")
 
 
+def _post_import_propiedades(db: Session, props: list, max_geocode: int = 25) -> int:
+    """Tras importar propiedades externas: asegura geo (para que aparezcan en el
+    MAPA) y dispara el matching contra los pedidos activos (para que aparezcan en
+    MATCHES). Devuelve la cantidad de matches nuevos generados.
+
+    - Si la propiedad trae lat/lng → solo resuelve el barrio del punto.
+    - Si NO trae coords → geocodifica por dirección (cap para no abusar de
+      Nominatim) y asigna barrio.
+    """
+    if not props:
+        return 0
+    db.flush()  # asignar ids antes de matchear
+    geocodificadas = 0
+    for obj in props:
+        try:
+            if obj.lat is not None and obj.lng is not None:
+                if obj.barrio_id is None:
+                    b = ventas_geo.barrio_de_punto(db, obj.lat, obj.lng)
+                    obj.barrio_id = b.id if b else None
+            elif obj.direccion and geocodificadas < max_geocode:
+                geo = ventas_geo.resolver(db, obj.direccion, obj.ciudad)
+                obj.lat, obj.lng = geo["lat"], geo["lng"]
+                obj.barrio_id = geo["barrio_id"]
+                if geo["lat"] is not None:
+                    geocodificadas += 1
+        except Exception as e:
+            print(f"[ventas_crm] geo post-import fallback: {e}")
+    db.flush()
+    matches = 0
+    for obj in props:
+        try:
+            matches += ventas_matching.evaluar_propiedad(db, obj)
+        except Exception as e:
+            print(f"[ventas_crm] matching post-import fallback: {e}")
+    return matches
+
+
 _RED_COLS = ("referencia, direccion, ubicacion, tipo, operacion, precio_num, moneda, "
              "precio_display, m2_cubierta_num, m2_total_num, ambientes_num, "
              "dormitorios_num, banos_num, lat, lng, detalles, publicado_por, "
@@ -1161,7 +1198,7 @@ def red_tokko_importar(payload: dict,
            .bindparams(bindparam("refs", expanding=True)))
     rows = [dict(r._mapping) for r in db.execute(sql, {"refs": refs})]
 
-    creadas, saltadas = 0, 0
+    creadas, saltadas, nuevas_props = 0, 0, []
     for r in rows:
         url = r.get("ficha_url")
         if url and db.query(mv.VentasPropiedad.id).filter_by(link_externo=url).first():
@@ -1180,9 +1217,14 @@ def red_tokko_importar(payload: dict,
             link_externo=url, cargada_por=v.id,
         )
         db.add(obj)
+        nuevas_props.append(obj)
         creadas += 1
+
+    # Geo + barrio + matching para que aparezcan en el MAPA y en MATCHES.
+    matches = _post_import_propiedades(db, nuevas_props)
     db.commit()
-    return {"creadas": creadas, "saltadas_ya_existentes": saltadas, "pedidas": len(refs)}
+    return {"creadas": creadas, "saltadas_ya_existentes": saltadas,
+            "pedidas": len(refs), "matches_generados": matches}
 
 
 # ── Red Tokko EN VIVO: resolver zona (desambiguar) + traer por zona ──

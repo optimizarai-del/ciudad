@@ -88,7 +88,8 @@ export default function RedTokko() {
     setImportando(true); setMsg('')
     try {
       const { data } = await api.post('/api/ventas-crm/red-tokko/importar', { referencias: refs })
-      setMsg(`✓ Importadas ${data.creadas} · ya existían ${data.saltadas_ya_existentes}`)
+      const mt = data.matches_generados ? ` · ${data.matches_generados} match${data.matches_generados > 1 ? 'es' : ''} nuevo${data.matches_generados > 1 ? 's' : ''}` : ''
+      setMsg(`✓ Importadas ${data.creadas} · ya existían ${data.saltadas_ya_existentes}${mt} · ya están en el mapa`)
       setSel(new Set())
       buscar()
     } catch (e) {

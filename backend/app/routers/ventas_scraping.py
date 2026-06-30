@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.security import get_current_user
 from app import models_ventas as mv
-from app.routers.ventas_crm import get_vendedor, _enum
+from app.routers.ventas_crm import get_vendedor, _enum, _post_import_propiedades
 from app.services import ventas_scraping as scraping
 from app.services.ventas_scraping import pipeline, queue as scraping_queue
 
@@ -219,7 +219,7 @@ def importar(payload: dict, db: Session = Depends(get_db), user=Depends(get_curr
     rows = (db.query(mv.VentasScrapingProp)
             .filter(mv.VentasScrapingProp.referencia.in_(refs)).all())
 
-    creadas, saltadas = 0, 0
+    creadas, saltadas, nuevas_props = 0, 0, []
     for r in rows:
         url = r.ficha_url
         if url and db.query(mv.VentasPropiedad.id).filter_by(link_externo=url).first():
@@ -237,7 +237,12 @@ def importar(payload: dict, db: Session = Depends(get_db), user=Depends(get_curr
             link_externo=url, cargada_por=v.id,
         )
         db.add(obj)
+        nuevas_props.append(obj)
         r.importada = True
         creadas += 1
+
+    # Geo + barrio + matching → aparecen en el MAPA y en MATCHES.
+    matches = _post_import_propiedades(db, nuevas_props)
     db.commit()
-    return {"creadas": creadas, "saltadas_ya_existentes": saltadas, "pedidas": len(refs)}
+    return {"creadas": creadas, "saltadas_ya_existentes": saltadas,
+            "pedidas": len(refs), "matches_generados": matches}
