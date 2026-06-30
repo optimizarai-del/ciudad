@@ -1,0 +1,285 @@
+"""Red Tokko EN VIVO (Fase 2+ / mejora de zona).
+
+Trae propiedades de la RED Tokko que la API oficial no expone, vía login web +
+el endpoint interno `pre_search` (lo mismo que hace el panel de Tokko). A
+diferencia del CLI, esto corre dentro del backend para que el vendedor dispare
+la búsqueda por zona desde la plataforma.
+
+Dos operaciones:
+  - resolver_zonas(pattern)  → candidatos de ubicación para DESAMBIGUAR
+    (devuelve la ruta completa "Provincia | Depto | Localidad" para elegir).
+  - buscar_en_vivo(loc_id, loc_type, ...) → trae la zona elegida, normaliza
+    (display + numérico), geocodifica el pin si falta, y upsertea en
+    `red_tokko_propiedades` para que se pueda importar al catálogo.
+
+La sesión web se cachea a nivel módulo (TTL) para no re-loguear en cada búsqueda.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import time
+from datetime import datetime, timedelta
+
+import httpx
+from sqlalchemy import text, bindparam
+from sqlalchemy.orm import Session
+
+from app.database import IS_POSTGRES
+from app.services import ventas_geo
+
+LOGIN_URL = "https://www.tokkobroker.com/go/"
+LOGIN_POST = "https://www.tokkobroker.com/login/?next=/home"
+PRESEARCH = "https://www.tokkobroker.com/properties/pre_search/"
+DIVISIONS = "https://www.tokkobroker.com/locations_api/v1/divisions/"
+
+OP_ID = {"venta": 1, "alquiler": 2, "alquiler_temporal": 3}
+_LOC_TYPE = {"D": "division", "C": "city", "S": "state", "Z": "zone", "N": "neighborhood"}
+
+# Sesión web cacheada (login es caro: la reusamos por un rato).
+_SESSION: dict = {"client": None, "expira": None}
+_SESSION_TTL = timedelta(minutes=15)
+
+
+# ───────────────────────── login / sesión ─────────────────────────
+
+def _creds() -> tuple[str, str]:
+    u = os.getenv("TOKKO_USER", "").strip()
+    p = os.getenv("TOKKO_PASS", "").strip()
+    if not u or not p:
+        raise RuntimeError(
+            "Faltan credenciales web de Tokko. Configurá TOKKO_USER y TOKKO_PASS "
+            "en el .env del backend.")
+    return u, p
+
+
+def _login() -> httpx.Client:
+    u, p = _creds()
+    c = httpx.Client(verify=False, timeout=40.0, follow_redirects=True,
+                     headers={"User-Agent": "Mozilla/5.0"})
+    r = c.get(LOGIN_URL)
+    m = re.search(r'name="csrfmiddlewaretoken"\s+value="([^"]+)"', r.text)
+    token = m.group(1) if m else c.cookies.get("csrftoken", "")
+    c.post(LOGIN_POST, data={"csrfmiddlewaretoken": token, "username": u,
+                             "password": p}, headers={"Referer": LOGIN_URL})
+    if "sessionid" not in c.cookies:
+        raise RuntimeError("No se pudo iniciar sesión en Tokko. Revisá TOKKO_USER / TOKKO_PASS.")
+    return c
+
+
+def _client() -> httpx.Client:
+    now = datetime.utcnow()
+    if _SESSION["client"] is not None and _SESSION["expira"] and now < _SESSION["expira"]:
+        return _SESSION["client"]
+    c = _login()
+    _SESSION["client"] = c
+    _SESSION["expira"] = now + _SESSION_TTL
+    return c
+
+
+# ───────────────────────── resolución de zona ─────────────────────────
+
+def resolver_zonas(pattern: str, limit: int = 10) -> list[dict]:
+    """Devuelve candidatos de ubicación para que el usuario ELIJA el correcto.
+    Cada candidato: {loc_id, loc_type, nombre, ruta, texto}."""
+    if not pattern or len(pattern.strip()) < 2:
+        return []
+    c = _client()
+    r = c.get(DIVISIONS, params={"format": "json", "pattern": pattern.strip()})
+    if r.status_code != 200:
+        return []
+    out = []
+    for x in r.json().get("results", [])[:limit]:
+        val = x.get("value", "")
+        pref, _, num = val.partition("-")
+        if not num:
+            continue
+        out.append({
+            "loc_id": num,
+            "loc_type": _LOC_TYPE.get(pref, "division"),
+            "valor": val,                      # "D-37004"
+            "nombre": x.get("text") or x.get("name"),
+            "ruta": x.get("name"),             # "La Pampa | Capital | Santa Rosa"
+        })
+    return out
+
+
+# ───────────────────────── búsqueda en vivo ─────────────────────────
+
+def _data(operacion, precio_min, precio_max, loc_id, loc_type) -> dict:
+    return {
+        "filters": [["network_share__in", "op", [50, 30]]],
+        "only_available": "checked", "only_reserved": "undefined",
+        "only_to_be_cotized": "undefined", "only_not_available": "undefined",
+        "with_tags": [], "without_tags": [], "with_custom_tags": [],
+        "with_or_custom_tags": [], "without_custom_tags": [],
+        "listing_edition_review": "undefined", "division_filters": [],
+        "state_filters": [], "current_localization_id": str(loc_id or "0"),
+        "current_localization_type": loc_type or "", "network": [3],
+        "exclude_my_properties": False,
+        "price_from": str(int(precio_min)) if precio_min else "0",
+        "price_to": str(int(precio_max)) if precio_max else "9999999999",
+        "operation_types": [OP_ID.get((operacion or "").lower())] if operacion else [],
+        "property_types": [], "currency": "USD", "bounding_box": [],
+    }
+
+
+def _num(s):
+    if s is None:
+        return None
+    d = re.sub(r"[^\d]", "", str(s))
+    return int(d) if d else None
+
+
+def _float(s):
+    if s is None:
+        return None
+    m = re.search(r"-?\d+(?:\.\d+)?", str(s))
+    return float(m.group(0)) if m else None
+
+
+def _moneda(*vals):
+    for v in vals:
+        if v and "USD" in str(v):
+            return "USD"
+        if v and ("$" in str(v) or "ARS" in str(v)):
+            return "ARS"
+    return "USD"
+
+
+def _normalizar(p: dict) -> dict:
+    def g(*keys):
+        for k in keys:
+            v = p.get(k)
+            if v not in (None, "", "USD 0", "0", "$ 0"):
+                return v
+        return None
+    precio_disp = g("OP1USD", "OP2USD", "OP3USD")
+    lat = _float(p.get("geo_lat"))
+    lng = _float(p.get("geo_long") or p.get("geo_lng"))
+    # Tokko a veces manda 0/0 → lo tratamos como faltante
+    if lat == 0:
+        lat = None
+    if lng == 0:
+        lng = None
+    return {
+        "referencia": p.get("reference") or str(p.get("id") or ""),
+        "tokko_id": p.get("id"),
+        "direccion": p.get("address") or p.get("fake_address") or p.get("location"),
+        "ubicacion": p.get("location"),
+        "tipo": p.get("type"),
+        "precio_display": precio_disp,
+        "precio_num": _num(precio_disp),
+        "moneda": _moneda(precio_disp),
+        "m2_cubierta_num": _num(p.get("roofed_surface")),
+        "m2_total_num": _num(p.get("surface") or p.get("total_surface")),
+        "ambientes_num": _num(p.get("rooms")),
+        "dormitorios_num": _num(p.get("suits")),
+        "banos_num": _num(p.get("bathroom_amount")),
+        "lat": lat, "lng": lng,
+        "detalles": None,
+        "publicado_por": p.get("company_name") or p.get("network_company_code"),
+        "ficha_url": p.get("info_url"),
+        "foto": p.get("cover_table") or p.get("cover"),
+    }
+
+
+_RED_COLS = ["referencia", "tokko_id", "direccion", "ubicacion", "tipo", "operacion",
+             "precio_num", "moneda", "precio_display", "m2_cubierta_num", "m2_total_num",
+             "ambientes_num", "dormitorios_num", "banos_num", "lat", "lng", "detalles",
+             "publicado_por", "ficha_url", "foto", "zona_consulta", "actualizado_at"]
+
+
+def _upsert(db: Session, rows: list[dict]):
+    """Upsert portable (Postgres ON CONFLICT / SQLite INSERT OR REPLACE-like)
+    por `referencia`. La tabla red_tokko_propiedades no es ORM."""
+    if not rows:
+        return 0
+    cols = ", ".join(_RED_COLS)
+    ph = ", ".join(f":{c}" for c in _RED_COLS)
+    if IS_POSTGRES:
+        setters = ", ".join(f"{c}=excluded.{c}" for c in _RED_COLS if c != "referencia")
+        sql = text(f"insert into red_tokko_propiedades ({cols}) values ({ph}) "
+                   f"on conflict (referencia) do update set {setters}")
+        for r in rows:
+            db.execute(sql, r)
+    else:
+        # SQLite: borro la referencia previa e inserto (idempotente).
+        delsql = text("delete from red_tokko_propiedades where referencia = :referencia")
+        inssql = text(f"insert into red_tokko_propiedades ({cols}) values ({ph})")
+        for r in rows:
+            db.execute(delsql, {"referencia": r["referencia"]})
+            db.execute(inssql, r)
+    db.commit()
+    return len(rows)
+
+
+def buscar_en_vivo(db: Session, loc_id: str, loc_type: str, operacion: str = "venta",
+                   precio_min=None, precio_max=None, limit: int = 60,
+                   zona_nombre: str = "", geocodificar: bool = True,
+                   max_geocode: int = 20) -> dict:
+    """Trae la zona elegida de la red Tokko, normaliza, geocodifica el pin si
+    falta, y upsertea en red_tokko_propiedades. Devuelve las filas."""
+    c = _client()
+    data = _data(operacion, precio_min, precio_max, loc_id, loc_type)
+    juntadas, total_red = [], None
+    for page in range(40):
+        r = c.get(PRESEARCH, params={"order_by": "-id", "page": page,
+                                     "data": json.dumps(data)})
+        if r.status_code != 200:
+            break
+        body = r.json()
+        if not isinstance(body, list) or not body:
+            break
+        if total_red is None:
+            try:
+                total_red = body[0][0].get("total")
+            except Exception:
+                total_red = None
+        filas = [x for x in body[1:] if isinstance(x, dict)]
+        if not filas:
+            break
+        for p in filas:
+            juntadas.append(_normalizar(p))
+            if len(juntadas) >= limit:
+                break
+        if len(juntadas) >= limit:
+            break
+        time.sleep(0.25)
+
+    # Geocodificar el pin de las que no traen coords (cap para no abusar de Nominatim)
+    geocodificadas = 0
+    if geocodificar:
+        for r in juntadas:
+            if geocodificadas >= max_geocode:
+                break
+            if (r.get("lat") is None or r.get("lng") is None) and r.get("direccion"):
+                lat, lng = ventas_geo.geocodificar(r["direccion"], r.get("ubicacion"))
+                if lat is not None:
+                    r["lat"], r["lng"] = lat, lng
+                    geocodificadas += 1
+                    time.sleep(1.0)  # Nominatim: 1 req/seg
+
+    # Preparar filas para upsert
+    ahora = datetime.utcnow().isoformat()
+    for r in juntadas:
+        r["operacion"] = operacion
+        r["zona_consulta"] = zona_nombre or loc_id
+        r["actualizado_at"] = ahora
+        for c2 in _RED_COLS:
+            r.setdefault(c2, None)
+    _upsert(db, juntadas)
+
+    # Marcar ya_importada
+    from app import models_ventas as mv
+    urls = [r["ficha_url"] for r in juntadas if r.get("ficha_url")]
+    importadas = set()
+    if urls:
+        importadas = {x[0] for x in db.query(mv.VentasPropiedad.link_externo)
+                      .filter(mv.VentasPropiedad.link_externo.in_(urls))}
+    for r in juntadas:
+        r["ya_importada"] = r.get("ficha_url") in importadas
+
+    return {"total_red": total_red, "trajo": len(juntadas),
+            "geocodificadas": geocodificadas, "propiedades": juntadas}

@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Globe, Download, Check, MapPin, Building2, RefreshCw, ExternalLink } from 'lucide-react'
+import { Globe, Download, Check, MapPin, Building2, RefreshCw, ExternalLink, Search, Radar, X } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
+import { useRole } from '../../context/RoleContext'
 import api from '../../utils/api'
 
 const OPERACIONES = [['', 'Todas'], ['venta', 'Venta'], ['alquiler', 'Alquiler']]
+const OPER_VIVO = [['venta', 'Venta'], ['alquiler', 'Alquiler']]
 
 export default function RedTokko() {
+  const { isAdmin, role } = useRole()
+  const esAdmin = isAdmin || role === 'ventas_admin' || role === 'gerencia'
+
   const [filtros, setFiltros] = useState({ zona: '', operacion: 'venta', precio_min: '', precio_max: '', dorm_min: '' })
   const [props, setProps] = useState([])
   const [nota, setNota] = useState('')
@@ -13,6 +18,47 @@ export default function RedTokko() {
   const [sel, setSel] = useState(new Set())
   const [importando, setImportando] = useState(false)
   const [msg, setMsg] = useState('')
+
+  // Búsqueda EN VIVO por zona (con desambiguación)
+  const [zonaQuery, setZonaQuery] = useState('')
+  const [candidatos, setCandidatos] = useState([])
+  const [zonaElegida, setZonaElegida] = useState(null)
+  const [resolviendo, setResolviendo] = useState(false)
+  const [vivo, setVivo] = useState({ operacion: 'venta', precio_min: '', precio_max: '' })
+  const [trayendo, setTrayendo] = useState(false)
+
+  const resolverZonas = async () => {
+    if (zonaQuery.trim().length < 2) return
+    setResolviendo(true); setCandidatos([]); setZonaElegida(null); setMsg('')
+    try {
+      const { data } = await api.get(`/api/ventas-crm/red-tokko/zonas?q=${encodeURIComponent(zonaQuery.trim())}`)
+      setCandidatos(data.zonas || [])
+      if (!data.zonas?.length) setMsg('No se encontró esa zona en Tokko. Probá otro nombre.')
+    } catch (e) {
+      setMsg(e?.response?.data?.detail || 'No se pudo consultar Tokko.')
+    } finally { setResolviendo(false) }
+  }
+
+  const traerEnVivo = async () => {
+    if (!zonaElegida) return
+    setTrayendo(true); setMsg(''); setSel(new Set())
+    try {
+      const { data } = await api.post('/api/ventas-crm/red-tokko/buscar', {
+        loc_id: zonaElegida.loc_id, loc_type: zonaElegida.loc_type,
+        zona_nombre: zonaElegida.ruta,
+        operacion: vivo.operacion,
+        precio_min: vivo.precio_min || null, precio_max: vivo.precio_max || null,
+        limit: 60,
+      })
+      setProps(data.propiedades || [])
+      setNota('')
+      setMsg(`✓ Traídas ${data.trajo} de ${data.total_red ?? '?'} en la zona · ${data.geocodificadas || 0} geolocalizadas`)
+    } catch (e) {
+      setMsg(e?.response?.data?.detail || 'No se pudo traer de la red en vivo.')
+    } finally { setTrayendo(false) }
+  }
+
+  const setV = k => e => setVivo(s => ({ ...s, [k]: e.target.value }))
 
   const buscar = async () => {
     setLoading(true); setMsg(''); setSel(new Set())
@@ -72,7 +118,72 @@ export default function RedTokko() {
           </div>
         </header>
 
-        {/* Filtros */}
+        {/* Búsqueda EN VIVO por zona (admin) */}
+        {esAdmin && (
+          <div className="card p-4 mb-4 border-[#B8893A]/30">
+            <div className="flex items-center gap-2 mb-2">
+              <Radar size={16} className="text-[#B8893A]" />
+              <p className="text-[13px] font-semibold">Traer de la red en vivo por zona</p>
+            </div>
+            <p className="text-[11px] text-muted mb-3">
+              Escribí una zona y elegí la correcta. Tokko trae solo esa zona (no toda la red).
+            </p>
+
+            {/* Paso 1: resolver zona */}
+            <div className="flex gap-2 items-end mb-2">
+              <div className="flex-1">
+                <label className="label">Zona</label>
+                <input className="input !py-2 text-[13px]" placeholder="Ej: Santa Rosa, General Pico…"
+                  value={zonaQuery} onChange={e => setZonaQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && resolverZonas()} />
+              </div>
+              <button className="btn-secondary !py-2 text-[13px]" onClick={resolverZonas} disabled={resolviendo || zonaQuery.trim().length < 2}>
+                <Search size={13} className={resolviendo ? 'animate-pulse' : ''} /> Resolver
+              </button>
+            </div>
+
+            {/* Candidatos para desambiguar */}
+            {candidatos.length > 0 && !zonaElegida && (
+              <div className="border border-border rounded-xl divide-y divide-border mb-2 max-h-52 overflow-y-auto">
+                {candidatos.map(z => (
+                  <button key={z.valor} onClick={() => { setZonaElegida(z); setCandidatos([]) }}
+                    className="w-full text-left px-3 py-2 text-[13px] hover:bg-[#B8893A]/10 flex items-center gap-2">
+                    <MapPin size={12} className="text-[#B8893A] shrink-0" />
+                    <span className="truncate">{z.ruta}</span>
+                    <span className="chip-muted text-[10px] ml-auto shrink-0">{z.loc_type}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Zona elegida + filtros + traer */}
+            {zonaElegida && (
+              <div className="bg-[#B8893A]/5 border border-[#B8893A]/20 rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Check size={14} className="text-emerald-500" />
+                  <span className="text-[13px] font-medium">{zonaElegida.ruta}</span>
+                  <button className="ml-auto btn-ghost !p-1" title="Cambiar zona"
+                    onClick={() => { setZonaElegida(null); setCandidatos([]) }}><X size={14} /></button>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+                  <div>
+                    <label className="label">Operación</label>
+                    <select className="input !py-2 text-[13px]" value={vivo.operacion} onChange={setV('operacion')}>
+                      {OPER_VIVO.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </div>
+                  <div><label className="label">USD mín</label><input className="input !py-2 text-[13px]" type="number" value={vivo.precio_min} onChange={setV('precio_min')} /></div>
+                  <div><label className="label">USD máx</label><input className="input !py-2 text-[13px]" type="number" value={vivo.precio_max} onChange={setV('precio_max')} /></div>
+                  <button className="btn-primary !py-2 text-[13px]" onClick={traerEnVivo} disabled={trayendo}>
+                    <Radar size={13} className={trayendo ? 'animate-pulse' : ''} /> {trayendo ? 'Trayendo…' : 'Traer de la red'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Filtros (sobre lo ya guardado) */}
         <div className="card p-3 mb-4 grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
           <div className="col-span-2 sm:col-span-1">
             <label className="label">Zona</label>

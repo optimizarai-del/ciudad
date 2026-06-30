@@ -1183,3 +1183,48 @@ def red_tokko_importar(payload: dict,
         creadas += 1
     db.commit()
     return {"creadas": creadas, "saltadas_ya_existentes": saltadas, "pedidas": len(refs)}
+
+
+# ── Red Tokko EN VIVO: resolver zona (desambiguar) + traer por zona ──
+
+@router.get("/red-tokko/zonas")
+def red_tokko_zonas(q: str = Query(..., min_length=2),
+                    db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Candidatos de ubicación para que el usuario elija el correcto.
+    Ej: 'Santa Rosa' → [La Pampa|Capital|Santa Rosa, San Luis|…|Santa Rosa de Conlara, …]."""
+    get_vendedor(db, user)
+    from app.services import ventas_red_tokko
+    try:
+        return {"zonas": ventas_red_tokko.resolver_zonas(q)}
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception:
+        raise HTTPException(502, "No se pudo consultar Tokko. Reintentá en un momento.")
+
+
+@router.post("/red-tokko/buscar")
+def red_tokko_buscar(payload: dict,
+                     db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Trae EN VIVO de la red Tokko la zona elegida (loc_id/loc_type del
+    endpoint /zonas), la guarda y la devuelve lista para importar."""
+    v = get_vendedor(db, user)
+    if not v.es_admin:
+        raise HTTPException(403, "Solo un admin de ventas puede traer de la red en vivo.")
+    loc_id = payload.get("loc_id")
+    loc_type = payload.get("loc_type")
+    if not loc_id:
+        raise HTTPException(400, "Elegí una zona (loc_id) del autocomplete.")
+    from app.services import ventas_red_tokko
+    try:
+        return ventas_red_tokko.buscar_en_vivo(
+            db, loc_id=loc_id, loc_type=loc_type or "division",
+            operacion=payload.get("operacion") or "venta",
+            precio_min=payload.get("precio_min"), precio_max=payload.get("precio_max"),
+            limit=min(int(payload.get("limit") or 60), 120),
+            zona_nombre=payload.get("zona_nombre") or "",
+            geocodificar=payload.get("geocodificar", True),
+        )
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"No se pudo traer de la red: {str(e)[:200]}")
