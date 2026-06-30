@@ -37,6 +37,52 @@ DIVISIONS = "https://www.tokkobroker.com/locations_api/v1/divisions/"
 OP_ID = {"venta": 1, "alquiler": 2, "alquiler_temporal": 3}
 _LOC_TYPE = {"D": "division", "C": "city", "S": "state", "Z": "zone", "N": "neighborhood"}
 
+# El servicio opera SOLO en Argentina: la desambiguación nunca debe ofrecer
+# ubicaciones de otros países. Tokko devuelve rutas inconsistentes: las
+# extranjeras a veces encabezan con el país ("México | …", "Estados Unidos | …")
+# y a veces con un estado/provincia extranjera ("Yucatán | Mérida | …"). Las
+# argentinas encabezan con "Argentina | …" o con una provincia argentina, o
+# tienen la provincia en algún segmento. Regla robusta:
+#   ES argentina  ⇔  (el primer segmento NO es un país extranjero)
+#                     Y (encabeza con "Argentina" o algún segmento es provincia AR)
+# Así "Entre Rios | Uruguay | …" (Uruguay = depto de Entre Ríos) queda incluida,
+# y "España | Cordoba | …" o "Yucatán | …" quedan excluidas.
+_PAISES_EXTRANJEROS = {
+    "mexico", "estados unidos", "usa", "ee uu", "eeuu", "uruguay", "chile",
+    "paraguay", "bolivia", "brasil", "brazil", "colombia", "peru", "ecuador",
+    "venezuela", "espana", "panama", "costa rica", "republica dominicana",
+    "guatemala", "honduras", "el salvador", "nicaragua", "cuba", "puerto rico",
+    "canada", "francia", "italia", "portugal",
+}
+_PROVINCIAS_AR = {
+    "buenos aires", "ciudad autonoma de buenos aires", "caba", "capital federal",
+    "catamarca", "chaco", "chubut", "cordoba", "corrientes", "entre rios",
+    "formosa", "jujuy", "la pampa", "la rioja", "mendoza", "misiones", "neuquen",
+    "rio negro", "salta", "san juan", "san luis", "santa cruz", "santa fe",
+    "santiago del estero", "tierra del fuego", "tucuman",
+}
+
+
+def _norm(s: str) -> str:
+    """minúsculas, sin acentos, sin espacios extra — para comparar segmentos."""
+    s = (s or "").strip().lower()
+    for a, b in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ñ", "n")):
+        s = s.replace(a, b)
+    return re.sub(r"\s+", " ", s)
+
+
+def _es_argentina(ruta: str) -> bool:
+    if not ruta:
+        return False
+    segs = [_norm(s) for s in ruta.split("|")]
+    if not segs:
+        return False
+    if segs[0] in _PAISES_EXTRANJEROS:
+        return False
+    if segs[0] == "argentina":
+        return True
+    return any(s in _PROVINCIAS_AR for s in segs)
+
 # Sesión web cacheada (login es caro: la reusamos por un rato).
 _SESSION: dict = {"client": None, "expira": None}
 _SESSION_TTL = timedelta(minutes=15)
@@ -68,9 +114,10 @@ def _login() -> httpx.Client:
     return c
 
 
-def _client() -> httpx.Client:
+def _client(forzar: bool = False) -> httpx.Client:
     now = datetime.utcnow()
-    if _SESSION["client"] is not None and _SESSION["expira"] and now < _SESSION["expira"]:
+    if (not forzar and _SESSION["client"] is not None
+            and _SESSION["expira"] and now < _SESSION["expira"]):
         return _SESSION["client"]
     c = _login()
     _SESSION["client"] = c
@@ -78,19 +125,57 @@ def _client() -> httpx.Client:
     return c
 
 
+def _invalidar_sesion():
+    _SESSION["client"] = None
+    _SESSION["expira"] = None
+
+
+def _get_json(url: str, params: dict, intentos: int = 3):
+    """GET autenticado que devuelve JSON. Si la sesión quedó inválida (Tokko
+    responde HTML/login o no-JSON), re-loguea y reintenta. Robustez clave: la
+    sesión web a veces queda rechazada y hay que rehacerla."""
+    ultimo_err = None
+    for i in range(intentos):
+        c = _client(forzar=(i > 0))
+        try:
+            r = c.get(url, params=params)
+            ctype = r.headers.get("content-type", "")
+            # Respuesta válida sólo si es JSON real
+            if r.status_code == 200 and "json" in ctype.lower():
+                return r.json()
+            # status 200 pero HTML (login expirado) o error → re-login y reintento
+            ultimo_err = f"http={r.status_code} ctype={ctype}"
+            _invalidar_sesion()
+            time.sleep(0.5)
+        except Exception as e:
+            ultimo_err = str(e)
+            _invalidar_sesion()
+            time.sleep(0.5)
+    raise RuntimeError(f"Tokko no respondió JSON tras {intentos} intentos ({ultimo_err}).")
+
+
+def _divisions(pattern: str) -> list:
+    try:
+        return _get_json(DIVISIONS, {"format": "json", "pattern": pattern}).get("results", [])
+    except RuntimeError:
+        return []
+
+
 # ───────────────────────── resolución de zona ─────────────────────────
 
-def resolver_zonas(pattern: str, limit: int = 10) -> list[dict]:
+def resolver_zonas(pattern: str, limit: int = 10, solo_argentina: bool = True) -> list[dict]:
     """Devuelve candidatos de ubicación para que el usuario ELIJA el correcto.
-    Cada candidato: {loc_id, loc_type, nombre, ruta, texto}."""
+    Por defecto SOLO Argentina (el servicio no opera en el exterior).
+    Cada candidato: {loc_id, loc_type, valor, nombre, ruta}."""
     if not pattern or len(pattern.strip()) < 2:
         return []
-    c = _client()
-    r = c.get(DIVISIONS, params={"format": "json", "pattern": pattern.strip()})
-    if r.status_code != 200:
-        return []
+    # Pedimos de más porque vamos a descartar las extranjeras y recortar después.
+    results = _divisions(pattern.strip())
     out = []
-    for x in r.json().get("results", [])[:limit]:
+    for x in results:
+        ruta = x.get("name")
+        if solo_argentina and not _es_argentina(ruta):
+            continue
         val = x.get("value", "")
         pref, _, num = val.partition("-")
         if not num:
@@ -99,9 +184,11 @@ def resolver_zonas(pattern: str, limit: int = 10) -> list[dict]:
             "loc_id": num,
             "loc_type": _LOC_TYPE.get(pref, "division"),
             "valor": val,                      # "D-37004"
-            "nombre": x.get("text") or x.get("name"),
-            "ruta": x.get("name"),             # "La Pampa | Capital | Santa Rosa"
+            "nombre": x.get("text") or ruta,
+            "ruta": ruta,                      # "La Pampa | Capital | Santa Rosa"
         })
+        if len(out) >= limit:
+            break
     return out
 
 
@@ -221,15 +308,14 @@ def buscar_en_vivo(db: Session, loc_id: str, loc_type: str, operacion: str = "ve
                    max_geocode: int = 20) -> dict:
     """Trae la zona elegida de la red Tokko, normaliza, geocodifica el pin si
     falta, y upsertea en red_tokko_propiedades. Devuelve las filas."""
-    c = _client()
     data = _data(operacion, precio_min, precio_max, loc_id, loc_type)
     juntadas, total_red = [], None
     for page in range(40):
-        r = c.get(PRESEARCH, params={"order_by": "-id", "page": page,
-                                     "data": json.dumps(data)})
-        if r.status_code != 200:
+        try:
+            body = _get_json(PRESEARCH, {"order_by": "-id", "page": page,
+                                         "data": json.dumps(data)})
+        except RuntimeError:
             break
-        body = r.json()
         if not isinstance(body, list) or not body:
             break
         if total_red is None:
