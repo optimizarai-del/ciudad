@@ -78,6 +78,53 @@ class PedidoPrioridad(str, Enum):
     alta = "alta"
 
 
+# ── Pipeline de Cliente (doc "Pipeline_Cliente_CRM_Ciudad_v2_3") ──
+# El pipeline vive sobre el CLIENTE (no sobre el pedido). 10 etapas: 8 activas
+# + 2 de pausa (caído/perdido y frío/espera).
+
+class ClienteEtapa(str, Enum):
+    nuevo_lead = "nuevo_lead"                    # 1
+    en_calificacion = "en_calificacion"          # 2
+    calificado_activo = "calificado_activo"      # 3
+    presentacion_opciones = "presentacion_opciones"  # 4
+    en_visitas = "en_visitas"                    # 5
+    oferta_negociacion = "oferta_negociacion"    # 6
+    reserva_sena = "reserva_sena"                # 7
+    escritura_cierre = "escritura_cierre"        # 8
+    caido_perdido = "caido_perdido"              # 9  (pausa, requiere motivo)
+    frio_espera = "frio_espera"                  # 10 (pausa, requiere motivo)
+
+
+# Orden canónico de las etapas activas (para validar avances y mostrar kanban).
+CLIENTE_ETAPAS_ORDEN = [
+    ClienteEtapa.nuevo_lead, ClienteEtapa.en_calificacion, ClienteEtapa.calificado_activo,
+    ClienteEtapa.presentacion_opciones, ClienteEtapa.en_visitas,
+    ClienteEtapa.oferta_negociacion, ClienteEtapa.reserva_sena, ClienteEtapa.escritura_cierre,
+]
+CLIENTE_ETAPAS_PAUSA = [ClienteEtapa.caido_perdido, ClienteEtapa.frio_espera]
+
+
+class ClienteTemperatura(str, Enum):
+    caliente = "caliente"
+    tibio = "tibio"
+    frio = "frio"
+
+
+class PerfilComprador(str, Enum):
+    contado = "contado"
+    credito = "credito"
+    inversor = "inversor"
+    espera_vender = "espera_vender"
+    oportunista = "oportunista"
+
+
+class TipoOperacionNegocio(str, Enum):
+    """El NEGOCIO (distinto del tipo de propiedad). Doc §3.7 (aclarado)."""
+    venta_propia = "venta_propia"
+    inversion = "inversion"
+    colega = "colega"
+
+
 class OperacionEstado(str, Enum):
     abierta = "abierta"
     sena = "sena"
@@ -156,6 +203,31 @@ class VentasCliente(Base):
     origen = Column(String)          # cómo llegó: referido, web, instagram, etc.
     observaciones = Column(Text)
 
+    # ── Pipeline de Cliente (Fase 1). Columnas String validadas contra los
+    # enums en la capa de schemas → migración portable SQLite/Postgres. ──
+    etapa = Column(String, default=ClienteEtapa.nuevo_lead.value, index=True)
+    temperatura = Column(String, default=ClienteTemperatura.tibio.value, index=True)
+    perfil_comprador = Column(String)         # PerfilComprador
+    tipo_operacion = Column(String)           # TipoOperacionNegocio (el negocio)
+    tipo_propiedad_buscada = Column(String)   # VPropiedadTipo (qué busca)
+
+    presupuesto_min_usd = Column(Float)
+    presupuesto_max_usd = Column(Float)
+    zona_interes = Column(String)
+    fuente_financiamiento = Column(String)    # propio | hipoteca | espera_vender | otro
+    fecha_estimada_decision = Column(String)  # "mes/trimestre" libre
+    motivo_pausa = Column(Text)               # obligatorio al pasar a perdido/frío
+
+    # Próxima acción OBLIGATORIA (Cambio 1.2): motor del seguimiento diario.
+    proxima_accion_tipo = Column(String)      # llamada|whatsapp|visita|envio|reunion|seguimiento
+    proxima_accion_fecha = Column(DateTime)
+    proxima_accion_contexto = Column(Text)
+
+    # Base para la degradación automática de temperatura (Fase 2).
+    ultimo_contacto_at = Column(DateTime)
+    etapa_desde = Column(DateTime)            # cuándo entró a la etapa actual (SLA)
+    temp_alerta_previa_at = Column(DateTime)  # cuándo se avisó "por enfriarse"
+
     # true cuando ya cerró al menos una operación → grupo "clientes operados"
     es_operado = Column(Boolean, default=False)
 
@@ -179,6 +251,53 @@ class VentasClienteNota(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     cliente = relationship("VentasCliente", back_populates="notas")
+
+
+class VentasClienteEvento(Base):
+    """Historial del pipeline de un cliente (Fase 1/2): cambios de etapa,
+    temperatura, reasignaciones, degradaciones, interacciones registradas.
+    Alimenta el timeline de la ficha y las métricas del líder."""
+    __tablename__ = "ventas_cliente_eventos"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    cliente_id = Column(Integer, ForeignKey("ventas_clientes.id"), index=True, nullable=False)
+    vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"))
+    tipo = Column(String, index=True)   # etapa | temperatura | reasignacion | degradacion | interaccion | sla
+    de = Column(String)                 # valor anterior
+    a = Column(String)                  # valor nuevo
+    detalle = Column(Text)              # motivo / contexto / nota
+    automatico = Column(Boolean, default=False)  # true si lo hizo el sistema
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class VentasPipelineSLA(Base):
+    """Config de SLA por etapa (Fase 2.3). Una fila por etapa; horas máximas
+    sin movimiento antes de alertar. Editable por el admin."""
+    __tablename__ = "ventas_pipeline_sla"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    etapa = Column(String, unique=True, index=True)
+    horas_sla = Column(Integer)         # null = sin SLA (etapas de cierre/pausa)
+
+
+class VentasLiderConsulta(Base):
+    """Consulta al líder antes de degradar un lead por inactividad (Fase 2.2).
+    Si el líder no responde en 24h, la degradación se ejecuta automática."""
+    __tablename__ = "ventas_lider_consultas"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    cliente_id = Column(Integer, ForeignKey("ventas_clientes.id"), index=True, nullable=False)
+    vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"))
+    de_temp = Column(String)
+    a_temp = Column(String)
+    estado = Column(String, default="pendiente", index=True)  # pendiente|confirmada|pospuesta|reasignada|auto
+    resolucion_detalle = Column(Text)
+    creada_at = Column(DateTime, default=datetime.utcnow, index=True)
+    vence_at = Column(DateTime)         # creada + 24h
+    resuelta_at = Column(DateTime)
 
 
 # ───────────────────── Propiedad ─────────────────────

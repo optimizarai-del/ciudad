@@ -132,24 +132,32 @@ def listar_clientes(operados: Optional[bool] = None, q: Optional[str] = None,
 @router.post("/clientes", response_model=sv.ClienteOut)
 def crear_cliente(data: sv.ClienteCreate,
                   db: Session = Depends(get_db), user=Depends(get_current_user)):
+    from datetime import datetime
     v = get_vendedor(db, user)
-    obj = mv.VentasCliente(**data.model_dump(), vendedor_id=v.id)
+    # exclude_none para no pisar los defaults del modelo (etapa/temperatura).
+    obj = mv.VentasCliente(**data.model_dump(exclude_none=True), vendedor_id=v.id)
+    obj.etapa_desde = datetime.utcnow()
     db.add(obj); db.flush()
+    _log_evento(db, v, obj.id, "etapa", None, obj.etapa, "Lead creado")
     _audit(db, v, "ventas_clientes", obj.id, mv.AuditAccion.create, data.model_dump())
     db.commit(); db.refresh(obj)
     return obj
 
 
 @router.patch("/clientes/{cid}", response_model=sv.ClienteOut)
-def editar_cliente(cid: int, data: sv.ClienteCreate,
+def editar_cliente(cid: int, data: sv.ClienteUpdate,
                    db: Session = Depends(get_db), user=Depends(get_current_user)):
     v = get_vendedor(db, user)
     obj = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).filter_by(id=cid).first()
     if not obj:
         raise HTTPException(404, "Cliente no encontrado")
-    for k, val in data.model_dump(exclude_unset=True).items():
+    cambios = data.model_dump(exclude_unset=True)
+    temp_anterior = obj.temperatura
+    for k, val in cambios.items():
         setattr(obj, k, val)
-    _audit(db, v, "ventas_clientes", obj.id, mv.AuditAccion.update, data.model_dump(exclude_unset=True))
+    if "temperatura" in cambios and cambios["temperatura"] != temp_anterior:
+        _log_evento(db, v, obj.id, "temperatura", temp_anterior, obj.temperatura, "Cambio manual")
+    _audit(db, v, "ventas_clientes", obj.id, mv.AuditAccion.update, cambios)
     db.commit(); db.refresh(obj)
     return obj
 
@@ -214,6 +222,240 @@ def eliminar_nota(cid: int, nid: int, db: Session = Depends(get_db), user=Depend
         raise HTTPException(404, "Nota no encontrada")
     db.delete(nota); db.commit()
     return {"ok": True}
+
+
+def _log_evento(db, v, cliente_id, tipo, de, a, detalle=None, automatico=False):
+    """Registra un evento del pipeline (timeline + métricas)."""
+    db.add(mv.VentasClienteEvento(
+        cliente_id=cliente_id, vendedor_id=(v.id if v else None),
+        tipo=tipo, de=de, a=a, detalle=detalle, automatico=automatico))
+
+
+# Etapas que exigen el perfil base completo (doc §3.5: transición 2→3).
+_ETAPAS_REQUIEREN_PERFIL = {
+    "calificado_activo", "presentacion_opciones", "en_visitas",
+    "oferta_negociacion", "reserva_sena", "escritura_cierre",
+}
+_ETAPAS_PAUSA = {"caido_perdido", "frio_espera"}
+_ETAPAS_VALIDAS = {e.value for e in mv.ClienteEtapa}
+
+
+def _validar_avance(cli, nueva_etapa: str, motivo: str | None):
+    """Criterios de avance (doc §3.5). Devuelve None si OK, o un mensaje de error."""
+    if nueva_etapa not in _ETAPAS_VALIDAS:
+        return f"Etapa inválida: {nueva_etapa}"
+    # Hard rule: pausa requiere motivo
+    if nueva_etapa in _ETAPAS_PAUSA and not (motivo and motivo.strip()):
+        return "Para mandar el lead a Perdido o Frío/En espera es obligatorio registrar un motivo."
+    # Hard rule: perfil base para entrar a Calificado-Activo y posteriores
+    if nueva_etapa in _ETAPAS_REQUIEREN_PERFIL:
+        faltan = []
+        if not cli.perfil_comprador: faltan.append("perfil de comprador")
+        if not (cli.presupuesto_min_usd or cli.presupuesto_max_usd): faltan.append("presupuesto")
+        if not cli.zona_interes: faltan.append("zona de interés")
+        if faltan:
+            return ("Para avanzar a esta etapa completá el perfil base: " + ", ".join(faltan) + ".")
+    return None
+
+
+@router.post("/clientes/{cid}/interaccion")
+def registrar_interaccion(cid: int, data: sv.InteraccionCreate,
+                          db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Cambio 1.2 — Registra una interacción: nota + PRÓXIMA ACCIÓN OBLIGATORIA.
+    No se puede cerrar el log sin definir la próxima acción (regla del doc)."""
+    from datetime import datetime
+    v = get_vendedor(db, user)
+    cli = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).filter_by(id=cid).first()
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    if not (data.proxima_accion_contexto and data.proxima_accion_contexto.strip()):
+        raise HTTPException(400, "La próxima acción es obligatoria: definí tipo, fecha y contexto.")
+    # Nota = interacción
+    nota = mv.VentasClienteNota(cliente_id=cid, vendedor_id=v.id,
+                                texto=data.texto, origen=data.origen)
+    db.add(nota)
+    # Actualizar próxima acción + último contacto
+    cli.proxima_accion_tipo = data.proxima_accion_tipo
+    cli.proxima_accion_fecha = data.proxima_accion_fecha
+    cli.proxima_accion_contexto = data.proxima_accion_contexto
+    cli.ultimo_contacto_at = datetime.utcnow()
+    if data.temperatura and data.temperatura != cli.temperatura:
+        _log_evento(db, v, cid, "temperatura", cli.temperatura, data.temperatura, "Actualizada en interacción")
+        cli.temperatura = data.temperatura
+    # Reset del aviso previo de enfriamiento (hubo actividad)
+    cli.temp_alerta_previa_at = None
+    _log_evento(db, v, cid, "interaccion", None, data.proxima_accion_tipo,
+                f"{data.texto[:120]} · próx: {data.proxima_accion_contexto[:80]}")
+    db.commit()
+    return {"ok": True, "ultimo_contacto_at": cli.ultimo_contacto_at.isoformat()}
+
+
+@router.patch("/clientes/{cid}/etapa", response_model=sv.ClienteOut)
+def cambiar_etapa(cid: int, data: sv.ClienteEtapaUpdate,
+                  db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Cambio 1.3 — Avanza/retrocede la etapa del cliente con criterios de avance
+    (doc §3.5) y motivo obligatorio para pausas."""
+    from datetime import datetime
+    v = get_vendedor(db, user)
+    cli = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).filter_by(id=cid).first()
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    err = _validar_avance(cli, data.etapa, data.motivo)
+    if err:
+        raise HTTPException(400, err)
+    anterior = cli.etapa
+    if data.etapa == anterior:
+        return cli
+    cli.etapa = data.etapa
+    cli.etapa_desde = datetime.utcnow()
+    if data.etapa in _ETAPAS_PAUSA:
+        cli.motivo_pausa = data.motivo
+    if data.etapa == "escritura_cierre":
+        cli.es_operado = True
+    _log_evento(db, v, cid, "etapa", anterior, data.etapa, data.motivo)
+    _audit(db, v, "ventas_clientes", cid, mv.AuditAccion.update, {"etapa": data.etapa})
+    db.commit(); db.refresh(cli)
+    return cli
+
+
+@router.get("/clientes/{cid}/eventos", response_model=List[sv.ClienteEventoOut])
+def listar_eventos_cliente(cid: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    v = get_vendedor(db, user)
+    cli = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).filter_by(id=cid).first()
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    return (db.query(mv.VentasClienteEvento).filter_by(cliente_id=cid)
+            .order_by(mv.VentasClienteEvento.created_at.desc()).limit(100).all())
+
+
+@router.get("/pipeline")
+def pipeline_clientes(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Cambio 1.3 — Clientes agrupados por etapa del pipeline (para kanban) +
+    flags de urgencia para el panel de temperatura."""
+    from datetime import datetime
+    from app.services import ventas_pipeline as vp
+    v = get_vendedor(db, user)
+    clientes = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).all()
+    ahora = datetime.utcnow()
+    orden_temp = {"caliente": 0, "tibio": 1, "frio": 2}
+    sla_map = vp.get_sla_map(db)
+    en_consulta = {q.cliente_id for q in db.query(mv.VentasLiderConsulta.cliente_id)
+                   .filter(mv.VentasLiderConsulta.estado == "pendiente")}
+    out = []
+    for c in clientes:
+        prox = c.proxima_accion_fecha
+        vencida = bool(prox and prox < ahora)
+        dias_sin_contacto = ((ahora - c.ultimo_contacto_at).days
+                             if c.ultimo_contacto_at else None)
+        dias_en_etapa = ((ahora - c.etapa_desde).days if c.etapa_desde else None)
+        sla = vp.sla_estado(c, sla_map, ahora)
+        out.append({
+            "id": c.id, "nombre": c.nombre, "telefono": c.telefono,
+            "etapa": c.etapa or "nuevo_lead",
+            "temperatura": c.temperatura or "tibio",
+            "perfil_comprador": c.perfil_comprador,
+            "tipo_operacion": c.tipo_operacion,
+            "presupuesto_min_usd": c.presupuesto_min_usd,
+            "presupuesto_max_usd": c.presupuesto_max_usd,
+            "zona_interes": c.zona_interes,
+            "proxima_accion_tipo": c.proxima_accion_tipo,
+            "proxima_accion_fecha": c.proxima_accion_fecha.isoformat() if c.proxima_accion_fecha else None,
+            "proxima_accion_contexto": c.proxima_accion_contexto,
+            "sin_proxima_accion": not c.proxima_accion_fecha,
+            "proxima_accion_vencida": vencida,
+            "dias_sin_contacto": dias_sin_contacto,
+            "dias_en_etapa": dias_en_etapa,
+            "sla_vencido": sla["sla_vencido"],
+            "en_consulta_lider": c.id in en_consulta,
+            "vendedor_id": c.vendedor_id,
+        })
+    # Orden para el panel de temperatura: temp, luego acción vencida, luego sin acción
+    out.sort(key=lambda x: (
+        orden_temp.get(x["temperatura"], 1),
+        0 if x["proxima_accion_vencida"] else 1,
+        0 if x["sin_proxima_accion"] else 1,
+        x["proxima_accion_fecha"] or "9999",
+    ))
+    return {"total": len(out), "clientes": out,
+            "etapas": [e.value for e in mv.CLIENTE_ETAPAS_ORDEN] + [e.value for e in mv.CLIENTE_ETAPAS_PAUSA]}
+
+
+# ── Fase 2: job, consultas al líder y SLA ──
+
+@router.post("/pipeline/jobs/run")
+def pipeline_run_jobs(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Corre degradación + resolución de consultas vencidas (Fase 2). Pensado
+    para el cron diario; también se puede disparar a mano (admin)."""
+    from app.services import ventas_pipeline as vp
+    v = get_vendedor(db, user)
+    if not v.es_admin:
+        raise HTTPException(403, "Solo un admin puede correr el job del pipeline.")
+    return vp.run_pipeline_jobs(db)
+
+
+@router.get("/pipeline/consultas")
+def pipeline_consultas(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Consultas de degradación pendientes para el líder (doc §7.1)."""
+    v = get_vendedor(db, user)
+    if not v.es_admin:
+        raise HTTPException(403, "Solo el líder/admin ve las consultas de degradación.")
+    qs = (db.query(mv.VentasLiderConsulta)
+          .filter_by(estado="pendiente")
+          .order_by(mv.VentasLiderConsulta.creada_at.asc()).all())
+    out = []
+    for q in qs:
+        c = db.get(mv.VentasCliente, q.cliente_id)
+        out.append({
+            "id": q.id, "cliente_id": q.cliente_id,
+            "cliente_nombre": c.nombre if c else "—",
+            "vendedor_id": q.vendedor_id,
+            "de_temp": q.de_temp, "a_temp": q.a_temp,
+            "creada_at": q.creada_at.isoformat() if q.creada_at else None,
+            "vence_at": q.vence_at.isoformat() if q.vence_at else None,
+        })
+    return {"consultas": out}
+
+
+@router.post("/pipeline/consultas/{qid}/resolver")
+def pipeline_resolver_consulta(qid: int, payload: dict,
+                               db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """El líder resuelve: confirmar | posponer | reasignar (con vendedor destino)."""
+    from app.services import ventas_pipeline as vp
+    v = get_vendedor(db, user)
+    if not v.es_admin:
+        raise HTTPException(403, "Solo el líder/admin resuelve consultas.")
+    try:
+        return vp.resolver_consulta(
+            db, qid, accion=payload.get("accion"),
+            detalle=payload.get("detalle", ""),
+            reasignar_a=payload.get("reasignar_a"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/pipeline/sla")
+def pipeline_get_sla(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    from app.services import ventas_pipeline as vp
+    get_vendedor(db, user)
+    return {"sla": vp.get_sla_map(db)}
+
+
+@router.put("/pipeline/sla")
+def pipeline_set_sla(payload: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Actualiza SLA por etapa (admin). payload: {etapa: horas|null, ...}."""
+    v = get_vendedor(db, user)
+    if not v.es_admin:
+        raise HTTPException(403, "Solo un admin configura los SLA.")
+    from app.services import ventas_pipeline as vp
+    vp.seed_sla(db)
+    for etapa, horas in (payload or {}).items():
+        fila = db.query(mv.VentasPipelineSLA).filter_by(etapa=etapa).first()
+        if fila:
+            fila.horas_sla = horas
+        else:
+            db.add(mv.VentasPipelineSLA(etapa=etapa, horas_sla=horas))
+    db.commit()
+    return {"ok": True, "sla": vp.get_sla_map(db)}
 
 
 def _fmt_usd(n):

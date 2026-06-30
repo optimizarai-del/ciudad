@@ -493,6 +493,85 @@ def _migrar_workspace_demo():
 
 
 @app.on_event("startup")
+def _migrar_cliente_pipeline():
+    """Pipeline de Cliente (Fase 1): agrega a ventas_clientes las columnas del
+    pipeline (etapa, temperatura, perfil, próxima acción, etc.) si faltan.
+    Idempotente, SQLite + Postgres. Los clientes existentes arrancan en
+    'nuevo_lead' / 'tibio'."""
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+    db = SessionLocal()
+    try:
+        ins = inspect(engine)
+        if "ventas_clientes" not in ins.get_table_names(schema=schema):
+            return
+        cols = {c["name"] for c in ins.get_columns("ventas_clientes", schema=schema)}
+        nuevas = {
+            "etapa": "VARCHAR DEFAULT 'nuevo_lead'",
+            "temperatura": "VARCHAR DEFAULT 'tibio'",
+            "perfil_comprador": "VARCHAR",
+            "tipo_operacion": "VARCHAR",
+            "tipo_propiedad_buscada": "VARCHAR",
+            "presupuesto_min_usd": "FLOAT",
+            "presupuesto_max_usd": "FLOAT",
+            "zona_interes": "VARCHAR",
+            "fuente_financiamiento": "VARCHAR",
+            "fecha_estimada_decision": "VARCHAR",
+            "motivo_pausa": "TEXT",
+            "ultimo_contacto_at": "TIMESTAMP",
+            # Próxima acción obligatoria (Cambio 1.2)
+            "proxima_accion_tipo": "VARCHAR",
+            "proxima_accion_fecha": "TIMESTAMP",
+            "proxima_accion_contexto": "TEXT",
+            # Pipeline timestamps + degradación (Fase 2)
+            "etapa_desde": "TIMESTAMP",
+            "temp_alerta_previa_at": "TIMESTAMP",
+        }
+        for col, ddl in nuevas.items():
+            if col not in cols:
+                try:
+                    db.execute(text(f"ALTER TABLE {qual}ventas_clientes ADD COLUMN {col} {ddl}"))
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    logger.exception("[migrar] ventas_clientes.%s: falló el ALTER; se continúa", col)
+        # backfill defaults para filas viejas
+        try:
+            db.execute(text(f"UPDATE {qual}ventas_clientes SET etapa='nuevo_lead' WHERE etapa IS NULL"))
+            db.execute(text(f"UPDATE {qual}ventas_clientes SET temperatura='tibio' WHERE temperatura IS NULL"))
+            db.commit()
+        except Exception:
+            db.rollback()
+    except Exception:
+        logger.exception("[migrar] _migrar_cliente_pipeline falló; se continúa el arranque")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def _crear_tabla_cliente_eventos():
+    """Tabla de eventos del pipeline de cliente (historial de cambios de etapa,
+    temperatura, reasignaciones, degradaciones). Se crea vía metadata en
+    create_all; este hook solo garantiza que exista en bases viejas."""
+    from sqlalchemy import inspect
+    from app.database import engine, IS_POSTGRES, CIUDAD_SCHEMA
+    from app import models_ventas as mv
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    try:
+        ins = inspect(engine)
+        existentes = set(ins.get_table_names(schema=schema))
+        for tabla in ("ventas_cliente_eventos", "ventas_pipeline_sla", "ventas_lider_consultas"):
+            if tabla not in existentes:
+                mv.Base.metadata.tables[
+                    (f"{CIUDAD_SCHEMA}.{tabla}" if IS_POSTGRES else tabla)
+                ].create(bind=engine, checkfirst=True)
+    except Exception:
+        logger.exception("[migrar] _crear_tabla_cliente_eventos falló; se continúa el arranque")
+
+
+@app.on_event("startup")
 def _limpiar_codigos_contrato_vacios():
     """Convierte contratos.codigo='' (cadena vacía) en NULL.
 

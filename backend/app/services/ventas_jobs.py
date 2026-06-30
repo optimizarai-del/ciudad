@@ -70,4 +70,12 @@ def run_daily(db: Session, hora=None) -> dict:
     vencidas = _notif_tareas_vencidas(db)
     matches = _notif_matches(db, hora=hora)
     db.commit()
-    return {"tareas_vencidas": vencidas, "matches_notificados": matches}
+    # Pipeline de Cliente (Fase 2): degradación de temperatura + consultas al líder.
+    pipeline = {}
+    try:
+        from app.services import ventas_pipeline as vp
+        pipeline = vp.run_pipeline_jobs(db)
+    except Exception as e:
+        print(f"[ventas_jobs] pipeline jobs fallback: {e}")
+    return {"tareas_vencidas": vencidas, "matches_notificados": matches,
+            "pipeline": pipeline}

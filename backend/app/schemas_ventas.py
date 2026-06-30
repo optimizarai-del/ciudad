@@ -51,6 +51,50 @@ class ClienteCreate(BaseModel):
     email: Optional[str] = None
     origen: Optional[str] = None
     observaciones: Optional[str] = None
+    # Pipeline (Fase 1) — todo opcional al crear; arranca en nuevo_lead/tibio.
+    temperatura: Optional[str] = None
+    perfil_comprador: Optional[str] = None
+    tipo_operacion: Optional[str] = None
+    tipo_propiedad_buscada: Optional[str] = None
+    presupuesto_min_usd: Optional[float] = None
+    presupuesto_max_usd: Optional[float] = None
+    zona_interes: Optional[str] = None
+    fuente_financiamiento: Optional[str] = None
+    fecha_estimada_decision: Optional[str] = None
+
+
+class ClienteUpdate(BaseModel):
+    """Edición parcial del perfil de cliente (no incluye etapa — esa va por su
+    endpoint dedicado con criterios de avance)."""
+    nombre: Optional[str] = None
+    telefono: Optional[str] = None
+    email: Optional[str] = None
+    origen: Optional[str] = None
+    observaciones: Optional[str] = None
+    temperatura: Optional[str] = None
+    perfil_comprador: Optional[str] = None
+    tipo_operacion: Optional[str] = None
+    tipo_propiedad_buscada: Optional[str] = None
+    presupuesto_min_usd: Optional[float] = None
+    presupuesto_max_usd: Optional[float] = None
+    zona_interes: Optional[str] = None
+    fuente_financiamiento: Optional[str] = None
+    fecha_estimada_decision: Optional[str] = None
+
+
+class ClienteEtapaUpdate(BaseModel):
+    etapa: str
+    motivo: Optional[str] = None        # obligatorio para caido_perdido / frio_espera
+
+
+class InteraccionCreate(BaseModel):
+    """Registrar una interacción = nota + próxima acción OBLIGATORIA (Cambio 1.2)."""
+    texto: str
+    origen: str = "web"
+    temperatura: Optional[str] = None   # opcional: actualizar temperatura en el momento
+    proxima_accion_tipo: str
+    proxima_accion_fecha: datetime
+    proxima_accion_contexto: str
 
 
 class ClienteOut(BaseModel):
@@ -63,7 +107,37 @@ class ClienteOut(BaseModel):
     observaciones: Optional[str] = None
     es_operado: bool
     created_at: datetime
+    # Pipeline
+    etapa: Optional[str] = None
+    temperatura: Optional[str] = None
+    perfil_comprador: Optional[str] = None
+    tipo_operacion: Optional[str] = None
+    tipo_propiedad_buscada: Optional[str] = None
+    presupuesto_min_usd: Optional[float] = None
+    presupuesto_max_usd: Optional[float] = None
+    zona_interes: Optional[str] = None
+    fuente_financiamiento: Optional[str] = None
+    fecha_estimada_decision: Optional[str] = None
+    motivo_pausa: Optional[str] = None
+    proxima_accion_tipo: Optional[str] = None
+    proxima_accion_fecha: Optional[datetime] = None
+    proxima_accion_contexto: Optional[str] = None
+    ultimo_contacto_at: Optional[datetime] = None
+    etapa_desde: Optional[datetime] = None
     notas: List[ClienteNotaOut] = []
+    class Config(_Cfg): ...
+
+
+class ClienteEventoOut(BaseModel):
+    id: int
+    cliente_id: int
+    vendedor_id: Optional[int] = None
+    tipo: Optional[str] = None
+    de: Optional[str] = None
+    a: Optional[str] = None
+    detalle: Optional[str] = None
+    automatico: bool = False
+    created_at: datetime
     class Config(_Cfg): ...
 
 
