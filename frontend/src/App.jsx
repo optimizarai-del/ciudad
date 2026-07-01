@@ -38,7 +38,6 @@ import VentasPropiedades  from './pages/ventas/Propiedades'
 import VentasMapas        from './pages/ventas/Mapas'
 import VentasRedTokko     from './pages/ventas/RedTokko'
 import VentasWebs         from './pages/ventas/Webs'
-import VentasPipeline     from './pages/ventas/Pipeline'
 import VentasOperaciones  from './pages/ventas/Operaciones'
 import VentasContactos    from './pages/ventas/Contactos'
 import VersionesLocal     from './pages/VersionesLocal'
@@ -118,9 +117,6 @@ export default function App() {
         } />
         <Route path="/ventas-crm/crm" element={
           <ProtectedRoute requireVentas><VentasCRM /></ProtectedRoute>
-        } />
-        <Route path="/ventas-crm/pipeline" element={
-          <ProtectedRoute requireVentas><VentasPipeline /></ProtectedRoute>
         } />
         <Route path="/ventas-crm/pedidos" element={
           <ProtectedRoute requireVentas><VentasPedidos /></ProtectedRoute>
