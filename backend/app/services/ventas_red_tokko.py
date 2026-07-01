@@ -334,18 +334,36 @@ def buscar_en_vivo(db: Session, loc_id: str, loc_type: str, operacion: str = "ve
             break
         time.sleep(0.25)
 
-    # Geocodificar el pin de las que no traen coords (cap para no abusar de Nominatim)
-    geocodificadas = 0
+    # Localización precisa + constraint por ZONA: ninguna propiedad de una
+    # búsqueda de (ej.) Santa Rosa puede terminar con el pin en otra ciudad.
+    #   1. Validamos el pin que trae Tokko: si cae fuera de la zona, lo tiramos.
+    #   2. Geocodificamos por dirección (Google si hay key; si no, Nominatim),
+    #      acotado a la zona buscada.
+    #   3. Si aún no hay pin válido, lo "clavamos" al centro de la zona: queda
+    #      en la ciudad correcta (aproximado) en lugar de en otra provincia.
+    RADIO_KM = 45.0
+    centro = ventas_geo.centro_de_zona(zona_nombre) if zona_nombre else (None, None)
+    usa_google = ventas_geo.tiene_google()
+    geocodificadas, corregidas = 0, 0
     if geocodificar:
         for r in juntadas:
-            if geocodificadas >= max_geocode:
-                break
-            if (r.get("lat") is None or r.get("lng") is None) and r.get("direccion"):
-                lat, lng = ventas_geo.geocodificar(r["direccion"], r.get("ubicacion"))
-                if lat is not None:
-                    r["lat"], r["lng"] = lat, lng
+            pin_ok = (r.get("lat") is not None and r.get("lng") is not None
+                      and ventas_geo.dentro_de_zona(r["lat"], r["lng"], centro, RADIO_KM))
+            if not pin_ok:
+                r["lat"], r["lng"] = None, None
+                if r.get("direccion") and geocodificadas < max_geocode:
+                    lat, lng = ventas_geo.geocodificar(
+                        r["direccion"], zona_nombre or r.get("ubicacion"))
                     geocodificadas += 1
-                    time.sleep(1.0)  # Nominatim: 1 req/seg
+                    if lat is not None and ventas_geo.dentro_de_zona(lat, lng, centro, RADIO_KM):
+                        r["lat"], r["lng"], pin_ok = lat, lng, True
+                    if not usa_google:
+                        time.sleep(1.0)  # Nominatim: 1 req/seg
+            # Fallback: no hay pin confiable → centro de la zona (ciudad correcta)
+            if not pin_ok and centro[0] is not None:
+                r["lat"], r["lng"] = centro
+                r["geo_aproximada"] = True
+                corregidas += 1
 
     # Preparar filas para upsert
     ahora = datetime.utcnow().isoformat()
@@ -368,4 +386,6 @@ def buscar_en_vivo(db: Session, loc_id: str, loc_type: str, operacion: str = "ve
         r["ya_importada"] = r.get("ficha_url") in importadas
 
     return {"total_red": total_red, "trajo": len(juntadas),
-            "geocodificadas": geocodificadas, "propiedades": juntadas}
+            "geocodificadas": geocodificadas, "corregidas_a_zona": corregidas,
+            "geocoder": "google" if usa_google else "nominatim",
+            "propiedades": juntadas}

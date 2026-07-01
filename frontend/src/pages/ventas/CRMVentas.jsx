@@ -55,9 +55,10 @@ const esHoy = iso => {
 export default function CRMVentas() {
   const { isAdmin, role } = useRole()
   const esAdmin = isAdmin || role === 'ventas_admin' || role === 'gerencia'
-  const [vista, setVista] = useState('etapas')       // etapas | temperatura
+  const [vista, setVista] = useState('etapas')       // etapas | temperatura | lider
   const [data, setData] = useState({ clientes: [] })
   const [consultas, setConsultas] = useState([])
+  const [lider, setLider] = useState(null)
   const [loading, setLoading] = useState(true)
   const [sel, setSel] = useState(null)
   const [dragId, setDragId] = useState(null)
@@ -71,6 +72,7 @@ export default function CRMVentas() {
     catch { setData({ clientes: [] }) } finally { setLoading(false) }
     if (esAdmin) {
       try { const { data } = await api.get('/api/ventas-crm/pipeline/consultas'); setConsultas(data.consultas || []) } catch {}
+      try { const { data } = await api.get('/api/ventas-crm/pipeline/lider'); setLider(data) } catch {}
     }
   }
   useEffect(() => { cargar() }, [])
@@ -145,6 +147,12 @@ export default function CRMVentas() {
                   className={`px-3.5 py-1.5 rounded-full text-[13px] font-medium flex items-center gap-1.5 transition ${vista === 'temperatura' ? 'bg-white dark:bg-[#2A2A2A] shadow-soft text-text dark:text-white' : 'text-muted hover:text-text dark:hover:text-white'}`}>
                   <Thermometer size={14} /> Temperatura
                 </button>
+                {esAdmin && (
+                  <button onClick={() => setVista('lider')}
+                    className={`px-3.5 py-1.5 rounded-full text-[13px] font-medium flex items-center gap-1.5 transition ${vista === 'lider' ? 'bg-white dark:bg-[#2A2A2A] shadow-soft text-text dark:text-white' : 'text-muted hover:text-text dark:hover:text-white'}`}>
+                    <ShieldAlert size={14} /> Líder
+                  </button>
+                )}
               </div>
               <button className="btn-primary" onClick={() => setNuevo({ nombre: '', telefono: '' })}>
                 <Plus size={15} /> Nuevo cliente
@@ -196,6 +204,8 @@ export default function CRMVentas() {
 
         {loading ? (
           <div className="card card-flat text-center py-24 text-muted">Cargando CRM…</div>
+        ) : vista === 'lider' ? (
+          <LiderPanel lider={lider} />
         ) : data.clientes.length === 0 ? (
           <div className="card text-center py-24">
             <div className="w-14 h-14 rounded-2xl bg-[#B8893A]/10 grid place-items-center mx-auto mb-4">
@@ -308,6 +318,91 @@ function PulseTile({ icon: Icon, label, value, tone }) {
       </div>
     </div>
   )
+}
+
+// ── Vista Líder: performance por vendedor (solo admin) ──
+function LiderPanel({ lider }) {
+  if (!lider) return <div className="card card-flat text-center py-24 text-muted">Cargando performance del equipo…</div>
+  const vs = lider.vendedores || []
+  if (!vs.length) return <div className="card text-center py-24 text-muted">Todavía no hay vendedores con actividad.</div>
+  const maxVal = Math.max(1, ...vs.map(v => v.valor_ponderado_usd || 0))
+  const eq = {
+    activos: vs.reduce((a, v) => a + v.activos, 0),
+    sinAccion: vs.reduce((a, v) => a + v.sin_proxima_accion, 0),
+    sla: vs.reduce((a, v) => a + v.sla_vencido, 0),
+    cierres: vs.reduce((a, v) => a + v.cierres, 0),
+  }
+  const usdC = n => 'USD ' + Math.round(n || 0).toLocaleString('es-AR')
+  return (
+    <div className="space-y-4">
+      {/* Resumen del equipo */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+        <MiniStat label="Leads activos" value={eq.activos} />
+        <MiniStat label="Sin próxima acción" value={eq.sinAccion} tone={eq.sinAccion ? 'danger' : 'ok'} />
+        <MiniStat label="SLA vencido" value={eq.sla} tone={eq.sla ? 'orange' : 'ok'} />
+        <MiniStat label="Cierres" value={eq.cierres} tone="gold" />
+      </div>
+
+      {/* Ranking por vendedor */}
+      <div className="card p-0 overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-border/70 dark:border-[#242424] flex items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">Ranking por vendedor</span>
+          <span className="text-[11px] text-muted/60">· por valor ponderado del pipeline</span>
+        </div>
+        <div className="divide-y divide-border/60 dark:divide-[#1E1E1E]">
+          {vs.map((v, i) => (
+            <div key={v.vendedor_id} className="px-5 py-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+              <div className="flex items-center gap-3 min-w-[180px]">
+                <span className={`w-7 h-7 rounded-full grid place-items-center text-[12px] font-bold shrink-0 ${i === 0 ? 'bg-[#B8893A]/15 text-[#B8893A]' : 'bg-neutral-200 dark:bg-[#242424] text-muted'}`}>{i + 1}</span>
+                <div className="min-w-0">
+                  <p className="font-medium text-[14px] truncate">{v.nombre}{v.es_admin && <span className="text-[10px] text-muted ml-1.5">líder</span>}</p>
+                  <p className="text-[11px] text-muted">{v.activos} activos · {v.calientes} calientes</p>
+                </div>
+              </div>
+              {/* Barra de valor ponderado */}
+              <div className="flex-1 min-w-[160px]">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-2.5 rounded-full bg-neutral-100 dark:bg-[#1A1A1A] overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${(100 * (v.valor_ponderado_usd || 0)) / maxVal}%`, background: '#B8893A' }} />
+                  </div>
+                  <span className="stat-value text-[13px] tabular-nums w-28 text-right">{usdC(v.valor_ponderado_usd)}</span>
+                </div>
+              </div>
+              {/* Señales */}
+              <div className="flex items-center gap-1.5">
+                <LiderChip n={v.sin_proxima_accion} label="sin acción" tone="danger" />
+                <LiderChip n={v.sla_vencido} label="SLA" tone="orange" />
+                <LiderChip n={v.en_consulta_lider} label="por degradar" tone="gold" />
+                {v.cierres > 0 && <span className="chip-muted !text-[11px] !bg-success/10 !text-success">{v.cierres} ✓</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MiniStat({ label, value, tone = 'idle' }) {
+  const tint = {
+    danger: 'text-danger', orange: 'text-orange-600 dark:text-orange-400',
+    gold: 'text-[#B8893A]', ok: 'text-success', idle: '',
+  }[tone]
+  return (
+    <div className="card px-4 py-3.5">
+      <div className={`stat-value text-[24px] leading-none tabular-nums ${tint}`}>{value}</div>
+      <div className="stat-label mt-1">{label}</div>
+    </div>
+  )
+}
+
+function LiderChip({ n, label, tone }) {
+  if (!n) return null
+  const cls = {
+    danger: 'bg-danger/10 text-danger', orange: 'bg-orange-500/12 text-orange-600 dark:text-orange-400',
+    gold: 'bg-[#B8893A]/12 text-[#B8893A]',
+  }[tone]
+  return <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${cls}`}>{n} {label}</span>
 }
 
 function fmtFecha(iso) {

@@ -185,3 +185,208 @@ def run_pipeline_jobs(db: Session) -> dict:
     r1 = resolver_consultas_vencidas(db)
     r2 = correr_degradacion(db)
     return {**r1, **r2}
+
+
+# ═══════════════════════ Fase 3 · métricas del pipeline ═══════════════════════
+
+# Orden canónico de las 8 etapas activas (índice = avance).
+ETAPAS_ACTIVAS_ORDEN = [e.value for e in mv.CLIENTE_ETAPAS_ORDEN]
+
+# Probabilidad de cierre ponderada por etapa: valora el pipeline (valor esperado).
+PROB_ETAPA = {
+    "nuevo_lead": 0.05,
+    "en_calificacion": 0.10,
+    "calificado_activo": 0.20,
+    "presentacion_opciones": 0.35,
+    "en_visitas": 0.50,
+    "oferta_negociacion": 0.70,
+    "reserva_sena": 0.90,
+    "escritura_cierre": 1.0,
+    "caido_perdido": 0.0,
+    "frio_espera": 0.0,
+}
+
+ETIQUETA_ETAPA = {
+    "nuevo_lead": "Nuevo lead",
+    "en_calificacion": "En calificación",
+    "calificado_activo": "Calificado · activo",
+    "presentacion_opciones": "Presentación de opciones",
+    "en_visitas": "En visitas",
+    "oferta_negociacion": "Oferta · negociación",
+    "reserva_sena": "Reserva · seña",
+    "escritura_cierre": "Escritura · cierre",
+    "caido_perdido": "Caído · perdido",
+    "frio_espera": "Frío · en espera",
+}
+
+
+def valor_cliente(c) -> float:
+    """Valor estimado de la operación del cliente: punto medio del presupuesto."""
+    lo, hi = c.presupuesto_min_usd, c.presupuesto_max_usd
+    if lo and hi:
+        return (lo + hi) / 2.0
+    return float(hi or lo or 0)
+
+
+def _riesgo_cliente(c, sla_map, ahora, en_consulta) -> dict:
+    """Flags de riesgo de un cliente activo (para dashboard y vista líder)."""
+    prox = c.proxima_accion_fecha
+    return {
+        "sin_proxima_accion": not c.proxima_accion_fecha,
+        "proxima_accion_vencida": bool(prox and prox < ahora),
+        "sla_vencido": sla_estado(c, sla_map, ahora)["sla_vencido"],
+        "en_consulta_lider": c.id in en_consulta,
+    }
+
+
+def metricas(db: Session, clientes: list, ahora: datetime | None = None) -> dict:
+    """Métricas agregadas del pipeline sobre un set de clientes ya scopeado.
+
+    - distribucion_etapa: foto actual (kanban) por etapa activa.
+    - embudo: cuántos clientes ALCANZARON al menos cada etapa (acumulado, desde
+      el historial de eventos) → permite ver conversión etapa a etapa.
+    - conversion: % de paso entre etapas consecutivas.
+    - temperatura: caliente/tibio/frío.
+    - tiempo_promedio_etapa: días promedio en la etapa actual.
+    - riesgo: sin próxima acción / acción vencida / SLA vencido.
+    - valor: total y ponderado por probabilidad de cierre.
+    """
+    ahora = ahora or datetime.utcnow()
+    sla_map = get_sla_map(db)
+    en_consulta = {q.cliente_id for q in db.query(mv.VentasLiderConsulta.cliente_id)
+                   .filter(mv.VentasLiderConsulta.estado == "pendiente")}
+    idx = {e: i for i, e in enumerate(ETAPAS_ACTIVAS_ORDEN)}
+
+    distribucion = {e: 0 for e in ETAPAS_ACTIVAS_ORDEN}
+    pausa = {e.value: 0 for e in mv.CLIENTE_ETAPAS_PAUSA}
+    temperatura = {"caliente": 0, "tibio": 0, "frio": 0}
+    dias_por_etapa = {e: [] for e in ETAPAS_ACTIVAS_ORDEN}
+    riesgo = {"sin_proxima_accion": 0, "proxima_accion_vencida": 0,
+              "sla_vencido": 0, "en_consulta_lider": 0}
+    valor_total = 0.0
+    valor_ponderado = 0.0
+
+    # Base del embudo: todos los clientes "alcanzaron" al menos nuevo_lead (idx 0).
+    alcanzado_max = {c.id: 0 for c in clientes}
+
+    activos = 0
+    for c in clientes:
+        etapa = c.etapa or "nuevo_lead"
+        temperatura[c.temperatura or "tibio"] = temperatura.get(c.temperatura or "tibio", 0) + 1
+        if etapa in distribucion:
+            distribucion[etapa] += 1
+            activos += 1
+            if c.etapa_desde:
+                dias_por_etapa[etapa].append((ahora - c.etapa_desde).total_seconds() / 86400.0)
+            r = _riesgo_cliente(c, sla_map, ahora, en_consulta)
+            for k in riesgo:
+                if r[k]:
+                    riesgo[k] += 1
+            v = valor_cliente(c)
+            valor_total += v
+            valor_ponderado += v * PROB_ETAPA.get(etapa, 0.0)
+            alcanzado_max[c.id] = max(alcanzado_max[c.id], idx.get(etapa, 0))
+        elif etapa in pausa:
+            pausa[etapa] += 1
+
+    # Embudo acumulado desde el historial de etapas (eventos tipo="etapa").
+    cids = [c.id for c in clientes]
+    if cids:
+        eventos = (db.query(mv.VentasClienteEvento)
+                   .filter(mv.VentasClienteEvento.tipo == "etapa")
+                   .filter(mv.VentasClienteEvento.cliente_id.in_(cids)).all())
+        for ev in eventos:
+            for val in (ev.de, ev.a):
+                if val in idx and ev.cliente_id in alcanzado_max:
+                    alcanzado_max[ev.cliente_id] = max(alcanzado_max[ev.cliente_id], idx[val])
+
+    embudo = []
+    for i, e in enumerate(ETAPAS_ACTIVAS_ORDEN):
+        n = sum(1 for mx in alcanzado_max.values() if mx >= i)
+        embudo.append({"etapa": e, "label": ETIQUETA_ETAPA[e], "alcanzaron": n})
+    conversion = []
+    for i in range(len(embudo) - 1):
+        a, b = embudo[i]["alcanzaron"], embudo[i + 1]["alcanzaron"]
+        conversion.append({
+            "de": embudo[i]["etapa"], "a": embudo[i + 1]["etapa"],
+            "pct": round(100.0 * b / a, 1) if a else 0.0,
+        })
+
+    tiempo_promedio = {
+        e: (round(sum(v) / len(v), 1) if v else None)
+        for e, v in dias_por_etapa.items()
+    }
+
+    return {
+        "total_clientes": len(clientes),
+        "activos": activos,
+        "distribucion_etapa": [
+            {"etapa": e, "label": ETIQUETA_ETAPA[e], "n": distribucion[e]}
+            for e in ETAPAS_ACTIVAS_ORDEN
+        ],
+        "en_pausa": [
+            {"etapa": e, "label": ETIQUETA_ETAPA[e], "n": pausa[e]} for e in pausa
+        ],
+        "temperatura": temperatura,
+        "embudo": embudo,
+        "conversion": conversion,
+        "tiempo_promedio_etapa": tiempo_promedio,
+        "riesgo": riesgo,
+        "valor_pipeline_usd": round(valor_total, 0),
+        "valor_ponderado_usd": round(valor_ponderado, 0),
+    }
+
+
+def metricas_lider(db: Session, ahora: datetime | None = None) -> dict:
+    """Performance por vendedor para la vista del líder (admin). Ranking por
+    valor ponderado del pipeline; incluye señales de riesgo y cierres."""
+    ahora = ahora or datetime.utcnow()
+    sla_map = get_sla_map(db)
+    en_consulta = {q.cliente_id for q in db.query(mv.VentasLiderConsulta.cliente_id)
+                   .filter(mv.VentasLiderConsulta.estado == "pendiente")}
+    vendedores = db.query(mv.VentasVendedor).filter_by(activo=True).all()
+    clientes = db.query(mv.VentasCliente).all()
+    ops = (db.query(mv.VentasOperacion)
+           .filter(mv.VentasOperacion.estado == mv.OperacionEstado.cerrada).all())
+
+    por_vend = {}
+    for v in vendedores:
+        por_vend[v.id] = {
+            "vendedor_id": v.id, "nombre": v.nombre, "es_admin": v.es_admin,
+            "activos": 0, "calientes": 0, "sin_proxima_accion": 0,
+            "proxima_accion_vencida": 0, "sla_vencido": 0, "en_consulta_lider": 0,
+            "cierres": 0, "comisiones_usd": 0.0,
+            "valor_pipeline_usd": 0.0, "valor_ponderado_usd": 0.0,
+        }
+
+    for c in clientes:
+        d = por_vend.get(c.vendedor_id)
+        if not d:
+            continue
+        etapa = c.etapa or "nuevo_lead"
+        if etapa in ESTADOS_ACTIVOS:
+            d["activos"] += 1
+            if (c.temperatura or "tibio") == "caliente":
+                d["calientes"] += 1
+            r = _riesgo_cliente(c, sla_map, ahora, en_consulta)
+            for k in ("sin_proxima_accion", "proxima_accion_vencida",
+                      "sla_vencido", "en_consulta_lider"):
+                if r[k]:
+                    d[k] += 1
+            val = valor_cliente(c)
+            d["valor_pipeline_usd"] += val
+            d["valor_ponderado_usd"] += val * PROB_ETAPA.get(etapa, 0.0)
+
+    for o in ops:
+        d = por_vend.get(o.vendedor_id)
+        if d:
+            d["cierres"] += 1
+            d["comisiones_usd"] += o.comision_monto_usd or 0.0
+
+    filas = list(por_vend.values())
+    for d in filas:
+        d["valor_pipeline_usd"] = round(d["valor_pipeline_usd"], 0)
+        d["valor_ponderado_usd"] = round(d["valor_ponderado_usd"], 0)
+        d["comisiones_usd"] = round(d["comisiones_usd"], 2)
+    filas.sort(key=lambda d: d["valor_ponderado_usd"], reverse=True)
+    return {"vendedores": filas}

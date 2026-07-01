@@ -458,6 +458,203 @@ def pipeline_set_sla(payload: dict, db: Session = Depends(get_db), user=Depends(
     return {"ok": True, "sla": vp.get_sla_map(db)}
 
 
+# ── Fase 3: métricas del pipeline, vista líder y export ──
+
+@router.get("/pipeline/metricas")
+def pipeline_metricas(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """KPIs del pipeline (embudo, conversión, temperatura, riesgo, valor) sobre
+    los clientes visibles para el usuario (admin ve todo)."""
+    from app.services import ventas_pipeline as vp
+    v = get_vendedor(db, user)
+    clientes = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).all()
+    m = vp.metricas(db, clientes)
+    m["es_admin"] = v.es_admin
+    return m
+
+
+@router.get("/pipeline/lider")
+def pipeline_lider(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Performance por vendedor (solo líder/admin)."""
+    from app.services import ventas_pipeline as vp
+    v = get_vendedor(db, user)
+    if not v.es_admin:
+        raise HTTPException(403, "Solo el líder/admin ve la performance del equipo.")
+    return vp.metricas_lider(db)
+
+
+_EXPORT_COLS = [
+    ("id", "ID"), ("nombre", "Cliente"), ("telefono", "Teléfono"),
+    ("etapa", "Etapa"), ("temperatura", "Temperatura"),
+    ("perfil_comprador", "Perfil"), ("tipo_operacion", "Operación"),
+    ("presupuesto_min_usd", "Presup. mín USD"), ("presupuesto_max_usd", "Presup. máx USD"),
+    ("zona_interes", "Zona"), ("proxima_accion_tipo", "Próx. acción"),
+    ("proxima_accion_fecha", "Próx. fecha"), ("ultimo_contacto_at", "Últ. contacto"),
+    ("dias_en_etapa", "Días en etapa"), ("vendedor", "Vendedor"),
+]
+
+
+def _export_filas(db, clientes, ahora):
+    from app.services import ventas_pipeline as vp
+    vends = {v.id: v.nombre for v in db.query(mv.VentasVendedor).all()}
+    filas = []
+    for c in clientes:
+        dias_etapa = ((ahora - c.etapa_desde).days if c.etapa_desde else None)
+        filas.append({
+            "id": c.id, "nombre": c.nombre, "telefono": c.telefono or "",
+            "etapa": vp.ETIQUETA_ETAPA.get(c.etapa or "nuevo_lead", c.etapa or ""),
+            "temperatura": c.temperatura or "tibio",
+            "perfil_comprador": c.perfil_comprador or "",
+            "tipo_operacion": c.tipo_operacion or "",
+            "presupuesto_min_usd": c.presupuesto_min_usd or "",
+            "presupuesto_max_usd": c.presupuesto_max_usd or "",
+            "zona_interes": c.zona_interes or "",
+            "proxima_accion_tipo": c.proxima_accion_tipo or "",
+            "proxima_accion_fecha": c.proxima_accion_fecha.strftime("%Y-%m-%d") if c.proxima_accion_fecha else "",
+            "ultimo_contacto_at": c.ultimo_contacto_at.strftime("%Y-%m-%d") if c.ultimo_contacto_at else "",
+            "dias_en_etapa": dias_etapa if dias_etapa is not None else "",
+            "vendedor": vends.get(c.vendedor_id, ""),
+        })
+    return filas
+
+
+@router.get("/pipeline/export.csv")
+def pipeline_export_csv(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Export del pipeline en CSV (UTF-8-BOM, abre nativo en Excel)."""
+    import csv, io
+    from datetime import datetime
+    from fastapi.responses import StreamingResponse
+    v = get_vendedor(db, user)
+    clientes = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).all()
+    filas = _export_filas(db, clientes, datetime.utcnow())
+    buf = io.StringIO()
+    buf.write("﻿")  # BOM para Excel
+    w = csv.writer(buf, delimiter=";")
+    w.writerow([label for _, label in _EXPORT_COLS])
+    for f in filas:
+        w.writerow([f[key] for key, _ in _EXPORT_COLS])
+    buf.seek(0)
+    fname = f"pipeline_{date.today().isoformat()}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@router.get("/pipeline/export.pdf")
+def pipeline_export_pdf(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Resumen ejecutivo del pipeline en PDF (embudo + KPIs + tabla de clientes)."""
+    import io
+    from datetime import datetime
+    from fastapi.responses import StreamingResponse
+    from app.services import ventas_pipeline as vp
+    v = get_vendedor(db, user)
+    clientes = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).all()
+    ahora = datetime.utcnow()
+    m = vp.metricas(db, clientes, ahora)
+    filas = _export_filas(db, clientes, ahora)
+    pdf = _pipeline_pdf(m, filas, es_admin=v.es_admin)
+    fname = f"pipeline_{date.today().isoformat()}.pdf"
+    return StreamingResponse(
+        iter([pdf]), media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+def _pipeline_pdf(m: dict, filas: list, es_admin: bool) -> bytes:
+    """Genera el PDF del pipeline con reportlab. Identidad CIUDAD (dorado)."""
+    import io
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle)
+
+    ORO = colors.HexColor("#B8893A")
+    GRIS = colors.HexColor("#737373")
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm, bottomMargin=16 * mm,
+                            leftMargin=16 * mm, rightMargin=16 * mm, title="Pipeline CIUDAD")
+    ss = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=ss["Title"], fontSize=20, textColor=colors.black, spaceAfter=2)
+    eyebrow = ParagraphStyle("eb", parent=ss["Normal"], fontSize=8, textColor=ORO,
+                             spaceAfter=8, leading=10)
+    h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=11, textColor=colors.black,
+                        spaceBefore=10, spaceAfter=6)
+    small = ParagraphStyle("sm", parent=ss["Normal"], fontSize=8, textColor=GRIS)
+
+    def fusd(n):
+        return f"USD {int(n or 0):,}".replace(",", ".")
+
+    el = []
+    el.append(Paragraph("CRM COMERCIAL · CIUDAD", eyebrow))
+    el.append(Paragraph("Resumen del Pipeline", h1))
+    el.append(Paragraph(date.today().strftime("Generado el %d/%m/%Y") +
+                        (" · vista equipo" if es_admin else " · tu cartera"), small))
+    el.append(Spacer(1, 8 * mm))
+
+    # KPIs
+    kpis = [
+        ["Clientes activos", str(m["activos"])],
+        ["Valor del pipeline", fusd(m["valor_pipeline_usd"])],
+        ["Valor ponderado", fusd(m["valor_ponderado_usd"])],
+        ["Sin próxima acción", str(m["riesgo"]["sin_proxima_accion"])],
+        ["Acción vencida", str(m["riesgo"]["proxima_accion_vencida"])],
+        ["SLA vencido", str(m["riesgo"]["sla_vencido"])],
+    ]
+    kt = Table([[Paragraph(f"<font size=8 color='#737373'>{k}</font><br/>"
+                           f"<font size=15>{val}</font>", ss["Normal"])
+                 for k, val in kpis[i:i + 3]] for i in (0, 3)],
+               colWidths=[58 * mm] * 3)
+    kt.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5E5E5")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5E5E5")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 9), ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    el.append(kt)
+
+    # Embudo
+    el.append(Paragraph("Embudo por etapa", h2))
+    maxn = max([e["alcanzaron"] for e in m["embudo"]] + [1])
+    emb_rows = []
+    for e in m["embudo"]:
+        barra = "█" * max(1, round(24 * e["alcanzaron"] / maxn)) if e["alcanzaron"] else ""
+        emb_rows.append([e["label"], str(e["alcanzaron"]),
+                         Paragraph(f"<font color='#B8893A'>{barra}</font>", ss["Normal"])])
+    et = Table([["Etapa", "Alcanzaron", ""]] + emb_rows,
+               colWidths=[55 * mm, 25 * mm, 98 * mm])
+    et.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR", (0, 0), (-1, 0), GRIS),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#E5E5E5")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFAFA")]),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    el.append(et)
+
+    # Tabla de clientes (primeros 40)
+    el.append(Paragraph("Clientes del pipeline", h2))
+    head = ["Cliente", "Etapa", "Temp.", "Próx. acción", "Días"]
+    body = [[f["nombre"][:26], f["etapa"], f["temperatura"],
+             (f["proxima_accion_fecha"] or "—"), str(f["dias_en_etapa"] or "—")]
+            for f in filas[:40]]
+    ct = Table([head] + body, colWidths=[46 * mm, 44 * mm, 20 * mm, 30 * mm, 18 * mm])
+    ct.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("TEXTCOLOR", (0, 0), (-1, 0), GRIS),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#E5E5E5")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFAFA")]),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    el.append(ct)
+    if len(filas) > 40:
+        el.append(Spacer(1, 3 * mm))
+        el.append(Paragraph(f"… y {len(filas) - 40} clientes más (ver CSV).", small))
+
+    doc.build(el)
+    return buf.getvalue()
+
+
 def _fmt_usd(n):
     return f"USD {n:,.0f}".replace(",", ".") if n else "—"
 
