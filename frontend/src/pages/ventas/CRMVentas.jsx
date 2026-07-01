@@ -1,9 +1,11 @@
 import { useEffect, useState, useMemo } from 'react'
 import {
   Flame, Thermometer, Snowflake, LayoutGrid, X, Clock, Plus,
-  AlertTriangle, MapPin, Send, ChevronRight, History, ShieldAlert, Gauge, CalendarClock
+  AlertTriangle, MapPin, Send, ChevronRight, History, ShieldAlert, Gauge, CalendarClock,
+  Search, BedDouble, Building2
 } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
+import PedidoModal from '../../components/ventas/PedidoModal'
 import { useRole } from '../../context/RoleContext'
 import api from '../../utils/api'
 
@@ -35,6 +37,10 @@ const TEMP = {
   frio: { label: 'Frío', icon: Snowflake, spine: 'bg-blue-400', dot: 'bg-blue-400', tint: 'text-blue-500 dark:text-blue-400', soft: 'bg-blue-500/10' },
 }
 const TEMP_ORDEN = ['caliente', 'tibio', 'frio']
+const PEDIDO_ESTADO = {
+  nuevo: 'Nuevo', contactado: 'Contactado', en_seguimiento: 'En seguimiento',
+  esperando_respuesta: 'Esperando', negociando: 'Negociando', cerrado: 'Cerrado', perdido: 'Perdido',
+}
 const PERFILES = [['', '—'], ['contado', 'Contado'], ['credito', 'Crédito'], ['inversor', 'Inversor'], ['espera_vender', 'Espera vender'], ['oportunista', 'Oportunista']]
 const TIPO_OP = [['', '—'], ['venta_propia', 'Venta propia'], ['inversion', 'Inversión'], ['colega', 'Colega']]
 const ACCIONES = [['llamada', 'Llamada'], ['whatsapp', 'WhatsApp'], ['visita', 'Visita'], ['envio', 'Envío de propiedades'], ['reunion', 'Reunión'], ['seguimiento', 'Seguimiento pasivo']]
@@ -384,12 +390,15 @@ function FichaDrawer({ cliente, onClose, onChange }) {
   const [nuevaEtapa, setNuevaEtapa] = useState(cliente._etapaDestino || cliente.etapa)
   const [motivo, setMotivo] = useState('')
   const [eventos, setEventos] = useState([])
+  const [busquedas, setBusquedas] = useState([])
+  const [pedidoModal, setPedidoModal] = useState(null)   // {initial} | null
   const [msg, setMsg] = useState(cliente._etapaDestino ? 'Completá lo que falta para mover a esta etapa.' : '')
   const [busy, setBusy] = useState(false)
   const t = TEMP[cliente.temperatura] || TEMP.tibio
 
   const recargarEventos = () => api.get(`/api/ventas-crm/clientes/${cliente.id}/eventos`).then(r => setEventos(r.data || [])).catch(() => {})
-  useEffect(() => { recargarEventos() }, [cliente.id])
+  const recargarBusquedas = () => api.get(`/api/ventas-crm/pedidos?cliente_id=${cliente.id}`).then(r => setBusquedas(r.data || [])).catch(() => setBusquedas([]))
+  useEffect(() => { recargarEventos(); recargarBusquedas() }, [cliente.id])
   useEffect(() => {
     const onEsc = e => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onEsc)
@@ -466,10 +475,10 @@ function FichaDrawer({ cliente, onClose, onChange }) {
 
         {/* Tabs como segmented control */}
         <div className="px-5 pt-4">
-          <div className="flex gap-1 bg-neutral-200/70 dark:bg-[#181818] rounded-full p-1 text-[12px]">
-            {[['accion', 'Acción'], ['perfil', 'Perfil'], ['etapa', 'Etapa'], ['historial', 'Historial']].map(([k, l]) => (
+          <div className="flex gap-0.5 bg-neutral-200/70 dark:bg-[#181818] rounded-full p-1 text-[11.5px]">
+            {[['accion', 'Acción'], ['busquedas', 'Búsquedas'], ['perfil', 'Perfil'], ['etapa', 'Etapa'], ['historial', 'Historial']].map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)}
-                className={`flex-1 px-2 py-1.5 rounded-full font-medium transition ${tab === k ? 'bg-white dark:bg-[#2A2A2A] shadow-soft text-text dark:text-white' : 'text-muted hover:text-text dark:hover:text-white'}`}>{l}</button>
+                className={`flex-1 px-1.5 py-1.5 rounded-full font-medium transition whitespace-nowrap ${tab === k ? 'bg-white dark:bg-[#2A2A2A] shadow-soft text-text dark:text-white' : 'text-muted hover:text-text dark:hover:text-white'}`}>{l}</button>
             ))}
           </div>
         </div>
@@ -490,6 +499,50 @@ function FichaDrawer({ cliente, onClose, onChange }) {
               <div><label className="label">Qué se va a hacer</label>
                 <input className="input !py-2.5 text-[13px]" value={accion.proxima_accion_contexto} onChange={setA('proxima_accion_contexto')} placeholder="Contexto de la próxima acción" /></div>
               <button className="btn-primary w-full" disabled={busy} onClick={registrarAccion}><Send size={14} /> Registrar interacción</button>
+            </>
+          )}
+
+          {tab === 'busquedas' && (
+            <>
+              <div className="flex items-center justify-between">
+                <p className="text-[12px] text-muted">Lo que este cliente está buscando.</p>
+                <button className="btn-secondary !py-1.5 !px-3 text-[12px]"
+                  onClick={() => setPedidoModal({ initial: { cliente_id: cliente.id } })}>
+                  <Plus size={13} /> Nueva búsqueda
+                </button>
+              </div>
+              {busquedas.length === 0 ? (
+                <div className="text-center py-8">
+                  <Search size={26} className="mx-auto text-muted/30 mb-2" />
+                  <p className="text-[12px] text-muted">Sin búsquedas cargadas.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {busquedas.map(b => (
+                    <button key={b.id} onClick={() => setPedidoModal({ initial: b })}
+                      className="w-full text-left rounded-2xl border border-border dark:border-[#2A2A2A] bg-surface dark:bg-[#161616] p-3 hover:border-[#B8893A]/40 hover:shadow-soft transition">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-[13px] capitalize flex items-center gap-1.5">
+                          <Building2 size={13} className="text-[#B8893A]" /> {b.tipo || 'Propiedad'}
+                        </span>
+                        <span className="chip-muted !text-[10px]">{PEDIDO_ESTADO[b.estado] || b.estado}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-2 text-[11.5px] text-muted">
+                        {b.zona && <span className="flex items-center gap-1"><MapPin size={10} />{b.zona}</span>}
+                        {(b.precio_min_usd || b.precio_max_usd) && (
+                          <span className="tabular-nums">
+                            {b.precio_min_usd ? `USD ${Number(b.precio_min_usd).toLocaleString('es-AR')}` : '0'}
+                            {' – '}
+                            {b.precio_max_usd ? `USD ${Number(b.precio_max_usd).toLocaleString('es-AR')}` : '∞'}
+                          </span>
+                        )}
+                        {b.dormitorios_min ? <span className="flex items-center gap-1"><BedDouble size={10} />{b.dormitorios_min}+</span> : null}
+                      </div>
+                      {b.detalle && <p className="text-[11px] text-muted/80 mt-1.5 line-clamp-2">{b.detalle}</p>}
+                    </button>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
@@ -549,6 +602,17 @@ function FichaDrawer({ cliente, onClose, onChange }) {
           )}
         </div>
       </div>
+
+      {pedidoModal && (
+        <div onClick={e => e.stopPropagation()}>
+          <PedidoModal
+            initial={pedidoModal.initial}
+            clientes={[{ id: cliente.id, nombre: cliente.nombre }]}
+            onClose={() => setPedidoModal(null)}
+            onSaved={() => { setPedidoModal(null); recargarBusquedas(); onChange() }}
+          />
+        </div>
+      )}
     </div>
   )
 }
