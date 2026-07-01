@@ -250,6 +250,13 @@ def _normalizar(p: dict) -> dict:
         lat = None
     if lng == 0:
         lng = None
+    # Servicio SOLO Argentina: todo el país está en lat/lng negativas. Tokko a
+    # veces manda el pin con el signo cambiado (positivo) → lo normalizamos para
+    # que no termine en el Índico o Asia. (Santa Rosa 36.6/64.2 → -36.6/-64.2.)
+    if lat is not None and lat > 0:
+        lat = -lat
+    if lng is not None and lng > 0:
+        lng = -lng
     return {
         "referencia": p.get("reference") or str(p.get("id") or ""),
         "tokko_id": p.get("id"),
