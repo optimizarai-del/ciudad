@@ -14,7 +14,7 @@ import time
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import text, bindparam
 
@@ -1574,6 +1574,67 @@ def _post_import_propiedades(db: Session, props: list, max_geocode: int = 25) ->
         except Exception as e:
             print(f"[ventas_crm] matching post-import fallback: {e}")
     return matches
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Carga de propiedad desde PDF / imagen / plano con IA (Fase 4.4)
+#  Subís la ficha o el plano y Claude extrae los datos → alta en el catálogo.
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.post("/propiedades/importar-archivo/preview")
+async def propiedad_importar_preview(
+    archivo: UploadFile = File(...),
+    db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Extrae los datos de la propiedad desde el archivo (sin guardar). El
+    operador revisa el resultado antes de confirmar. Admite PDF/imagen/DOCX/TXT."""
+    from app.services import ventas_prop_import as vpi
+    get_vendedor(db, user)
+    content = await archivo.read()
+    if not content:
+        raise HTTPException(400, "El archivo está vacío.")
+    if len(content) > 12 * 1024 * 1024:
+        raise HTTPException(413, "El archivo supera los 12 MB.")
+    try:
+        datos = vpi.parsear_propiedad_archivo(content, archivo.filename or "")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"No se pudo procesar el archivo: {e}")
+    return {"datos": datos, "archivo": archivo.filename}
+
+
+@router.post("/propiedades/importar-archivo/confirmar", response_model=sv.PropiedadOut)
+def propiedad_importar_confirmar(payload: dict,
+                                 db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Crea la VentasPropiedad a partir del JSON revisado + geo + matching
+    (aparece en el mapa y en Matches)."""
+    v = get_vendedor(db, user)
+    d = payload or {}
+    if not (d.get("titulo") or d.get("direccion")):
+        raise HTTPException(400, "Falta al menos un título o una dirección.")
+    tipo = _enum(mv.VPropiedadTipo, d.get("tipo") or "otro", "tipo")
+    obj = mv.VentasPropiedad(
+        cargada_por=v.id,
+        titulo=(d.get("titulo") or d.get("direccion") or "Propiedad")[:200],
+        tipo=tipo,
+        estado=mv.VPropiedadEstado.disponible,
+        fuente=mv.VPropiedadFuente.propia,
+        direccion=d.get("direccion"),
+        ciudad=" ".join(x for x in [d.get("ciudad"), d.get("provincia")] if x) or None,
+        precio_usd=d.get("precio_usd"),
+        superficie_m2=d.get("superficie_m2"),
+        dormitorios=d.get("dormitorios"),
+        banos=d.get("banos"),
+        antiguedad_anios=d.get("antiguedad_anios"),
+        descripcion=d.get("descripcion"),
+        inmobiliaria=d.get("inmobiliaria"),
+    )
+    db.add(obj)
+    # Geo (con constraint por ciudad/provincia) + barrio + matching.
+    matches = _post_import_propiedades(db, [obj])
+    _audit(db, v, "ventas_propiedades", obj.id, mv.AuditAccion.create, {"via": "pdf_ia"})
+    db.commit(); db.refresh(obj)
+    return obj
 
 
 _RED_COLS = ("referencia, direccion, ubicacion, tipo, operacion, precio_num, moneda, "

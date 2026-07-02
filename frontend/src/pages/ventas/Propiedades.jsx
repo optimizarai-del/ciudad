@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Plus, X, Pencil, Trash2, Building2, Handshake, Calculator } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { Plus, X, Pencil, Trash2, Building2, Handshake, Calculator, Sparkles, Upload, FileText } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
 import SearchBar from '../../components/SearchBar'
 import api from '../../utils/api'
@@ -20,6 +20,7 @@ export default function Propiedades() {
   const [editing, setEditing] = useState(null)
   const [ofertasDe, setOfertasDe] = useState(null)
   const [tasarOpen, setTasarOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [busqueda, setBusqueda] = useState('')
 
   const load = () => api.get('/api/ventas-crm/propiedades').then(r => setList(r.data || []))
@@ -45,6 +46,7 @@ export default function Propiedades() {
             </div>
             <div className="flex gap-2">
               <button className="btn-secondary" onClick={() => setTasarOpen(true)}><Calculator size={14} /> Tasar</button>
+              <button className="btn-secondary !text-[#B8893A] !border-[#B8893A]/30" onClick={() => setImportOpen(true)}><Sparkles size={14} /> Cargar por PDF</button>
               <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}><Plus size={14} /> Nueva</button>
             </div>
           </div>
@@ -89,6 +91,7 @@ export default function Propiedades() {
       {open && <PropModal initial={editing} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); load() }} />}
       {ofertasDe && <OfertasModal propiedad={ofertasDe} onClose={() => setOfertasDe(null)} />}
       {tasarOpen && <TasarModal onClose={() => setTasarOpen(false)} />}
+      {importOpen && <ImportarPDFModal onClose={() => setImportOpen(false)} onSaved={() => { setImportOpen(false); load() }} />}
     </Layout>
   )
 }
@@ -208,6 +211,107 @@ function OfertasModal({ propiedad, onClose }) {
             <button className="btn-primary px-4">Agregar</button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+function ImportarPDFModal({ onClose, onSaved }) {
+  const [fase, setFase] = useState('subir')   // subir | revisar
+  const [datos, setDatos] = useState(null)
+  const [nombreArchivo, setNombreArchivo] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+  const inputRef = useRef(null)
+
+  const subir = async (file) => {
+    if (!file) return
+    setErr(''); setLoading(true)
+    const fd = new FormData()
+    fd.append('archivo', file)
+    try {
+      const { data } = await api.post('/api/ventas-crm/propiedades/importar-archivo/preview', fd)
+      setDatos({ ...empty, ...data.datos, precio_usd: data.datos.precio_usd ?? '', superficie_m2: data.datos.superficie_m2 ?? '', dormitorios: data.datos.dormitorios ?? '', banos: data.datos.banos ?? '', antiguedad_anios: data.datos.antiguedad_anios ?? '' })
+      setNombreArchivo(data.archivo || file.name)
+      setFase('revisar')
+    } catch (e) {
+      setErr(e.response?.data?.detail || 'No se pudo leer el archivo.')
+    } finally { setLoading(false) }
+  }
+
+  const set = k => e => setDatos({ ...datos, [k]: e.target.value })
+
+  const confirmar = async () => {
+    setErr(''); setLoading(true)
+    try {
+      await api.post('/api/ventas-crm/propiedades/importar-archivo/confirmar', {
+        titulo: datos.titulo || null, tipo: datos.tipo || 'otro',
+        direccion: datos.direccion || null, ciudad: datos.ciudad || null,
+        provincia: datos.provincia || null, precio_usd: num(datos.precio_usd),
+        superficie_m2: num(datos.superficie_m2), dormitorios: num(datos.dormitorios),
+        banos: num(datos.banos), antiguedad_anios: num(datos.antiguedad_anios),
+        descripcion: datos.descripcion || null, inmobiliaria: datos.inmobiliaria || null,
+      })
+      onSaved()
+    } catch (e) { setErr(e.response?.data?.detail || 'Error al crear la propiedad.') } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto" onClick={onClose}>
+      <div className="card p-6 sm:p-8 w-full max-w-2xl shadow-lift animate-scale-in my-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="flex items-center gap-2"><Sparkles size={16} className="text-[#B8893A]" /><h2 className="hero-title text-xl sm:text-2xl">Cargar propiedad por PDF</h2></div>
+            <p className="hero-sub text-[12px] mt-1">Subí la ficha, el aviso o el plano — la IA completa los datos.</p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
+        </div>
+
+        {fase === 'subir' && (
+          <div>
+            <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt" className="hidden"
+              onChange={e => subir(e.target.files?.[0])} />
+            <button
+              onClick={() => inputRef.current?.click()} disabled={loading}
+              className="w-full border-2 border-dashed border-border dark:border-[#2A2A2A] rounded-3xl py-14 flex flex-col items-center gap-3 hover:border-[#B8893A]/50 hover:bg-[#B8893A]/[0.03] transition disabled:opacity-60">
+              {loading ? (
+                <><Sparkles size={26} className="text-[#B8893A] animate-pulse" /><p className="text-[14px] font-medium">Analizando con IA…</p><p className="text-[12px] text-muted">Extrayendo dirección, precio, m², dormitorios…</p></>
+              ) : (
+                <><Upload size={26} className="text-muted" /><p className="text-[14px] font-medium">Elegí un archivo</p><p className="text-[12px] text-muted">PDF, imagen (JPG/PNG), DOCX o TXT · hasta 12 MB</p></>
+              )}
+            </button>
+            {err && <p className="text-[13px] text-danger bg-danger/5 px-4 py-2 rounded-xl mt-4">{err}</p>}
+          </div>
+        )}
+
+        {fase === 'revisar' && datos && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-[12px] text-muted bg-[#B8893A]/[0.06] px-3 py-2 rounded-xl">
+              <FileText size={14} className="text-[#B8893A]" /> Extraído de <b className="text-text dark:text-white">{nombreArchivo}</b> — revisá y corregí antes de guardar.
+            </div>
+            <div><label className="label">Título</label><input className="input" value={datos.titulo || ''} onChange={set('titulo')} /></div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div><label className="label">Tipo</label><select className="input" value={datos.tipo} onChange={set('tipo')}>{TIPOS.map(t => <option key={t}>{t}</option>)}</select></div>
+              <div><label className="label">Precio USD</label><input className="input" type="number" value={datos.precio_usd ?? ''} onChange={set('precio_usd')} /></div>
+              <div><label className="label">Ciudad</label><input className="input" value={datos.ciudad || ''} onChange={set('ciudad')} /></div>
+              <div><label className="label">Provincia</label><input className="input" value={datos.provincia || ''} onChange={set('provincia')} /></div>
+            </div>
+            <div><label className="label">Dirección</label><input className="input" value={datos.direccion || ''} onChange={set('direccion')} /></div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div><label className="label">m²</label><input className="input" type="number" value={datos.superficie_m2 ?? ''} onChange={set('superficie_m2')} /></div>
+              <div><label className="label">Dorm.</label><input className="input" type="number" value={datos.dormitorios ?? ''} onChange={set('dormitorios')} /></div>
+              <div><label className="label">Baños</label><input className="input" type="number" value={datos.banos ?? ''} onChange={set('banos')} /></div>
+              <div><label className="label">Antigüedad</label><input className="input" type="number" value={datos.antiguedad_anios ?? ''} onChange={set('antiguedad_anios')} /></div>
+            </div>
+            <div><label className="label">Inmobiliaria</label><input className="input" value={datos.inmobiliaria || ''} onChange={set('inmobiliaria')} /></div>
+            <div><label className="label">Descripción</label><textarea className="input resize-none" rows={3} value={datos.descripcion || ''} onChange={set('descripcion')} /></div>
+            {err && <p className="text-[13px] text-danger bg-danger/5 px-4 py-2 rounded-xl">{err}</p>}
+            <div className="flex gap-3 pt-1">
+              <button type="button" className="btn-secondary flex-1" onClick={() => { setFase('subir'); setDatos(null); setErr('') }}>Volver a subir</button>
+              <button className="btn-primary flex-1" disabled={loading} onClick={confirmar}>{loading ? 'Guardando…' : 'Confirmar carga'}</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
