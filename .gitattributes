@@ -1,0 +1,11 @@
+# Tratar binarios como binarios (evita corrupción por conversión CRLF en Windows)
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.zip   binary
+*.woff  binary
+*.woff2 binary
+*.db    binary
