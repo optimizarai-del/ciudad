@@ -106,3 +106,128 @@ def get_tasas_cached_sync() -> dict:
         "icl_fuente": "fallback",
         "icl_ok": False,
     }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Índice HISTÓRICO (nivel) — para calcular ajustes reales entre dos fechas.
+#
+#  El ajuste correcto de un alquiler NO es "la tasa mensual de hoy compuesta N
+#  veces": es la razón del índice entre la fecha de inicio del período y la fecha
+#  del ajuste. Tanto INDEC (IPC, mensual) como BCRA (ICL, diario) publican el
+#  NIVEL del índice, así que el factor exacto es  nivel(hasta) / nivel(desde).
+#  Así se calcula legalmente un ajuste ICL.
+# ════════════════════════════════════════════════════════════════════════════
+
+# Cache de las series (nivel). TTL 6 h — el índice del pasado no cambia.
+_SERIE_CACHE: dict = {"ipc": None, "ipc_ts": 0, "icl": None, "icl_ts": 0}
+_SERIE_TTL = 6 * 3600
+
+
+def _serie_ipc_sync() -> dict:
+    """{ 'YYYY-MM': nivel_indice } del IPC nacional (INDEC). Cacheado."""
+    ahora = time.time()
+    if _SERIE_CACHE["ipc"] and (ahora - _SERIE_CACHE["ipc_ts"]) < _SERIE_TTL:
+        return _SERIE_CACHE["ipc"]
+    serie: dict = {}
+    try:
+        with httpx.Client(timeout=10.0, verify=False) as c:
+            r = c.get("https://apis.datos.gob.ar/series/api/series/",
+                      params={"ids": "148.3_INIVELNAL_DICI_M_26",
+                              "limit": 240, "sort": "desc", "format": "json"})
+            for fecha, valor in r.json().get("data", []):
+                if valor is not None:
+                    serie[str(fecha)[:7]] = float(valor)
+    except Exception as e:
+        print(f"[indices] serie IPC falló: {e}")
+    if serie:
+        _SERIE_CACHE["ipc"] = serie
+        _SERIE_CACHE["ipc_ts"] = ahora
+    return serie
+
+
+def _serie_icl_sync(desde: date, hasta: date) -> list:
+    """[(date, nivel), ...] ordenado asc del ICL diario (BCRA). Cacheado por
+    rango amplio para servir cualquier par de fechas sin refetch."""
+    ahora = time.time()
+    cache = _SERIE_CACHE["icl"]
+    if cache and (ahora - _SERIE_CACHE["icl_ts"]) < _SERIE_TTL:
+        pares, c_desde, c_hasta = cache
+        if c_desde <= desde and c_hasta >= hasta:
+            return pares
+    # Traer un rango generoso: desde 30 días antes del pedido más viejo hasta hoy.
+    d0 = min(desde, hasta) - timedelta(days=30)
+    d1 = date.today()
+    pares: list = []
+    try:
+        with httpx.Client(timeout=12.0, verify=False) as c:
+            r = c.get("https://api.bcra.gob.ar/estadisticas/v4.0/Monetarias/40",
+                      params={"desde": d0.isoformat(), "hasta": d1.isoformat()},
+                      headers={"Accept": "application/json"})
+            res = r.json().get("results") or []
+            rows = (res[0].get("detalle") if res else []) or []
+            for row in rows:
+                try:
+                    f = date.fromisoformat(str(row.get("fecha"))[:10])
+                    v = float(row.get("valor"))
+                    pares.append((f, v))
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"[indices] serie ICL falló: {e}")
+    pares.sort(key=lambda x: x[0])
+    if pares:
+        _SERIE_CACHE["icl"] = (pares, d0, d1)
+        _SERIE_CACHE["icl_ts"] = ahora
+    return pares
+
+
+def _valor_icl_en(pares: list, objetivo: date):
+    """Nivel ICL vigente en `objetivo`: el último dato con fecha <= objetivo."""
+    val = None
+    for f, v in pares:  # pares viene ordenado asc
+        if f <= objetivo:
+            val = v
+        else:
+            break
+    return val
+
+
+def factor_acumulado(indice: str, desde: date, hasta: date):
+    """Factor de ajuste REAL entre dos fechas: nivel(hasta) / nivel(desde).
+
+    - ICL: razón del índice diario del BCRA (método legal del ajuste).
+    - IPC: razón del nivel mensual del INDEC (mes de `hasta` / mes de `desde`).
+
+    Devuelve (factor, fuente) con factor > 0, o (None, motivo) si todavía no
+    hay dato publicado para ese período (ej. IPC del mes en curso). En ese caso
+    el ajuste NO se crea — se reintenta cuando el organismo publique el dato.
+    NUNCA usa valores de fallback: si no hay dato real, no ajusta.
+    """
+    indice = (indice or "").lower()
+    if desde is None or hasta is None or hasta <= desde:
+        return None, "rango_invalido"
+
+    if indice == "ipc":
+        serie = _serie_ipc_sync()
+        if not serie:
+            return None, "sin_datos_ipc"
+        k_desde, k_hasta = desde.strftime("%Y-%m"), hasta.strftime("%Y-%m")
+        nivel_desde = serie.get(k_desde)
+        nivel_hasta = serie.get(k_hasta)
+        # El mes del ajuste puede no estar publicado aún (INDEC tiene ~1 mes de
+        # rezago). En ese caso NO ajustamos todavía: reintenta el mes que viene.
+        if nivel_desde is None or nivel_hasta is None or nivel_desde <= 0:
+            return None, "ipc_no_publicado"
+        return round(nivel_hasta / nivel_desde, 8), "INDEC"
+
+    if indice == "icl":
+        pares = _serie_icl_sync(desde, hasta)
+        if not pares:
+            return None, "sin_datos_icl"
+        v_desde = _valor_icl_en(pares, desde)
+        v_hasta = _valor_icl_en(pares, hasta)
+        if not v_desde or not v_hasta:
+            return None, "icl_no_publicado"
+        return round(v_hasta / v_desde, 8), "BCRA"
+
+    return None, "indice_no_soportado"

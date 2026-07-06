@@ -7,16 +7,23 @@ Cada contrato tiene:
   - periodicidad_meses     → 1 (mensual), 3 (trimestral), 6 (semestral), 12 (anual)
   - porcentaje_fijo        → sólo si indice='fijo'
 
-El monto vigente en un momento dado es:
-  monto_inicial × (1 + tasa_periodo) ^ cantidad_periodos_aplicados
+Cada período de ajuste usa el ÍNDICE REAL entre la fecha de inicio del período
+y la fecha del ajuste (no la tasa mensual de hoy compuesta, que era incorrecta):
+
+  factor_periodo = nivel_indice(fecha_ajuste) / nivel_indice(inicio_del_periodo)
+  monto_nuevo    = monto_anterior × factor_periodo
 
 Donde:
   - cantidad_periodos = floor(meses_transcurridos / periodicidad_meses)
-  - tasa_periodo:
-      * fijo  → porcentaje_fijo / 100
-      * icl   → (1 + icl_mensual)^periodicidad − 1
-      * ipc   → (1 + ipc_mensual)^periodicidad − 1
-      * sin_ajuste → 0
+  - factor_periodo:
+      * fijo  → 1 + porcentaje_fijo / 100
+      * icl   → ICL(fecha_ajuste) / ICL(inicio)   [nivel diario BCRA; método legal]
+      * ipc   → IPC(mes_ajuste) / IPC(mes_inicio)  [nivel mensual INDEC]
+      * sin_ajuste → no ajusta
+
+Si el índice del período todavía NO está publicado (ej. IPC del mes en curso),
+el ajuste no se crea y se reintenta más adelante. Nunca se usan valores de
+fallback: mejor no ajustar que ajustar con datos inventados.
 
 Cada ajuste se registra como una fila en `ajustes_contrato` para tener
 trazabilidad: fecha, %% aplicado, monto anterior, monto nuevo, índice usado.
@@ -35,7 +42,18 @@ from typing import Iterable
 from sqlalchemy.orm import Session
 
 from app import models
-from app.services.indices_service import get_tasas_cached_sync
+from app.services.indices_service import factor_acumulado
+
+
+def _fecha_periodo(inicio: _date, offset_meses: int) -> _date:
+    """inicio + offset_meses, con clamp del día si el mes no tiene tantos días."""
+    anio = inicio.year + (inicio.month - 1 + offset_meses) // 12
+    mes = ((inicio.month - 1 + offset_meses) % 12) + 1
+    try:
+        return _date(anio, mes, inicio.day)
+    except ValueError:
+        from calendar import monthrange
+        return _date(anio, mes, monthrange(anio, mes)[1])
 
 
 def _meses_entre(desde: _date, hasta: _date) -> int:
@@ -50,18 +68,6 @@ def _indice_str(c: models.Contrato) -> str:
     if v is None:
         return "sin_ajuste"
     return v.value if hasattr(v, "value") else str(v)
-
-
-def _tasa_por_periodo(c: models.Contrato, periodicidad: int, tasas: dict) -> float:
-    """Devuelve la tasa fraccional que se aplica en UN período de ajuste."""
-    indice = _indice_str(c)
-    if indice == "fijo":
-        return (c.porcentaje_fijo or 0) / 100.0
-    if indice == "icl":
-        return (1 + tasas["icl_mensual"]) ** periodicidad - 1
-    if indice == "ipc":
-        return (1 + tasas["ipc_mensual"]) ** periodicidad - 1
-    return 0.0
 
 
 def monto_vigente(contrato: models.Contrato) -> float:
@@ -128,47 +134,47 @@ def aplicar_ajustes_pendientes(
 
     faltan = periodos_esperados - ajustes_actuales
 
-    # Tasas vivas (cache). Solo se piden una vez aunque haya varios ajustes.
-    try:
-        tasas = get_tasas_cached_sync()
-    except Exception as e:
-        print(f"[ajustes] no se pudieron obtener tasas vivas: {e}")
-        return 0
-    tasa_p = _tasa_por_periodo(contrato, periodicidad, tasas)
-    if tasa_p == 0 and indice != "fijo":
-        # No tiene sentido crear ajustes con 0% (probablemente las APIs fallaron)
-        return 0
-
-    # Crear los ajustes faltantes uno a uno, partiendo del último monto vigente
+    # Crear los ajustes faltantes uno a uno, partiendo del último monto vigente.
+    # Cada ajuste usa el ÍNDICE REAL del período: razón nivel(fecha_ajuste) /
+    # nivel(inicio_del_período). NO se usa la tasa de hoy compuesta ni valores de
+    # fallback: si el índice del período todavía no está publicado, se corta y se
+    # reintenta la próxima vez (mejor no ajustar que ajustar con datos inventados).
+    porcentaje_fijo = (contrato.porcentaje_fijo or 0) / 100.0
     monto_actual = monto_vigente(contrato)
     creados = 0
     for i in range(faltan):
-        # Fecha del ajuste: inicio + (ajustes_actuales + i + 1) × periodicidad
         n_periodo = ajustes_actuales + i + 1
-        # Calculamos el día con seguridad (clamp si el mes no tiene tantos días)
-        offset_meses = n_periodo * periodicidad
-        anio = contrato.fecha_inicio.year + (contrato.fecha_inicio.month - 1 + offset_meses) // 12
-        mes = ((contrato.fecha_inicio.month - 1 + offset_meses) % 12) + 1
-        try:
-            fecha_ajuste = _date(anio, mes, contrato.fecha_inicio.day)
-        except ValueError:
-            # Día que no existe en el mes (ej 31 de febrero) → último día del mes
-            from calendar import monthrange
-            fecha_ajuste = _date(anio, mes, monthrange(anio, mes)[1])
+        fecha_ajuste = _fecha_periodo(contrato.fecha_inicio, n_periodo * periodicidad)
+        periodo_inicio = _fecha_periodo(contrato.fecha_inicio, (n_periodo - 1) * periodicidad)
 
-        monto_nuevo = round(monto_actual * (1 + tasa_p), 2)
+        if indice == "fijo":
+            factor = 1 + porcentaje_fijo
+            fuente = "fijo"
+        else:
+            factor, fuente = factor_acumulado(indice, periodo_inicio, fecha_ajuste)
+            if factor is None:
+                # El índice de este período aún no está disponible (o falló la
+                # API). Cortamos: no persistimos ajustes con datos que no son
+                # reales. Los períodos siguientes dependen de éste.
+                print(f"[ajustes] contrato {contrato.id}: periodo {n_periodo} "
+                      f"({periodo_inicio} a {fecha_ajuste}) sin dato {indice} ({fuente}); "
+                      f"se reintentara. Creados hasta ahora: {creados}")
+                break
+
+        monto_nuevo = round(monto_actual * factor, 2)
         db.add(models.AjusteContrato(
             contrato_id=contrato.id,
             fecha=fecha_ajuste,
-            porcentaje=round(tasa_p * 100, 4),
+            porcentaje=round((factor - 1) * 100, 4),
             monto_anterior=monto_actual,
             monto_nuevo=monto_nuevo,
-            indice_usado=indice,
+            indice_usado=(indice if indice != "fijo" else "fijo"),
         ))
         monto_actual = monto_nuevo
         creados += 1
 
-    db.flush()
+    if creados:
+        db.flush()
     return creados
 
 

@@ -8,6 +8,7 @@ from app.security import get_current_user
 from app import models, schemas
 from app.services.indices_service import (
     get_tasas_mensuales,
+    factor_acumulado,
     IPC_MENSUAL_FALLBACK,
     ICL_MENSUAL_FALLBACK,
 )
@@ -15,25 +16,39 @@ from app.services.indices_service import (
 router = APIRouter(prefix="/api/calculadora", tags=["calculadora"])
 
 
-def _factor_ajuste(
-    indice: str,
-    periodicidad: int,
-    meses_transcurridos: int,
-    porc_fijo: float,
-    ipc_mensual: float,
-    icl_mensual: float,
-) -> float:
-    """Factor multiplicador acumulado según periodos cumplidos."""
-    if indice == "sin_ajuste" or meses_transcurridos < periodicidad:
-        return 1.0
-    periodos = meses_transcurridos // periodicidad
+def _sumar_meses(inicio: date, offset_meses: int) -> date:
+    anio = inicio.year + (inicio.month - 1 + offset_meses) // 12
+    mes = ((inicio.month - 1 + offset_meses) % 12) + 1
+    try:
+        return date(anio, mes, inicio.day)
+    except ValueError:
+        from calendar import monthrange
+        return date(anio, mes, monthrange(anio, mes)[1])
+
+
+def _factor_ajuste(indice: str, periodicidad: int, inicio: date, fecha_obj: date,
+                   porc_fijo: float):
+    """Factor multiplicador acumulado REAL a la fecha objetivo, según los períodos
+    de ajuste cumplidos. Devuelve (factor, periodos_aplicados).
+
+    Usa el índice histórico real (ICL/IPC), no la tasa de hoy compuesta. Si el
+    índice del período más reciente aún no está publicado, retrocede al último
+    período con dato disponible."""
+    meses = (fecha_obj.year - inicio.year) * 12 + (fecha_obj.month - inicio.month)
+    if indice == "sin_ajuste" or meses < periodicidad:
+        return 1.0, 0
+    periodos = meses // periodicidad
     if indice == "fijo":
-        tasa_periodo = (porc_fijo or 0) / 100.0
-    elif indice == "icl":
-        tasa_periodo = (1 + icl_mensual) ** periodicidad - 1
-    else:  # ipc por default
-        tasa_periodo = (1 + ipc_mensual) ** periodicidad - 1
-    return (1 + tasa_periodo) ** periodos
+        return (1 + (porc_fijo or 0) / 100.0) ** periodos, periodos
+    # ICL/IPC: factor = nivel(fecha_último_ajuste) / nivel(inicio). Si el período
+    # más reciente no está publicado, se prueba con uno menos.
+    while periodos > 0:
+        fin = _sumar_meses(inicio, periodos * periodicidad)
+        factor, _fuente = factor_acumulado(indice, inicio, fin)
+        if factor is not None:
+            return factor, periodos
+        periodos -= 1
+    return 1.0, 0
 
 
 @router.post("/", response_model=schemas.CalculoOut)
@@ -74,17 +89,14 @@ async def calcular(data: schemas.CalculoIn, db: Session = Depends(get_db), user=
         base_alquiler = float(contrato.monto_inicial or prop.precio_alquiler or 0)
         fecha_obj = data.fecha or date.today()
         if contrato.fecha_inicio and fecha_obj > contrato.fecha_inicio:
-            meses = (fecha_obj.year - contrato.fecha_inicio.year) * 12 + (fecha_obj.month - contrato.fecha_inicio.month)
             indice_aplicado = contrato.indice_ajuste.value if hasattr(contrato.indice_ajuste, "value") else contrato.indice_ajuste
-            factor = _factor_ajuste(
+            factor, periodos_aplicados = _factor_ajuste(
                 indice_aplicado,
                 contrato.periodicidad_meses or 3,
-                meses,
+                contrato.fecha_inicio,
+                fecha_obj,
                 contrato.porcentaje_fijo or 0,
-                ipc_mensual,
-                icl_mensual,
             )
-            periodos_aplicados = meses // (contrato.periodicidad_meses or 3)
 
     alquiler_act = round(base_alquiler * factor, 2)
     expensas = float(prop.expensas or 0)
