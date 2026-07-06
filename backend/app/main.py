@@ -741,6 +741,21 @@ async def _start_recordatorios():
 
 
 @app.on_event("startup")
+async def _start_ajustes_diarios():
+    """
+    Actualización diaria de índices IPC/ICL + aplicación automática de ajustes a
+    los contratos vigentes. Se activa con AJUSTES_DIARIOS_ENABLED=true (default
+    true). Corre una vez al arrancar y luego cada AJUSTES_INTERVALO_SEG (24 h).
+    """
+    import os, asyncio
+    if os.getenv("AJUSTES_DIARIOS_ENABLED", "true").lower() not in ("1", "true", "yes"):
+        return
+    intervalo = int(os.getenv("AJUSTES_INTERVALO_SEG", str(24 * 3600)))
+    from app.services.ajuste_contratos import loop_ajustes_diarios
+    asyncio.create_task(loop_ajustes_diarios(intervalo))
+
+
+@app.on_event("startup")
 def _seed_if_empty():
     from app.database import SessionLocal
     from app import models

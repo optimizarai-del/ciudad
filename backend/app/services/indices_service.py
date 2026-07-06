@@ -231,3 +231,21 @@ def factor_acumulado(indice: str, desde: date, hasta: date):
         return round(v_hasta / v_desde, 8), "BCRA"
 
     return None, "indice_no_soportado"
+
+
+def refrescar_series() -> dict:
+    """Fuerza el refetch de las series históricas IPC/ICL (invalida su cache).
+    Pensado para la actualización diaria. Devuelve un resumen del estado."""
+    _SERIE_CACHE["ipc_ts"] = 0
+    _SERIE_CACHE["icl_ts"] = 0
+    ipc = _serie_ipc_sync()
+    hoy = date.today()
+    icl = _serie_icl_sync(hoy - timedelta(days=400), hoy)
+    return {
+        "ipc_meses": len(ipc),
+        "ipc_ultimo": (max(ipc.keys()) if ipc else None),
+        "ipc_ok": bool(ipc),
+        "icl_dias": len(icl),
+        "icl_ultimo": (icl[-1][0].isoformat() if icl else None),
+        "icl_ok": bool(icl),
+    }

@@ -2,9 +2,10 @@
 Índices económicos en vivo.
 Fuentes: INDEC (IPC vía datos.gob.ar), BCRA v4 (ICL / UVA), DolarAPI (tipo de cambio).
 """
+import os
 from datetime import date, timedelta
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.security import get_current_user
 
@@ -154,3 +155,18 @@ async def get_indices(user=Depends(get_current_user)):
             resultado["dolar_blue"] = {"ok": False, "error": "No disponible"}
 
     return resultado
+
+
+@router.post("/actualizar-diario")
+def actualizar_diario(token: str | None = Query(None)):
+    """Job de actualización diaria: refresca IPC/ICL y aplica los ajustes
+    pendientes a los contratos vigentes. Pensado para el cron de Easypanel.
+
+    Sin auth de usuario (lo llama el cron), pero protegido por AJUSTES_JOB_TOKEN
+    si está definido en el entorno. Idempotente: correrlo de más no duplica nada.
+    """
+    secreto = os.getenv("AJUSTES_JOB_TOKEN", "").strip()
+    if secreto and token != secreto:
+        raise HTTPException(403, "Token de job inválido")
+    from app.services.ajuste_contratos import correr_actualizacion_diaria
+    return correr_actualizacion_diaria()

@@ -190,3 +190,64 @@ def aplicar_ajustes_pendientes_bulk(
         except Exception as e:
             print(f"[ajustes_bulk] contrato {c.id}: {e}")
     return total
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Actualización DIARIA de índices + aplicación automática de ajustes
+#
+#  Se corre todos los días: refresca las series IPC (INDEC) e ICL (BCRA) y aplica
+#  los ajustes que hayan quedado pendientes en cada contrato vigente. Así, en
+#  cuanto el organismo publica el índice de un período, el ajuste se aplica solo
+#  —sin depender de que alguien abra Cobranza—. Idempotente: no duplica ajustes.
+# ════════════════════════════════════════════════════════════════════════════
+
+def correr_actualizacion_diaria() -> dict:
+    """Refresca los índices y aplica ajustes pendientes a todos los contratos
+    vigentes. Crea y cierra su propia sesión. Devuelve un resumen."""
+    from app.database import SessionLocal
+    from app.services import indices_service
+
+    estado_idx = {}
+    try:
+        estado_idx = indices_service.refrescar_series()
+    except Exception as e:
+        print(f"[ajustes-diarios] refrescar_series falló: {e}")
+
+    db = SessionLocal()
+    try:
+        contratos = (db.query(models.Contrato)
+                     .filter(models.Contrato.estado == "vigente").all())
+        creados = aplicar_ajustes_pendientes_bulk(db, contratos)
+        if creados:
+            db.commit()
+        resumen = {
+            "indices": estado_idx,
+            "contratos_vigentes": len(contratos),
+            "ajustes_creados": creados,
+            "fecha": _date.today().isoformat(),
+        }
+        print(f"[ajustes-diarios] {resumen}")
+        return resumen
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print(f"[ajustes-diarios] error aplicando ajustes: {e}")
+        return {"indices": estado_idx, "error": str(e),
+                "fecha": _date.today().isoformat()}
+    finally:
+        db.close()
+
+
+async def loop_ajustes_diarios(intervalo_seg: int = 86400):
+    """Loop de fondo: corre la actualización diaria cada `intervalo_seg` (24 h).
+    Corre la parte bloqueante (httpx + DB) en un thread para no frenar el event
+    loop. Se arranca desde el startup de main.py si AJUSTES_DIARIOS_ENABLED."""
+    import asyncio
+    while True:
+        try:
+            await asyncio.to_thread(correr_actualizacion_diaria)
+        except Exception as e:
+            print(f"[ajustes-diarios] ciclo falló: {e}")
+        await asyncio.sleep(intervalo_seg)
