@@ -79,6 +79,9 @@ export default function Sidebar({ onNavigate }) {
       {hasVentas && (
         <Section label="Ventas">
           <NavItem to="/ventas-crm/dashboard"    icon={TrendingUp}   label="Dashboard" />
+          {isGerencia && (
+            <NavItem to="/ventas-crm/ejecutivo"  icon={BarChart2}    label="Ejecutivo" />
+          )}
           <NavItem to="/ventas-crm/crm"          icon={LayoutGrid}   label="CRM de Ventas" />
           <NavItem to="/ventas-crm/pedidos"      icon={ClipboardList} label="Pedidos" />
           <NavItem to="/ventas-crm/clientes"     icon={Users}        label="Clientes" />

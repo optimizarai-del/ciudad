@@ -17,7 +17,7 @@ from app.database import Base, engine
 from app import models_ventas  # noqa: F401
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
 from app.routers import cobranza, ventas_router, ventas_crm, ventas_fase23, comprobantes
-from app.routers import ventas_scraping
+from app.routers import ventas_scraping, ventas_captacion
 from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr, tasas_mensuales, refacciones, versiones
 from app.routers import historial as historial_router
 from app.security import get_current_user
@@ -77,6 +77,7 @@ app.include_router(ventas_router.router)
 app.include_router(ventas_crm.router)
 app.include_router(ventas_fase23.router)
 app.include_router(ventas_scraping.router)
+app.include_router(ventas_captacion.router)
 app.include_router(comprobantes.router)
 app.include_router(liquidaciones.router)
 app.include_router(finanzas.router)

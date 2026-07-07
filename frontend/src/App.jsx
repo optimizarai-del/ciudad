@@ -27,6 +27,7 @@ import ActualizarTasas    from './pages/ActualizarTasas'
 import Refacciones        from './pages/Refacciones'
 import ClientesVentas     from './pages/ClientesVentas'
 import VentasDashboardCRM from './pages/ventas/DashboardCRM'
+import VentasDashboardEjecutivo from './pages/ventas/DashboardEjecutivo'
 import VentasCRM          from './pages/ventas/CRMVentas'
 import VentasPedidos      from './pages/ventas/Pedidos'
 import VentasConfig       from './pages/ventas/Configuracion'
@@ -114,6 +115,9 @@ export default function App() {
         {/* Ventas CRM — módulo aislado Fase 1 (tablas ventas_*) */}
         <Route path="/ventas-crm/dashboard" element={
           <ProtectedRoute requireVentas><VentasDashboardCRM /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/ejecutivo" element={
+          <ProtectedRoute requireVentas><VentasDashboardEjecutivo /></ProtectedRoute>
         } />
         <Route path="/ventas-crm/crm" element={
           <ProtectedRoute requireVentas><VentasCRM /></ProtectedRoute>

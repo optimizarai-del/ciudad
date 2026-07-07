@@ -26,7 +26,15 @@ from app.security import get_current_user
 from app import models_ventas as mv
 from app.routers.ventas_crm import get_vendedor, _enum, _post_import_propiedades
 from app.services import ventas_scraping as scraping
+from app.services import ventas_geo
 from app.services.ventas_scraping import pipeline, queue as scraping_queue
+
+# Radio de zona para el constraint geográfico de lo scrapeado. Igual criterio
+# que la búsqueda en vivo de Red Tokko: un pin que cae más lejos que esto de su
+# ciudad se considera mal geolocalizado y se corrige al centro de la zona, para
+# que la propiedad no aparezca en otra localidad del mapa (ej. Pilar en vez de
+# Santa Rosa).
+_RADIO_ZONA_KM = 45.0
 
 router = APIRouter(prefix="/api/ventas-scraping", tags=["ventas-scraping"])
 
@@ -219,19 +227,40 @@ def importar(payload: dict, db: Session = Depends(get_db), user=Depends(get_curr
     rows = (db.query(mv.VentasScrapingProp)
             .filter(mv.VentasScrapingProp.referencia.in_(refs)).all())
 
-    creadas, saltadas, nuevas_props = 0, 0, []
+    # Cache de centros de zona por ubicación, para no geocodificar la misma
+    # ciudad una y otra vez durante el bucle de importación.
+    _centros: dict[str, tuple] = {}
+
+    def _centro(ubicacion: str | None) -> tuple:
+        key = (ubicacion or "").strip().lower()
+        if key not in _centros:
+            _centros[key] = ventas_geo.centro_de_zona(ubicacion) if key else (None, None)
+        return _centros[key]
+
+    creadas, saltadas, corregidas, nuevas_props = 0, 0, 0, []
     for r in rows:
         url = r.ficha_url
         if url and db.query(mv.VentasPropiedad.id).filter_by(link_externo=url).first():
             saltadas += 1
             continue
+
+        # Constraint de zona: si trae coords pero caen fuera del radio de su
+        # propia ciudad, el pin está mal → lo llevamos al centro de la zona.
+        lat, lng = r.lat, r.lng
+        if lat is not None and lng is not None:
+            centro = _centro(r.ubicacion)
+            if centro[0] is not None and not ventas_geo.dentro_de_zona(
+                    lat, lng, centro, radio_km=_RADIO_ZONA_KM):
+                lat, lng = centro
+                corregidas += 1
+
         obj = mv.VentasPropiedad(
             titulo=r.direccion or f"{r.tipo or 'Propiedad'} en {r.ubicacion or ''}".strip(),
             tipo=_enum(mv.VPropiedadTipo, _TIPO_MAP.get(r.tipo, "otro"), "tipo"),
             estado=mv.VPropiedadEstado.disponible,
             fuente=mv.VPropiedadFuente.scraping,
             direccion=r.direccion, ciudad=r.ubicacion,
-            lat=r.lat, lng=r.lng, precio_usd=r.precio_num,
+            lat=lat, lng=lng, precio_usd=r.precio_num,
             dormitorios=r.dormitorios_num, banos=r.banos_num,
             descripcion=r.detalles, inmobiliaria=r.publicado_por,
             link_externo=url, cargada_por=v.id,
@@ -245,4 +274,5 @@ def importar(payload: dict, db: Session = Depends(get_db), user=Depends(get_curr
     matches = _post_import_propiedades(db, nuevas_props)
     db.commit()
     return {"creadas": creadas, "saltadas_ya_existentes": saltadas,
+            "pin_corregido_a_zona": corregidas,
             "pedidas": len(refs), "matches_generados": matches}

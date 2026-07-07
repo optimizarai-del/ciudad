@@ -1,0 +1,77 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  CIUDAD Ventas — stack completo para app nueva
+#
+#  Servicios:
+#    backend   FastAPI (uvicorn) en :8000, no expuesto — lo alcanza nginx.
+#    frontend  React/Vite servido por nginx en :80, reverse-proxy /api → backend.
+#    redis     cola del scraping (opcional, perfil "scraping").
+#    worker    worker RQ del scraping (opcional, perfil "scraping").
+#
+#  Deploy mínimo (sin scraping en background):
+#    docker compose up -d --build
+#
+#  Con worker de scraping:
+#    docker compose --profile scraping up -d --build
+#
+#  La config real vive en ./backend/.env (copiar de ./backend/.env.example).
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # nginx sirve el frontend → el backend NO debe montar el SPA (evita que
+      # el catch-all rompa los redirects de trailing-slash del API).
+      SERVE_FRONTEND: "false"
+    volumes:
+      # Persistencia de SQLite + adjuntos. Si usás Postgres/Supabase (DATABASE_URL
+      # en el .env), igual sirve para los archivos subidos.
+      - ciudad_data:/data
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Vacío = mismo origen. nginx hace el proxy de /api → backend.
+        VITE_API_URL: ""
+    restart: unless-stopped
+    depends_on:
+      - backend
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/_proxy.inc:/etc/nginx/conf.d/_proxy.inc:ro
+    ports:
+      - "${PUBLIC_PORT:-80}:80"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    profiles: ["scraping"]
+    volumes:
+      - ciudad_redis:/data
+
+  worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    profiles: ["scraping"]
+    command: ["python", "-m", "app.services.ventas_scraping.worker"]
+    env_file:
+      - ./backend/.env
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      - redis
+      - backend
+    volumes:
+      - ciudad_data:/data
+
+volumes:
+  ciudad_data:
+  ciudad_redis:

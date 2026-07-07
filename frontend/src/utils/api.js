@@ -18,6 +18,14 @@ function resolveApiBase() {
     if (host.endsWith('.optimizar-ia.com')) {
       return `https://api.${host}`
     }
+    // Dev local.
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return 'http://localhost:8000'
+    }
+    // Cualquier otro dominio (app nueva "ventas-ciudad"): mismo origen. El
+    // frontend y el API se sirven juntos (nginx hace reverse-proxy de /api,
+    // /auth, /health → backend), así que las llamadas son relativas.
+    return ''
   }
   return 'http://localhost:8000'
 }

@@ -482,6 +482,96 @@ def pipeline_lider(db: Session = Depends(get_db), user=Depends(get_current_user)
     return vp.metricas_lider(db)
 
 
+@router.get("/dashboard-ejecutivo")
+def dashboard_ejecutivo(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Foto ejecutiva del negocio (solo líder/admin): cruza el pipeline de
+    clientes, la captación por canal, las operaciones y el inventario.
+
+    Pensado para el dueño/gerencia: una sola pantalla con los números que
+    importan, sin tener que recorrer cada módulo."""
+    from datetime import datetime, timedelta
+    from app.services import ventas_pipeline as vp
+
+    v = get_vendedor(db, user)
+    if not v.es_admin:
+        raise HTTPException(403, "Solo el líder/admin ve el dashboard ejecutivo.")
+
+    ahora = datetime.utcnow()
+    hace_30 = ahora - timedelta(days=30)
+
+    clientes = db.query(mv.VentasCliente).all()
+    pipeline = vp.metricas(db, clientes, ahora)
+
+    # ── Captación por canal (origen) ──
+    canales: dict[str, dict] = {}
+    for c in clientes:
+        canal = (c.origen or "sin_origen").strip().lower()
+        d = canales.setdefault(canal, {"canal": canal, "total": 0, "ult_30d": 0})
+        d["total"] += 1
+        if c.created_at and c.created_at >= hace_30:
+            d["ult_30d"] += 1
+    captacion = sorted(canales.values(), key=lambda x: x["total"], reverse=True)
+    leads_30d = sum(c["ult_30d"] for c in captacion)
+
+    # ── Operaciones ──
+    ops = db.query(mv.VentasOperacion).all()
+    est_ops = {e.value: 0 for e in mv.OperacionEstado}
+    comision_cerrada = 0.0
+    monto_cerrado = 0.0
+    for o in ops:
+        est = o.estado.value if hasattr(o.estado, "value") else (o.estado or "abierta")
+        est_ops[est] = est_ops.get(est, 0) + 1
+        if est == "cerrada":
+            comision_cerrada += float(o.comision_monto_usd or 0)
+            monto_cerrado += float(o.monto_cierre_usd or 0)
+    operaciones = {
+        "por_estado": [{"estado": k, "n": v} for k, v in est_ops.items()],
+        "abiertas": est_ops.get("abierta", 0) + est_ops.get("sena", 0),
+        "cerradas": est_ops.get("cerrada", 0),
+        "monto_cerrado_usd": round(monto_cerrado, 0),
+        "comision_cerrada_usd": round(comision_cerrada, 0),
+    }
+
+    # ── Inventario de propiedades ──
+    props = db.query(mv.VentasPropiedad).all()
+    por_estado = {e.value: 0 for e in mv.VPropiedadEstado}
+    por_fuente = {e.value: 0 for e in mv.VPropiedadFuente}
+    valor_inventario = 0.0
+    for p in props:
+        est = p.estado.value if hasattr(p.estado, "value") else (p.estado or "disponible")
+        fte = p.fuente.value if hasattr(p.fuente, "value") else (p.fuente or "propia")
+        por_estado[est] = por_estado.get(est, 0) + 1
+        por_fuente[fte] = por_fuente.get(fte, 0) + 1
+        if est == "disponible" and p.precio_usd:
+            valor_inventario += float(p.precio_usd)
+    inventario = {
+        "total": len(props),
+        "por_estado": [{"estado": k, "n": v} for k, v in por_estado.items()],
+        "por_fuente": [{"fuente": k, "n": v} for k, v in por_fuente.items()],
+        "valor_disponible_usd": round(valor_inventario, 0),
+    }
+
+    return {
+        "generado_at": ahora.isoformat(),
+        "resumen": {
+            "clientes_total": len(clientes),
+            "leads_ult_30d": leads_30d,
+            "pipeline_valor_usd": pipeline["valor_pipeline_usd"],
+            "pipeline_ponderado_usd": pipeline["valor_ponderado_usd"],
+            "operaciones_abiertas": operaciones["abiertas"],
+            "operaciones_cerradas": operaciones["cerradas"],
+            "comision_cerrada_usd": operaciones["comision_cerrada_usd"],
+            "inventario_disponible": next(
+                (x["n"] for x in inventario["por_estado"] if x["estado"] == "disponible"), 0),
+        },
+        "pipeline": pipeline,
+        "captacion": captacion,
+        "operaciones": operaciones,
+        "inventario": inventario,
+        "equipo": vp.metricas_lider(db, ahora),
+    }
+
+
 _EXPORT_COLS = [
     ("id", "ID"), ("nombre", "Cliente"), ("telefono", "Teléfono"),
     ("etapa", "Etapa"), ("temperatura", "Temperatura"),
