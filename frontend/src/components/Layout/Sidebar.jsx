@@ -58,7 +58,7 @@ export default function Sidebar({ onNavigate }) {
   })
 
   const toggleGrupo = (label) => setAbiertos(prev => {
-    const next = { ...prev, [label]: prev[label] === false ? true : false }
+    const next = { ...prev, [label]: prev[label] === true ? false : true }
     try { localStorage.setItem(LS_GRUPOS, JSON.stringify(next)) } catch {}
     return next
   })
@@ -217,7 +217,7 @@ export default function Sidebar({ onNavigate }) {
           }
 
           // Expandido: encabezado desplegable + subgrupos con subtítulo.
-          const open = abiertos[g.label] !== false // por defecto abierto
+          const open = abiertos[g.label] === true // por defecto cerrado
           return (
             <div key={g.label} className="mb-2">
               <button
