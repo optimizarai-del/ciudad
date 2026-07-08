@@ -6,8 +6,9 @@ Gestión de usuarios del equipo CIUDAD.
   PATCH  /api/users/{id}      — editar rol/nombre/telefono/is_active (admin)
   DELETE /api/users/{id}      — eliminar (admin) — hard delete con guards
 """
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
+from sqlalchemy import text, func
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel, EmailStr
@@ -56,6 +57,60 @@ class UserUpdate(BaseModel):
 @router.get("/", response_model=List[schemas.UserOut])
 def listar(db: Session = Depends(get_db), user=Depends(get_current_user)):
     return db.query(models.User).order_by(models.User.id).all()
+
+
+@router.get("/equipo")
+def equipo(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Organigrama del equipo con un resumen de actividad por persona.
+
+    Para cada usuario agrega, desde `acciones_historial`:
+      - acciones_total: acciones registradas de siempre
+      - acciones_30d:   acciones en los últimos 30 días
+      - ultima_actividad: timestamp de la acción más reciente (ISO) o None
+
+    Pensado para la vista de tarjetas: al pasar el mouse por una persona se
+    muestra este mini-resumen.
+    """
+    usuarios = db.query(models.User).order_by(models.User.id).all()
+
+    corte_30d = datetime.utcnow() - timedelta(days=30)
+    H = models.AccionHistorial
+
+    # Totales por usuario en una sola query (evita N+1).
+    totales = dict(
+        db.query(H.user_id, func.count(H.id))
+          .filter(H.user_id.isnot(None))
+          .group_by(H.user_id).all()
+    )
+    ult_30d = dict(
+        db.query(H.user_id, func.count(H.id))
+          .filter(H.user_id.isnot(None), H.created_at >= corte_30d)
+          .group_by(H.user_id).all()
+    )
+    ultima = dict(
+        db.query(H.user_id, func.max(H.created_at))
+          .filter(H.user_id.isnot(None))
+          .group_by(H.user_id).all()
+    )
+
+    out = []
+    for u in usuarios:
+        ua = ultima.get(u.id)
+        out.append({
+            "id": u.id,
+            "nombre": u.nombre,
+            "email": u.email,
+            "telefono": u.telefono,
+            "role": u.role.value if hasattr(u.role, "value") else u.role,
+            "is_active": u.is_active,
+            "es_yo": u.id == user.id,
+            "actividad": {
+                "total": totales.get(u.id, 0),
+                "mes": ult_30d.get(u.id, 0),
+                "ultima": ua.isoformat() if ua else None,
+            },
+        })
+    return out
 
 
 @router.post("/", response_model=UserCreateOut, status_code=201)
