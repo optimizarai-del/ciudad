@@ -226,6 +226,54 @@ def set_tokko_config(data: sv.TokkoConfigIn, db: Session = Depends(get_db), user
     return _tokko_out(cfg)
 
 
+# ═══════════════════ Conexiones — credenciales web de Tokko ═══════════════════
+# Cada negocio carga su usuario/contraseña del panel de Tokko desde la
+# plataforma. Solo un admin REAL (no el acceso demo) puede editarlas.
+
+def _solo_admin_real(db: Session, user):
+    from app.services.workspace import is_demo_user
+    v = get_vendedor(db, user)
+    if not v.es_admin:
+        raise HTTPException(403, "Solo un admin puede configurar las conexiones.")
+    if is_demo_user(user):
+        raise HTTPException(403, "El acceso demo no puede editar las conexiones reales.")
+    return v
+
+
+@router.get("/conexiones/tokko")
+def conexiones_tokko_estado(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    v = get_vendedor(db, user)
+    if not v.es_admin:
+        raise HTTPException(403, "Solo un admin ve las conexiones.")
+    from app.services import ventas_red_tokko
+    return ventas_red_tokko.estado_conexion(db)
+
+
+@router.put("/conexiones/tokko")
+def conexiones_tokko_guardar(data: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _solo_admin_real(db, user)
+    web_user = (data.get("web_user") or "").strip()
+    web_pass = data.get("web_pass")  # opcional: si no viene, se conserva la guardada
+    if not web_user:
+        raise HTTPException(400, "El usuario de Tokko es obligatorio.")
+    from app.services import ventas_red_tokko
+    return ventas_red_tokko.guardar_credenciales(db, web_user, web_pass)
+
+
+@router.post("/conexiones/tokko/probar")
+def conexiones_tokko_probar(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _solo_admin_real(db, user)
+    from app.services import ventas_red_tokko
+    return ventas_red_tokko.probar_conexion(db)
+
+
+@router.delete("/conexiones/tokko")
+def conexiones_tokko_borrar(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    _solo_admin_real(db, user)
+    from app.services import ventas_red_tokko
+    return ventas_red_tokko.borrar_credenciales(db)
+
+
 @router.get("/tokko-ciudades")
 def tokko_ciudades(db: Session = Depends(get_db), user=Depends(get_current_user)):
     """Ciudades disponibles en la cuenta Tokko (con conteo) para el selector de

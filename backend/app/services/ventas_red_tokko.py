@@ -90,20 +90,49 @@ _SESSION_TTL = timedelta(minutes=15)
 
 # ───────────────────────── login / sesión ─────────────────────────
 
+def _creds_db() -> tuple[str, str] | None:
+    """Credenciales web guardadas en la plataforma (sección Conexiones). Abre su
+    propia sesión y descifra la contraseña. None si no hay o no se pueden usar."""
+    try:
+        from app.database import SessionLocal
+        from app import models_ventas as mv
+        from app.services import cripto
+        db = SessionLocal()
+        try:
+            cfg = db.query(mv.VentasTokkoConfig).first()
+            if not cfg or not (cfg.web_user or "").strip():
+                return None
+            passw = cripto.descifrar(cfg.web_pass_enc)
+            if not passw:
+                return None
+            return cfg.web_user.strip(), passw
+        finally:
+            db.close()
+    except Exception:
+        return None
+
+
+def _creds_env() -> tuple[str, str] | None:
+    u = os.getenv("TOKKO_USER", "").strip()
+    p = os.getenv("TOKKO_PASS", "").strip()
+    return (u, p) if u and p else None
+
+
 def tokko_configurado() -> bool:
-    """True si están las credenciales web de Tokko. Permite que la UI avise con
-    claridad ('Tokko no conectado') en vez de un engañoso 'no se encontró'."""
-    return bool(os.getenv("TOKKO_USER", "").strip() and os.getenv("TOKKO_PASS", "").strip())
+    """True si hay credenciales web de Tokko (cargadas en la plataforma o por
+    env). Permite que la UI avise claro ('Tokko no conectado') en vez de un
+    engañoso 'no se encontró esa zona'."""
+    return bool(_creds_db() or _creds_env())
 
 
 def _creds() -> tuple[str, str]:
-    u = os.getenv("TOKKO_USER", "").strip()
-    p = os.getenv("TOKKO_PASS", "").strip()
-    if not u or not p:
+    # Prioridad: lo cargado por el negocio en Conexiones; si no, env (compat).
+    creds = _creds_db() or _creds_env()
+    if not creds:
         raise RuntimeError(
-            "Faltan credenciales web de Tokko. Configurá TOKKO_USER y TOKKO_PASS "
-            "en el .env del backend.")
-    return u, p
+            "Faltan las credenciales web de Tokko. Cargalas en Ventas → Conexiones "
+            "(o configurá TOKKO_USER y TOKKO_PASS en el backend).")
+    return creds
 
 
 def _login() -> httpx.Client:
@@ -402,3 +431,75 @@ def buscar_en_vivo(db: Session, loc_id: str, loc_type: str, operacion: str = "ve
             "geocodificadas": geocodificadas, "corregidas_a_zona": corregidas,
             "geocoder": "google" if usa_google else "nominatim",
             "propiedades": juntadas}
+
+
+# ═══════════════════ Conexiones — credenciales por negocio ═══════════════════
+#
+# Cada negocio carga su usuario/contraseña del panel web de Tokko desde la
+# plataforma (sección Conexiones). Se guardan en ventas_tokko_config con la
+# contraseña CIFRADA. El servicio las prefiere sobre las env vars.
+
+def estado_conexion(db: Session) -> dict:
+    """Estado para la UI: si está configurado, de qué fuente, usuario (sin pass)
+    y el resultado de la última prueba. Nunca devuelve la contraseña."""
+    from app.services import ventas_tokko
+    cfg = ventas_tokko.get_config(db)
+    en_plataforma = bool((cfg.web_user or "").strip() and (cfg.web_pass_enc or "").strip())
+    env = _creds_env()
+    fuente = "plataforma" if en_plataforma else ("env" if env else None)
+    return {
+        "configurado": bool(en_plataforma or env),
+        "fuente": fuente,
+        "web_user": (cfg.web_user or "").strip() or (env[0] if env else ""),
+        "ultima_prueba_ok": cfg.ultima_prueba_ok,
+        "ultima_prueba_at": cfg.ultima_prueba_at.isoformat() if cfg.ultima_prueba_at else None,
+        "ultima_prueba_msg": cfg.ultima_prueba_msg,
+    }
+
+
+def guardar_credenciales(db: Session, web_user: str, web_pass: str | None) -> dict:
+    """Guarda usuario y (si viene) contraseña. La pass se cifra; si no mandan
+    una nueva, se conserva la guardada (para poder editar solo el usuario)."""
+    from app.services import ventas_tokko, cripto
+    cfg = ventas_tokko.get_config(db)
+    cfg.web_user = (web_user or "").strip() or None
+    if web_pass:
+        cfg.web_pass_enc = cripto.cifrar(web_pass)
+    cfg.activo = bool(cfg.web_user and cfg.web_pass_enc)
+    _invalidar_sesion()  # próxima búsqueda re-loguea con las nuevas
+    db.commit()
+    return estado_conexion(db)
+
+
+def borrar_credenciales(db: Session) -> dict:
+    from app.services import ventas_tokko
+    cfg = ventas_tokko.get_config(db)
+    cfg.web_user = None
+    cfg.web_pass_enc = None
+    cfg.activo = False
+    cfg.ultima_prueba_ok = None
+    cfg.ultima_prueba_at = None
+    cfg.ultima_prueba_msg = None
+    _invalidar_sesion()
+    db.commit()
+    return estado_conexion(db)
+
+
+def probar_conexion(db: Session) -> dict:
+    """Intenta loguear en Tokko con las credenciales vigentes y guarda el
+    resultado. Devuelve {ok, msg, ...estado}."""
+    from app.services import ventas_tokko
+    cfg = ventas_tokko.get_config(db)
+    _invalidar_sesion()
+    try:
+        _client(forzar=True)
+        ok, msg = True, "Conexión exitosa con Tokko."
+    except RuntimeError as e:
+        ok, msg = False, str(e)
+    except Exception as e:
+        ok, msg = False, f"No se pudo conectar con Tokko: {e}"
+    cfg.ultima_prueba_ok = ok
+    cfg.ultima_prueba_at = datetime.utcnow()
+    cfg.ultima_prueba_msg = msg[:400]
+    db.commit()
+    return {"ok": ok, "msg": msg, **estado_conexion(db)}

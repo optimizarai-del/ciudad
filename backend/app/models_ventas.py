@@ -568,6 +568,15 @@ class VentasTokkoConfig(Base):
     ultima_sync_resultado = Column(Text)  # resumen de la última corrida
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Credenciales del panel WEB de Tokko (Conexiones): habilitan traer la red
+    # en vivo por zona. Cada negocio carga las suyas desde la plataforma. La
+    # contraseña se guarda CIFRADA (services/cripto.py), nunca en texto plano.
+    web_user = Column(String)
+    web_pass_enc = Column(String)
+    ultima_prueba_ok = Column(Boolean)
+    ultima_prueba_at = Column(DateTime)
+    ultima_prueba_msg = Column(String)
+
 
 class VentasTelegramLink(Base):
     """Vinculación vendedor ↔ chat de Telegram (Fase 2). La vinculación se

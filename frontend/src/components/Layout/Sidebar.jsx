@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Building2, FileText, Users, Calculator,
   BarChart2, Bot, TrendingUp, Settings, DollarSign,
   Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History,
-  ClipboardList, Handshake, Network, LayoutGrid, Sparkles, CalendarClock, Map, Globe
+  ClipboardList, Handshake, Network, LayoutGrid, Sparkles, CalendarClock, Map, Globe, Plug
 } from 'lucide-react'
 import { useRole } from '../../context/RoleContext'
 
@@ -95,6 +95,9 @@ export default function Sidebar({ onNavigate }) {
           <NavItem to="/ventas-crm/contactos"    icon={Network}      label="Contactos" />
           <NavItem to="/ventas-crm/notificaciones" icon={Bell}       label="Notificaciones" />
           <NavItem to="/ventas-crm/configuracion" icon={Settings}    label="Configuración" />
+          {isGerencia && !isAdminDemo && (
+            <NavItem to="/ventas-crm/conexiones"  icon={Plug}        label="Conexiones" />
+          )}
         </Section>
       )}
 

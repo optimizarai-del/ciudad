@@ -31,6 +31,7 @@ import VentasDashboardEjecutivo from './pages/ventas/DashboardEjecutivo'
 import VentasCRM          from './pages/ventas/CRMVentas'
 import VentasPedidos      from './pages/ventas/Pedidos'
 import VentasConfig       from './pages/ventas/Configuracion'
+import VentasConexiones   from './pages/ventas/Conexiones'
 import VentasMatches      from './pages/ventas/Matches'
 import VentasTareas       from './pages/ventas/Tareas'
 import VentasNotificaciones from './pages/ventas/Notificaciones'
@@ -127,6 +128,9 @@ export default function App() {
         } />
         <Route path="/ventas-crm/configuracion" element={
           <ProtectedRoute requireVentas><VentasConfig /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/conexiones" element={
+          <ProtectedRoute requireVentas><VentasConexiones /></ProtectedRoute>
         } />
         <Route path="/ventas-crm/matches" element={
           <ProtectedRoute requireVentas><VentasMatches /></ProtectedRoute>
