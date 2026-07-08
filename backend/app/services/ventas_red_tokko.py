@@ -320,11 +320,51 @@ _RED_COLS = ["referencia", "tokko_id", "direccion", "ubicacion", "tipo", "operac
              "publicado_por", "ficha_url", "foto", "zona_consulta", "actualizado_at"]
 
 
+_DDL_RED_TOKKO = """
+CREATE TABLE IF NOT EXISTS red_tokko_propiedades (
+    referencia       VARCHAR PRIMARY KEY,
+    tokko_id         VARCHAR,
+    direccion        TEXT,
+    ubicacion        TEXT,
+    tipo             VARCHAR,
+    operacion        VARCHAR,
+    precio_num       DOUBLE PRECISION,
+    moneda           VARCHAR,
+    precio_display   VARCHAR,
+    m2_cubierta_num  DOUBLE PRECISION,
+    m2_total_num     DOUBLE PRECISION,
+    ambientes_num    DOUBLE PRECISION,
+    dormitorios_num  DOUBLE PRECISION,
+    banos_num        DOUBLE PRECISION,
+    lat              DOUBLE PRECISION,
+    lng              DOUBLE PRECISION,
+    detalles         TEXT,
+    publicado_por    VARCHAR,
+    ficha_url        TEXT,
+    foto             TEXT,
+    zona_consulta    VARCHAR,
+    actualizado_at   TIMESTAMP
+)
+"""
+
+
+def _ensure_tabla(db: Session):
+    """Crea red_tokko_propiedades si no existe. La tabla NO es del ORM (la
+    poblaba la CLI); en un deploy sin CLI hay que crearla para poder traer en
+    vivo. Idempotente y portable (SQLite + Postgres)."""
+    try:
+        db.execute(text(_DDL_RED_TOKKO))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 def _upsert(db: Session, rows: list[dict]):
     """Upsert portable (Postgres ON CONFLICT / SQLite INSERT OR REPLACE-like)
     por `referencia`. La tabla red_tokko_propiedades no es ORM."""
     if not rows:
         return 0
+    _ensure_tabla(db)
     cols = ", ".join(_RED_COLS)
     ph = ", ".join(f":{c}" for c in _RED_COLS)
     if IS_POSTGRES:
