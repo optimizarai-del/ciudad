@@ -1,0 +1,37 @@
+# Overlay opcional: worker de scraping en background (Redis + RQ).
+# Uso (server propio):
+#   docker compose -f docker-compose.yml -f docker-compose.scraping.yml up -d --build
+# En Easypanel: agregá estos dos servicios como Compose aparte, o sumá un
+# servicio Redis y un servicio App con el comando del worker.
+# Sin esto, el scraping corre síncrono dentro del request (ok para bajo volumen).
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - ciudad_redis:/data
+
+  worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.services.ventas_scraping.worker"]
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/ciudad.db}
+      CIUDAD_DB_SCHEMA: ${CIUDAD_DB_SCHEMA:-ciudad}
+      SECRET_KEY: ${SECRET_KEY:-CAMBIAME_secreto_ventas_ciudad}
+    depends_on:
+      - redis
+      - backend
+    volumes:
+      - ciudad_data:/data
+
+  # El backend necesita saber de Redis para encolar en vez de correr síncrono.
+  backend:
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+
+volumes:
+  ciudad_redis:
