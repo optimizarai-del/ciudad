@@ -535,6 +535,21 @@ def _migrar_tokko_conexiones():
 
 
 @app.on_event("startup")
+def _asegurar_tabla_red_tokko():
+    """Crea red_tokko_propiedades si no existe (no es una tabla del ORM). Así el
+    listado y el 'traer de la red en vivo' funcionan en un deploy sin CLI."""
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        from app.services.ventas_red_tokko import _ensure_tabla
+        _ensure_tabla(db)
+    except Exception:
+        logger.exception("[migrar] _asegurar_tabla_red_tokko falló; se continúa")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _migrar_cliente_pipeline():
     """Pipeline de Cliente (Fase 1): agrega a ventas_clientes las columnas del
     pipeline (etapa, temperatura, perfil, próxima acción, etc.) si faltan.

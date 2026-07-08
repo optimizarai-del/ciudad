@@ -1778,7 +1778,7 @@ def red_tokko_listar(
     except Exception:
         # Tabla aún no creada / sin datos en esta base.
         return {"total": 0, "propiedades": [],
-                "nota": "No hay datos de la red Tokko en esta base. Corré la CLI tokko para poblarla."}
+                "nota": "Todavía no trajiste propiedades de la red. Usá «Traer de la red en vivo por zona» (arriba) para poblar el catálogo."}
 
     # Marcar las que ya fueron importadas (dedup por ficha_url == link_externo)
     urls = [r["ficha_url"] for r in rows if r.get("ficha_url")]
