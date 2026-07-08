@@ -22,6 +22,19 @@ from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storag
 from app.routers import historial as historial_router
 from app.security import get_current_user
 
+# En Postgres, asegurar que el schema exista ANTES de crear las tablas. Permite
+# aislar la app en un schema propio (ej. ciudad_ventas) sin crearlo a mano, y es
+# un no-op si ya existe.
+from app.database import IS_POSTGRES as _IS_PG, CIUDAD_SCHEMA as _SCHEMA
+if _IS_PG:
+    from sqlalchemy import text as _text
+    try:
+        with engine.connect() as _c:
+            _c.execute(_text(f'CREATE SCHEMA IF NOT EXISTS "{_SCHEMA}"'))
+            _c.commit()
+    except Exception as _e:
+        print(f"[startup] CREATE SCHEMA {_SCHEMA} warning: {_e}")
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
