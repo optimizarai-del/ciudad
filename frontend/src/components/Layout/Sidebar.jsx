@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, FileText, Users, Calculator,
-  BarChart2, Bot, TrendingUp, Settings, DollarSign,
+  BarChart2, TrendingUp, Settings, DollarSign,
   Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History,
   ClipboardList, Handshake, Network, LayoutGrid, Sparkles, CalendarClock, Map, Globe, Plug
 } from 'lucide-react'
@@ -105,7 +105,6 @@ export default function Sidebar({ onNavigate }) {
       <Section label="Herramientas">
         <NavItem to="/asistente"                       icon={Sparkles}   label="Asistente IA" />
         <NavItem to="/indices"                         icon={BarChart2}  label="Índices" />
-        <NavItem to="/agente"                          icon={Bot}        label="Agente IA" />
         <NavItem to="/recordatorios"                   icon={Bell}       label="Recordatorios" />
         <NavItem to="/herramientas/versiones-local"    icon={HardDrive}  label="Versiones local" />
       </Section>

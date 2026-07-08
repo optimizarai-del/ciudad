@@ -11,7 +11,6 @@ import Propiedades        from './pages/Propiedades'
 import Clientes           from './pages/Clientes'
 import Contratos          from './pages/Contratos'
 import Calculadora        from './pages/Calculadora'
-import Agente             from './pages/Agente'
 import AsistenteIA        from './pages/AsistenteIA'
 import Finanzas           from './pages/Finanzas'
 import Equipo             from './pages/Equipo'
@@ -175,9 +174,6 @@ export default function App() {
         } />
         <Route path="/calculadora" element={
           <ProtectedRoute><Calculadora /></ProtectedRoute>
-        } />
-        <Route path="/agente" element={
-          <ProtectedRoute><Agente /></ProtectedRoute>
         } />
         <Route path="/asistente" element={
           <ProtectedRoute><AsistenteIA /></ProtectedRoute>
