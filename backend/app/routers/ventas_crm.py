@@ -103,7 +103,9 @@ def listar_vendedores(db: Session = Depends(get_db), user=Depends(get_current_us
     v = get_vendedor(db, user)
     if not v.es_admin:
         return [v]
-    return db.query(mv.VentasVendedor).order_by(mv.VentasVendedor.id).all()
+    # Aísla el sandbox demo: el admin real ve solo vendedores reales y el
+    # admin_demo solo los del demo (mismo criterio que clientes/propiedades).
+    return _demo(db.query(mv.VentasVendedor), mv.VentasVendedor, v).order_by(mv.VentasVendedor.id).all()
 
 
 @router.patch("/vendedores/{vid}", response_model=sv.VendedorOut)
