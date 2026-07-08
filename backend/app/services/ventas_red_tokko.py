@@ -90,6 +90,12 @@ _SESSION_TTL = timedelta(minutes=15)
 
 # ───────────────────────── login / sesión ─────────────────────────
 
+def tokko_configurado() -> bool:
+    """True si están las credenciales web de Tokko. Permite que la UI avise con
+    claridad ('Tokko no conectado') en vez de un engañoso 'no se encontró'."""
+    return bool(os.getenv("TOKKO_USER", "").strip() and os.getenv("TOKKO_PASS", "").strip())
+
+
 def _creds() -> tuple[str, str]:
     u = os.getenv("TOKKO_USER", "").strip()
     p = os.getenv("TOKKO_PASS", "").strip()

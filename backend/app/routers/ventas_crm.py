@@ -1843,8 +1843,12 @@ def red_tokko_zonas(q: str = Query(..., min_length=2),
     Ej: 'Santa Rosa' → [La Pampa|Capital|Santa Rosa, San Luis|…|Santa Rosa de Conlara, …]."""
     get_vendedor(db, user)
     from app.services import ventas_red_tokko
+    conectado = ventas_red_tokko.tokko_configurado()
+    if not conectado:
+        # Sin credenciales no hay forma de resolver zonas; avisamos claro.
+        return {"zonas": [], "tokko_conectado": False}
     try:
-        return {"zonas": ventas_red_tokko.resolver_zonas(q)}
+        return {"zonas": ventas_red_tokko.resolver_zonas(q), "tokko_conectado": True}
     except RuntimeError as e:
         raise HTTPException(503, str(e))
     except Exception:

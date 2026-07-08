@@ -7,6 +7,50 @@ import api from '../../utils/api'
 const OPERACIONES = [['', 'Todas'], ['venta', 'Venta'], ['alquiler', 'Alquiler']]
 const OPER_VIVO = [['venta', 'Venta'], ['alquiler', 'Alquiler']]
 
+// Localidades de La Pampa — palabras clave exactas para resolver la zona en
+// Tokko. El usuario elige de la lista (o escribe) y Tokko la desambigua.
+const ZONAS_LAPAMPA = [
+  'Santa Rosa', 'Toay', 'General Pico', 'General Acha', 'Eduardo Castex',
+  'Realicó', 'Intendente Alvear', 'Victorica', 'Macachín', 'Catriló',
+  'Quemú Quemú', 'Winifreda', 'Ingeniero Luiggi', 'Guatraché', '25 de Mayo',
+  'Colonia Barón', 'Doblas', 'Anguil', 'Miguel Riglos', 'Lonquimay',
+  'Uriburu', 'Rancul', 'Parera', 'Bernasconi', 'La Adela', 'Alpachiri',
+  'Santa Isabel', 'Telén', 'Trenel', 'Alta Italia', 'Bernardo Larroudé',
+  'Caleufú', 'Arata', 'Embajador Martini', 'Jacinto Arauz', 'Ataliva Roca',
+  'Utracán', 'General Manuel J. Campos', 'Villa Mirasol', 'Metileo',
+  'Monte Nievas', 'Speluzzi', 'Rolón', 'Naicó', 'La Reforma', 'Puelches',
+  'Puelén', 'Casa de Piedra', 'Gobernador Duval', 'Colonia Santa María',
+  'Algarrobo del Águila', 'La Humada', 'Chacharramendi', 'Cuchillo Có',
+]
+
+// Combobox con buscador: filtra la lista mientras escribís y permite texto libre.
+function ComboZona({ value, onChange, onPick }) {
+  const [open, setOpen] = useState(false)
+  const q = (value || '').trim().toLowerCase()
+  const ops = ZONAS_LAPAMPA.filter(z => z.toLowerCase().includes(q)).slice(0, 10)
+  return (
+    <div className="relative">
+      <input className="input !py-2 text-[13px]" placeholder="Ej: Santa Rosa, General Pico…"
+        value={value} autoComplete="off"
+        onChange={e => { onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={e => { if (e.key === 'Enter') { setOpen(false); onPick(value) } }} />
+      {open && ops.length > 0 && (
+        <div className="absolute z-30 left-0 right-0 mt-1 rounded-xl border border-border bg-white dark:bg-[#141414] shadow-xl max-h-56 overflow-y-auto">
+          {ops.map(z => (
+            <button key={z} type="button"
+              onMouseDown={e => { e.preventDefault(); onChange(z); onPick(z); setOpen(false) }}
+              className="w-full text-left px-3 py-2 text-[13px] hover:bg-[#B8893A]/10 flex items-center gap-2">
+              <MapPin size={12} className="text-[#B8893A] shrink-0" /><span>{z}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function RedTokko() {
   const { isAdmin, role } = useRole()
   const esAdmin = isAdmin || role === 'ventas_admin' || role === 'gerencia'
@@ -27,13 +71,18 @@ export default function RedTokko() {
   const [vivo, setVivo] = useState({ operacion: 'venta', precio_min: '', precio_max: '' })
   const [trayendo, setTrayendo] = useState(false)
 
-  const resolverZonas = async () => {
-    if (zonaQuery.trim().length < 2) return
+  const resolverZonas = async (qArg) => {
+    const q = (typeof qArg === 'string' ? qArg : zonaQuery).trim()
+    if (q.length < 2) return
     setResolviendo(true); setCandidatos([]); setZonaElegida(null); setMsg('')
     try {
-      const { data } = await api.get(`/api/ventas-crm/red-tokko/zonas?q=${encodeURIComponent(zonaQuery.trim())}`)
+      const { data } = await api.get(`/api/ventas-crm/red-tokko/zonas?q=${encodeURIComponent(q)}`)
       setCandidatos(data.zonas || [])
-      if (!data.zonas?.length) setMsg('No se encontró esa zona en Tokko. Probá otro nombre.')
+      if (data.tokko_conectado === false) {
+        setMsg('Tokko no está conectado en este servidor. Un admin tiene que configurar las credenciales (TOKKO_USER / TOKKO_PASS) para traer de la red.')
+      } else if (!data.zonas?.length) {
+        setMsg('No se encontró esa zona en Tokko. Probá otro nombre.')
+      }
     } catch (e) {
       setMsg(e?.response?.data?.detail || 'No se pudo consultar Tokko.')
     } finally { setResolviendo(false) }
@@ -130,15 +179,13 @@ export default function RedTokko() {
               Escribí una zona y elegí la correcta. Tokko trae solo esa zona (no toda la red).
             </p>
 
-            {/* Paso 1: resolver zona */}
+            {/* Paso 1: resolver zona (combobox con buscador de localidades) */}
             <div className="flex gap-2 items-end mb-2">
               <div className="flex-1">
                 <label className="label">Zona</label>
-                <input className="input !py-2 text-[13px]" placeholder="Ej: Santa Rosa, General Pico…"
-                  value={zonaQuery} onChange={e => setZonaQuery(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && resolverZonas()} />
+                <ComboZona value={zonaQuery} onChange={setZonaQuery} onPick={z => resolverZonas(z)} />
               </div>
-              <button className="btn-secondary !py-2 text-[13px]" onClick={resolverZonas} disabled={resolviendo || zonaQuery.trim().length < 2}>
+              <button className="btn-secondary !py-2 text-[13px]" onClick={() => resolverZonas()} disabled={resolviendo || zonaQuery.trim().length < 2}>
                 <Search size={13} className={resolviendo ? 'animate-pulse' : ''} /> Resolver
               </button>
             </div>
@@ -188,7 +235,9 @@ export default function RedTokko() {
         <div className="card p-3 mb-4 grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
           <div className="col-span-2 sm:col-span-1">
             <label className="label">Zona</label>
-            <input className="input !py-2 text-[13px]" placeholder="Santa Rosa…" value={filtros.zona} onChange={set('zona')} />
+            <ComboZona value={filtros.zona}
+              onChange={z => setFiltros(f => ({ ...f, zona: z }))}
+              onPick={z => setFiltros(f => ({ ...f, zona: z }))} />
           </div>
           <div>
             <label className="label">Operación</label>
