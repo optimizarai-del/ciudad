@@ -69,18 +69,28 @@ export default function Sidebar({ onNavigate }) {
   if (hasAlquileres) {
     grupos.push({
       label: 'Alquileres',
-      items: [
-        { to: '/alquileres/dashboard',    icon: LayoutDashboard, label: 'Dashboard' },
-        { to: '/alquileres/propiedades',  icon: Home,            label: 'Propiedades' },
-        { to: '/alquileres/contratos',    icon: FileText,        label: 'Contratos' },
-        { to: '/alquileres/cobranza',     icon: CreditCard,      label: 'Cobros' },
-        { to: '/alquileres/liquidaciones', icon: Receipt,        label: 'Liquidaciones' },
-        { to: '/alquileres/tasas',        icon: Landmark,        label: 'Tasas municipales' },
-        { to: '/alquileres/refacciones',  icon: Wrench,          label: 'Refacciones' },
-        { to: '/alquileres/clientes',     icon: Users,           label: 'Clientes' },
-        { to: '/alquileres/propietarios', icon: KeyRound,        label: 'Propietarios' },
-        { to: '/alquileres/historial',    icon: History,         label: 'Historial' },
-        { to: '/calculadora',             icon: Calculator,      label: 'Calculadora' },
+      subs: [
+        { label: 'Resumen', items: [
+          { to: '/alquileres/dashboard',   icon: LayoutDashboard, label: 'Dashboard' },
+        ]},
+        { label: 'Operación', items: [
+          { to: '/alquileres/propiedades',  icon: Home,       label: 'Propiedades' },
+          { to: '/alquileres/contratos',    icon: FileText,   label: 'Contratos' },
+          { to: '/alquileres/cobranza',     icon: CreditCard, label: 'Cobros' },
+          { to: '/alquileres/liquidaciones', icon: Receipt,   label: 'Liquidaciones' },
+        ]},
+        { label: 'Mantenimiento', items: [
+          { to: '/alquileres/tasas',       icon: Landmark, label: 'Tasas municipales' },
+          { to: '/alquileres/refacciones', icon: Wrench,   label: 'Refacciones' },
+        ]},
+        { label: 'Personas', items: [
+          { to: '/alquileres/clientes',     icon: Users,   label: 'Clientes' },
+          { to: '/alquileres/propietarios', icon: KeyRound, label: 'Propietarios' },
+        ]},
+        { label: 'Utilidades', items: [
+          { to: '/alquileres/historial', icon: History,    label: 'Historial' },
+          { to: '/calculadora',          icon: Calculator, label: 'Calculadora' },
+        ]},
       ],
     })
   }
@@ -88,24 +98,36 @@ export default function Sidebar({ onNavigate }) {
   if (hasVentas) {
     grupos.push({
       label: 'Ventas',
-      items: [
-        { to: '/ventas-crm/dashboard',   icon: TrendingUp,    label: 'Dashboard' },
-        ...(isGerencia ? [{ to: '/ventas-crm/ejecutivo', icon: BarChart2, label: 'Ejecutivo' }] : []),
-        { to: '/ventas-crm/crm',          icon: LayoutGrid,    label: 'CRM de Ventas' },
-        { to: '/ventas-crm/pedidos',      icon: ClipboardList, label: 'Pedidos' },
-        { to: '/ventas-crm/clientes',     icon: Users,         label: 'Clientes' },
-        { to: '/ventas-crm/propiedades',  icon: Building2,     label: 'Propiedades' },
-        { to: '/ventas-crm/red-tokko',    icon: Globe,         label: 'Red Tokko' },
-        { to: '/ventas-crm/webs',         icon: Network,       label: 'Webs' },
-        { to: '/ventas-crm/mapas',        icon: Map,           label: 'Mapas' },
-        { to: '/ventas-crm/operaciones',  icon: Handshake,     label: 'Operaciones' },
-        { to: '/ventas-crm/matches',      icon: Sparkles,      label: 'Matches' },
-        { to: '/ventas-crm/tareas',       icon: CalendarClock, label: 'Tareas' },
-        { to: '/ventas-crm/contactos',    icon: Network,       label: 'Contactos' },
-        { to: '/ventas-crm/notificaciones', icon: Bell,        label: 'Notificaciones' },
-        { to: '/ventas-crm/configuracion', icon: Settings,     label: 'Configuración' },
-        ...(isGerencia && !isAdminDemo ? [{ to: '/ventas-crm/conexiones', icon: Plug, label: 'Conexiones' }] : []),
-      ],
+      subs: [
+        { label: 'Resumen', items: [
+          { to: '/ventas-crm/dashboard', icon: TrendingUp, label: 'Dashboard' },
+          ...(isGerencia ? [{ to: '/ventas-crm/ejecutivo', icon: BarChart2, label: 'Ejecutivo' }] : []),
+        ]},
+        { label: 'Pipeline', items: [
+          { to: '/ventas-crm/crm',     icon: LayoutGrid,    label: 'CRM de Ventas' },
+          { to: '/ventas-crm/pedidos', icon: ClipboardList, label: 'Pedidos' },
+          { to: '/ventas-crm/matches', icon: Sparkles,      label: 'Matches' },
+        ]},
+        { label: 'Catálogo', items: [
+          { to: '/ventas-crm/propiedades', icon: Building2, label: 'Propiedades' },
+          { to: '/ventas-crm/red-tokko',   icon: Globe,     label: 'Red Tokko' },
+          { to: '/ventas-crm/webs',        icon: Network,   label: 'Webs' },
+          { to: '/ventas-crm/mapas',       icon: Map,       label: 'Mapas' },
+        ]},
+        { label: 'Personas', items: [
+          { to: '/ventas-crm/clientes',  icon: Users,   label: 'Clientes' },
+          { to: '/ventas-crm/contactos', icon: Network, label: 'Contactos' },
+        ]},
+        { label: 'Gestión', items: [
+          { to: '/ventas-crm/operaciones',    icon: Handshake,     label: 'Operaciones' },
+          { to: '/ventas-crm/tareas',         icon: CalendarClock, label: 'Tareas' },
+          { to: '/ventas-crm/notificaciones', icon: Bell,          label: 'Notificaciones' },
+        ]},
+        { label: 'Ajustes', items: [
+          { to: '/ventas-crm/configuracion', icon: Settings, label: 'Configuración' },
+          ...(isGerencia && !isAdminDemo ? [{ to: '/ventas-crm/conexiones', icon: Plug, label: 'Conexiones' }] : []),
+        ]},
+      ].filter(s => s.items.length > 0),
     })
   }
 
@@ -179,18 +201,22 @@ export default function Sidebar({ onNavigate }) {
       {/* Navegación */}
       <nav className="flex-1 flex flex-col gap-1">
         {grupos.map((g) => {
-          // Riel: solo íconos, sin encabezado, separados por divisor.
+          // Items del grupo, ya sea plano o con subgrupos.
+          const flat = g.subs ? g.subs.flatMap((s) => s.items) : g.items
+
+          // Riel: solo íconos, sin encabezados, separados por divisor por grupo.
           if (col) {
             return (
               <div
                 key={g.label}
                 className="flex flex-col gap-0.5 pb-2 mb-1 border-b border-gray-100 dark:border-gray-900 last:border-0"
               >
-                {g.items.map((it) => <Item key={it.to} {...it} collapsed onNavigate={onNavigate} />)}
+                {flat.map((it) => <Item key={it.to} {...it} collapsed onNavigate={onNavigate} />)}
               </div>
             )
           }
-          // Expandido: encabezado desplegable.
+
+          // Expandido: encabezado desplegable + subgrupos con subtítulo.
           const open = abiertos[g.label] !== false // por defecto abierto
           return (
             <div key={g.label} className="mb-2">
@@ -207,8 +233,23 @@ export default function Sidebar({ onNavigate }) {
                 />
               </button>
               {open && (
-                <div className="space-y-0.5 mt-0.5">
-                  {g.items.map((it) => <Item key={it.to} {...it} collapsed={false} onNavigate={onNavigate} />)}
+                <div className="mt-0.5">
+                  {g.subs ? (
+                    g.subs.map((s) => (
+                      <div key={s.label} className="mb-1.5 last:mb-0">
+                        <p className="px-3 pt-1 pb-0.5 text-[9px] font-semibold uppercase tracking-wider text-gray-400/70 dark:text-gray-600/80">
+                          {s.label}
+                        </p>
+                        <div className="space-y-0.5">
+                          {s.items.map((it) => <Item key={it.to} {...it} collapsed={false} onNavigate={onNavigate} />)}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="space-y-0.5">
+                      {g.items.map((it) => <Item key={it.to} {...it} collapsed={false} onNavigate={onNavigate} />)}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
