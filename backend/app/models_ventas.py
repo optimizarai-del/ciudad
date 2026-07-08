@@ -172,6 +172,8 @@ class VentasVendedor(Base):
 
     id = Column(Integer, primary_key=True)
     workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    # Sandbox demo: los admin_demo ven/crean solo is_demo=True; el resto, is_demo=False.
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True, nullable=False)
     nombre = Column(String, nullable=False)
     es_admin = Column(Boolean, default=False)   # rol ventas_admin
@@ -195,6 +197,7 @@ class VentasCliente(Base):
 
     id = Column(Integer, primary_key=True)
     workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"), index=True)
 
     nombre = Column(String, nullable=False)
@@ -307,6 +310,7 @@ class VentasPropiedad(Base):
 
     id = Column(Integer, primary_key=True)
     workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     cargada_por = Column(Integer, ForeignKey("ventas_vendedores.id"))
 
     titulo = Column(String)
@@ -351,6 +355,7 @@ class VentasPedido(Base):
 
     id = Column(Integer, primary_key=True)
     workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     cliente_id = Column(Integer, ForeignKey("ventas_clientes.id"), index=True, nullable=False)
     vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"), index=True)
 
@@ -418,6 +423,7 @@ class VentasOperacion(Base):
 
     id = Column(Integer, primary_key=True)
     workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     propiedad_id = Column(Integer, ForeignKey("ventas_propiedades.id"), index=True)
     cliente_id = Column(Integer, ForeignKey("ventas_clientes.id"), index=True)
     pedido_id = Column(Integer, ForeignKey("ventas_pedidos.id"))
@@ -663,6 +669,7 @@ class VentasMatch(Base):
 
     id = Column(Integer, primary_key=True)
     workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
     pedido_id = Column(Integer, ForeignKey("ventas_pedidos.id"), index=True, nullable=False)
     propiedad_id = Column(Integer, ForeignKey("ventas_propiedades.id"), index=True, nullable=False)
     vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"), index=True)

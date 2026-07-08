@@ -453,6 +453,9 @@ def _migrar_workspace_demo():
         # refacciones nunca se creó sin is_demo (modelo nuevo), pero
         # corremos por las dudas para que sea idempotente.
         "refacciones",
+        # Módulo Ventas — sandbox demo (mismas reglas que el core).
+        "ventas_vendedores", "ventas_clientes", "ventas_propiedades",
+        "ventas_pedidos", "ventas_operaciones", "ventas_matches",
     ]
 
     db = SessionLocal()
@@ -845,5 +848,20 @@ def _seed_if_empty():
             seed_run()
     finally:
         db.close()
+
+
+@app.on_event("startup")
+def _seed_demo_sandbox():
+    """Siembra el sandbox demo (usuario admin_demo + datos demo de Alquileres y
+    Ventas) si DEMO_SEED_ENABLED=true. Idempotente y aislado de la data real:
+    corre DESPUÉS del seed base y de la migración de is_demo. Nunca tumba el
+    arranque si algo falla."""
+    if os.getenv("DEMO_SEED_ENABLED", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return
+    try:
+        from app.seed_demo import sembrar_demo
+        sembrar_demo()
+    except Exception:
+        logger.exception("[seed_demo] falló; se continúa el arranque")
 
 

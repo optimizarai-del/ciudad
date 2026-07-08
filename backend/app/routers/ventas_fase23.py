@@ -38,15 +38,18 @@ def listar_matches(orden: str = "score", db: Session = Depends(get_db), user=Dep
     """Datos para la pantalla visual de matches (Mod #8): agrupados por
     propiedad, con los pedidos/clientes que matchean a la derecha."""
     v = get_vendedor(db, user)
-    q = db.query(mv.VentasMatch).filter(mv.VentasMatch.estado != mv.MatchEstado.descartado)
+    dflag = bool(getattr(v, "is_demo", False))
+    q = (db.query(mv.VentasMatch)
+         .filter(mv.VentasMatch.estado != mv.MatchEstado.descartado,
+                 mv.VentasMatch.is_demo == dflag))
     if not v.es_admin:
         q = q.filter(mv.VentasMatch.vendedor_id == v.id)
     matches = q.all()
 
-    # Cache de propiedades, pedidos y clientes para no consultar 1x1
-    props = {p.id: p for p in db.query(mv.VentasPropiedad).all()}
-    pedidos = {p.id: p for p in db.query(mv.VentasPedido).all()}
-    clientes = {c.id: c for c in db.query(mv.VentasCliente).all()}
+    # Cache de propiedades, pedidos y clientes (mismo sandbox) para no consultar 1x1
+    props = {p.id: p for p in db.query(mv.VentasPropiedad).filter_by(is_demo=dflag).all()}
+    pedidos = {p.id: p for p in db.query(mv.VentasPedido).filter_by(is_demo=dflag).all()}
+    clientes = {c.id: c for c in db.query(mv.VentasCliente).filter_by(is_demo=dflag).all()}
 
     por_prop = {}
     for m in matches:

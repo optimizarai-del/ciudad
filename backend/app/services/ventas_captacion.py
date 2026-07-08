@@ -40,9 +40,11 @@ def _elegir_vendedor(db: Session) -> Optional[mv.VentasVendedor]:
     Prioriza vendedores NO admin (los admin ven todo igual y no suelen tomar el
     lead inicial). Si solo hay admins, usa el admin. Si no hay ninguno, None.
     """
+    # Los leads entrantes son reales → nunca se asignan al vendedor demo.
     vendedores = db.query(mv.VentasVendedor).filter(
-        mv.VentasVendedor.activo.is_(True)
-    ).all() if hasattr(mv.VentasVendedor, "activo") else db.query(mv.VentasVendedor).all()
+        mv.VentasVendedor.activo.is_(True),
+        mv.VentasVendedor.is_demo.is_(False),
+    ).all()
     if not vendedores:
         return None
 

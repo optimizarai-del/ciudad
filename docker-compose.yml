@@ -48,6 +48,8 @@ services:
       INSTAGRAM_VERIFY_TOKEN: ${INSTAGRAM_VERIFY_TOKEN:-ciudad_verify_token}
       WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-ciudad_whatsapp_token}
       REDIS_URL: ${REDIS_URL:-}
+      # Sandbox demo: crea admin_demo@ciudad.demo / demo1234 con datos demo aislados.
+      DEMO_SEED_ENABLED: ${DEMO_SEED_ENABLED:-true}
     volumes:
       # Persistencia de SQLite + adjuntos. Con Postgres/Supabase igual guarda
       # los archivos subidos.

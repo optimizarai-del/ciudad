@@ -337,17 +337,23 @@ def metricas(db: Session, clientes: list, ahora: datetime | None = None) -> dict
     }
 
 
-def metricas_lider(db: Session, ahora: datetime | None = None) -> dict:
+def metricas_lider(db: Session, ahora: datetime | None = None,
+                   es_demo: bool = False) -> dict:
     """Performance por vendedor para la vista del líder (admin). Ranking por
-    valor ponderado del pipeline; incluye señales de riesgo y cierres."""
+    valor ponderado del pipeline; incluye señales de riesgo y cierres.
+
+    `es_demo` aísla el sandbox: True → solo vendedores/clientes/ops demo;
+    False → solo los reales."""
     ahora = ahora or datetime.utcnow()
     sla_map = get_sla_map(db)
     en_consulta = {q.cliente_id for q in db.query(mv.VentasLiderConsulta.cliente_id)
                    .filter(mv.VentasLiderConsulta.estado == "pendiente")}
-    vendedores = db.query(mv.VentasVendedor).filter_by(activo=True).all()
-    clientes = db.query(mv.VentasCliente).all()
+    vendedores = (db.query(mv.VentasVendedor)
+                  .filter_by(activo=True, is_demo=es_demo).all())
+    clientes = db.query(mv.VentasCliente).filter_by(is_demo=es_demo).all()
     ops = (db.query(mv.VentasOperacion)
-           .filter(mv.VentasOperacion.estado == mv.OperacionEstado.cerrada).all())
+           .filter(mv.VentasOperacion.estado == mv.OperacionEstado.cerrada,
+                   mv.VentasOperacion.is_demo == es_demo).all())
 
     por_vend = {}
     for v in vendedores:

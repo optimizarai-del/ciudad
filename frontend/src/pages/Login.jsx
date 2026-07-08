@@ -104,15 +104,15 @@ export default function Login() {
             </button>
           </form>
 
-          {/* Demo box */}
+          {/* Demo box — acceso al sandbox demo (ve SOLO datos demo, aislado de la data real) */}
           <div className="mt-8 p-4 rounded-2xl bg-[#F5F5F5] dark:bg-[#1A1A1A] border border-[#E5E5E5] dark:border-[#2A2A2A]">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-[#737373] dark:text-[#7A7A7A] font-semibold mb-2">Demo</p>
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[#737373] dark:text-[#7A7A7A] font-semibold mb-2">Acceso demo</p>
             <div className="space-y-1">
-              <p className="text-[13px] text-[#0A0A0A] dark:text-[#E0E0E0] font-mono">admin@ciudad.com</p>
-              <p className="text-[13px] text-[#0A0A0A] dark:text-[#E0E0E0] font-mono">ciudad1234</p>
+              <p className="text-[13px] text-[#0A0A0A] dark:text-[#E0E0E0] font-mono">admin_demo@ciudad.demo</p>
+              <p className="text-[13px] text-[#0A0A0A] dark:text-[#E0E0E0] font-mono">demo1234</p>
             </div>
             <button
-              onClick={() => setForm({ email: 'admin@ciudad.com', password: 'ciudad1234' })}
+              onClick={() => setForm({ email: 'admin_demo@ciudad.demo', password: 'demo1234' })}
               className="btn-ghost mt-3 w-full text-[12px] py-1.5">
               Completar automáticamente
             </button>

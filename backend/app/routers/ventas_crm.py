@@ -41,13 +41,15 @@ def get_vendedor(db: Session, user) -> mv.VentasVendedor:
     if v:
         return v
     role = user.role.value if hasattr(user.role, "value") else user.role
-    if role not in ("admin", "gerencia", "ventas", "ventas_admin"):
+    if role not in ("admin", "gerencia", "ventas", "ventas_admin", "admin_demo"):
         raise HTTPException(403, "No tenés acceso al módulo de Ventas")
-    es_admin = role in ("admin", "gerencia", "ventas_admin")
+    # admin/gerencia y el usuario demo ven todo su workspace (es_admin=True).
+    es_admin = role in ("admin", "gerencia", "ventas_admin", "admin_demo")
     v = mv.VentasVendedor(
         user_id=user.id,
         nombre=user.nombre,
         es_admin=es_admin,
+        is_demo=(role == "admin_demo"),
     )
     db.add(v); db.commit(); db.refresh(v)
     return v
@@ -60,8 +62,20 @@ def _audit(db, vendedor, entidad, entidad_id, accion, detalle=None):
     ))
 
 
+def _demo(query, model, vendedor):
+    """Aísla el sandbox demo: filtra por is_demo == el del vendedor. El usuario
+    demo (is_demo=True) ve solo data demo; los reales solo ven la real. Se aplica
+    a TODO modelo de Ventas que tenga la columna is_demo (entidades compartidas
+    como propiedades y matches, además de las scopeadas por vendedor)."""
+    if hasattr(model, "is_demo"):
+        return query.filter(model.is_demo == bool(vendedor.is_demo))
+    return query
+
+
 def _scope(query, model, vendedor):
-    """Filtra por vendedor salvo que sea admin (ve todo)."""
+    """Filtra por sandbox demo y por vendedor (salvo admin, que ve todo su
+    workspace)."""
+    query = _demo(query, model, vendedor)
     if vendedor.es_admin:
         return query
     return query.filter(model.vendedor_id == vendedor.id)
@@ -136,6 +150,7 @@ def crear_cliente(data: sv.ClienteCreate,
     v = get_vendedor(db, user)
     # exclude_none para no pisar los defaults del modelo (etapa/temperatura).
     obj = mv.VentasCliente(**data.model_dump(exclude_none=True), vendedor_id=v.id)
+    obj.is_demo = bool(v.is_demo)
     obj.etapa_desde = datetime.utcnow()
     db.add(obj); db.flush()
     _log_evento(db, v, obj.id, "etapa", None, obj.etapa, "Lead creado")
@@ -479,7 +494,7 @@ def pipeline_lider(db: Session = Depends(get_db), user=Depends(get_current_user)
     v = get_vendedor(db, user)
     if not v.es_admin:
         raise HTTPException(403, "Solo el líder/admin ve la performance del equipo.")
-    return vp.metricas_lider(db)
+    return vp.metricas_lider(db, es_demo=bool(v.is_demo))
 
 
 @router.get("/dashboard-ejecutivo")
@@ -499,7 +514,7 @@ def dashboard_ejecutivo(db: Session = Depends(get_db), user=Depends(get_current_
     ahora = datetime.utcnow()
     hace_30 = ahora - timedelta(days=30)
 
-    clientes = db.query(mv.VentasCliente).all()
+    clientes = _demo(db.query(mv.VentasCliente), mv.VentasCliente, v).all()
     pipeline = vp.metricas(db, clientes, ahora)
 
     # ── Captación por canal (origen) ──
@@ -514,7 +529,7 @@ def dashboard_ejecutivo(db: Session = Depends(get_db), user=Depends(get_current_
     leads_30d = sum(c["ult_30d"] for c in captacion)
 
     # ── Operaciones ──
-    ops = db.query(mv.VentasOperacion).all()
+    ops = _demo(db.query(mv.VentasOperacion), mv.VentasOperacion, v).all()
     est_ops = {e.value: 0 for e in mv.OperacionEstado}
     comision_cerrada = 0.0
     monto_cerrado = 0.0
@@ -533,7 +548,7 @@ def dashboard_ejecutivo(db: Session = Depends(get_db), user=Depends(get_current_
     }
 
     # ── Inventario de propiedades ──
-    props = db.query(mv.VentasPropiedad).all()
+    props = _demo(db.query(mv.VentasPropiedad), mv.VentasPropiedad, v).all()
     por_estado = {e.value: 0 for e in mv.VPropiedadEstado}
     por_fuente = {e.value: 0 for e in mv.VPropiedadFuente}
     valor_inventario = 0.0
@@ -568,7 +583,7 @@ def dashboard_ejecutivo(db: Session = Depends(get_db), user=Depends(get_current_
         "captacion": captacion,
         "operaciones": operaciones,
         "inventario": inventario,
-        "equipo": vp.metricas_lider(db, ahora),
+        "equipo": vp.metricas_lider(db, ahora, es_demo=bool(v.is_demo)),
     }
 
 
@@ -854,8 +869,8 @@ def listar_propiedades(barrio_id: Optional[int] = None, tipo: Optional[str] = No
                        estado: Optional[str] = None, q: Optional[str] = None,
                        skip: int = 0, limit: int = Query(200, le=500),
                        db: Session = Depends(get_db), user=Depends(get_current_user)):
-    get_vendedor(db, user)  # garantiza acceso
-    query = db.query(mv.VentasPropiedad)
+    v = get_vendedor(db, user)  # garantiza acceso
+    query = _demo(db.query(mv.VentasPropiedad), mv.VentasPropiedad, v)
     if barrio_id is not None:
         query = query.filter(mv.VentasPropiedad.barrio_id == barrio_id)
     if tipo:
@@ -880,7 +895,7 @@ def crear_propiedad(data: sv.PropiedadCreate,
     payload["tipo"] = _enum(mv.VPropiedadTipo, payload.get("tipo"), "tipo")
     payload["estado"] = _enum(mv.VPropiedadEstado, payload.get("estado"), "estado")
     payload["fuente"] = _enum(mv.VPropiedadFuente, payload.get("fuente"), "fuente")
-    obj = mv.VentasPropiedad(**payload, cargada_por=v.id)
+    obj = mv.VentasPropiedad(**payload, cargada_por=v.id, is_demo=bool(v.is_demo))
     # Auto-geocoding (Mod #5): si hay dirección y no se asignó barrio a mano,
     # intentar resolver lat/lng y barrio. Best-effort, no bloquea el alta.
     if obj.direccion and not obj.barrio_id:
@@ -1122,7 +1137,7 @@ def crear_pedido(data: sv.PedidoCreate,
     payload["estado"] = _enum(mv.PedidoEstado, payload.get("estado"), "estado")
     payload["prioridad"] = _enum(mv.PedidoPrioridad, payload.get("prioridad"), "prioridad")
     payload["tipo"] = _enum(mv.VPropiedadTipo, payload.get("tipo"), "tipo")
-    obj = mv.VentasPedido(**payload, vendedor_id=v.id)
+    obj = mv.VentasPedido(**payload, vendedor_id=v.id, is_demo=bool(v.is_demo))
     db.add(obj); db.flush()
     _audit(db, v, "ventas_pedidos", obj.id, mv.AuditAccion.create, data.model_dump())
     try:
@@ -1220,7 +1235,8 @@ def crear_operacion(data: sv.OperacionCreate,
     payload["estado"] = _enum(mv.OperacionEstado, payload.get("estado"), "estado")
 
     manual = payload.get("comision_pct") is not None or payload.get("comision_monto_usd") is not None
-    obj = mv.VentasOperacion(**payload, vendedor_id=v.id, comision_manual=manual)
+    obj = mv.VentasOperacion(**payload, vendedor_id=v.id, comision_manual=manual,
+                             is_demo=bool(v.is_demo))
 
     if not manual and obj.monto_cierre_usd:
         tipo_prop = None
@@ -1705,6 +1721,7 @@ def propiedad_importar_confirmar(payload: dict,
     tipo = _enum(mv.VPropiedadTipo, d.get("tipo") or "otro", "tipo")
     obj = mv.VentasPropiedad(
         cargada_por=v.id,
+        is_demo=bool(v.is_demo),
         titulo=(d.get("titulo") or d.get("direccion") or "Propiedad")[:200],
         tipo=tipo,
         estado=mv.VPropiedadEstado.disponible,
@@ -1804,7 +1821,7 @@ def red_tokko_importar(payload: dict,
             precio_usd=r.get("precio_num"),
             dormitorios=r.get("dormitorios_num"), banos=r.get("banos_num"),
             descripcion=r.get("detalles"), inmobiliaria=r.get("publicado_por"),
-            link_externo=url, cargada_por=v.id,
+            link_externo=url, cargada_por=v.id, is_demo=bool(v.is_demo),
         )
         db.add(obj)
         nuevas_props.append(obj)

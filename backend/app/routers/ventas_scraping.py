@@ -263,7 +263,7 @@ def importar(payload: dict, db: Session = Depends(get_db), user=Depends(get_curr
             lat=lat, lng=lng, precio_usd=r.precio_num,
             dormitorios=r.dormitorios_num, banos=r.banos_num,
             descripcion=r.detalles, inmobiliaria=r.publicado_por,
-            link_externo=url, cargada_por=v.id,
+            link_externo=url, cargada_por=v.id, is_demo=bool(v.is_demo),
         )
         db.add(obj)
         nuevas_props.append(obj)

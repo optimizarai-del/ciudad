@@ -95,6 +95,7 @@ def _upsert_match(db, pedido, prop, score, razones):
             pedido_id=pedido.id, propiedad_id=prop.id, vendedor_id=pedido.vendedor_id,
             score=score, razones_json=json.dumps(razones, ensure_ascii=False),
             estado=mv.MatchEstado.pendiente, notificado=False,
+            is_demo=bool(getattr(pedido, "is_demo", False)),
         )
         db.add(m)
         return m, True
@@ -109,7 +110,8 @@ def evaluar_propiedad(db: Session, prop: mv.VentasPropiedad) -> int:
     """Evalúa una propiedad contra todos los pedidos activos. Devuelve nuevos."""
     nuevos = 0
     pedidos = (db.query(mv.VentasPedido)
-               .filter(mv.VentasPedido.estado.in_(ESTADOS_PEDIDO_ACTIVO)).all())
+               .filter(mv.VentasPedido.estado.in_(ESTADOS_PEDIDO_ACTIVO),
+                       mv.VentasPedido.is_demo == bool(getattr(prop, "is_demo", False))).all())
     for ped in pedidos:
         score, razones = evaluar_match(ped, prop)
         _, creado = _upsert_match(db, ped, prop, score, razones)
@@ -123,7 +125,8 @@ def evaluar_pedido(db: Session, pedido: mv.VentasPedido) -> int:
     """Evalúa un pedido contra todas las propiedades disponibles. Devuelve nuevos."""
     nuevos = 0
     props = (db.query(mv.VentasPropiedad)
-             .filter(mv.VentasPropiedad.estado == mv.VPropiedadEstado.disponible).all())
+             .filter(mv.VentasPropiedad.estado == mv.VPropiedadEstado.disponible,
+                     mv.VentasPropiedad.is_demo == bool(getattr(pedido, "is_demo", False))).all())
     for prop in props:
         score, razones = evaluar_match(pedido, prop)
         _, creado = _upsert_match(db, pedido, prop, score, razones)
