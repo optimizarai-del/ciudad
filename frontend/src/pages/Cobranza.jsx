@@ -20,6 +20,24 @@ const prevMes = m => { const [y,mm]=m.split('-').map(Number); return mm===1?`${y
 const nextMes = m => { const [y,mm]=m.split('-').map(Number); return mm===12?`${y+1}-01`:`${y}-${String(mm+1).padStart(2,'0')}` }
 const mesLabel = m => { const [y,mm]=m.split('-').map(Number); return new Date(y,mm-1,1).toLocaleString('es-AR',{month:'long',year:'numeric'}) }
 
+// Sanitiza un monto tipeado: vacío → 0, y descarta negativos / NaN / Infinity
+// (un number input igual deja escribir '-5' o '1e999'). Evita mandar valores
+// inválidos al backend.
+const sanitizeMonto = v => {
+  if (v === '' || v == null) return 0
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+// El detail de un 422 de FastAPI es un ARRAY de errores, no un string.
+// Lo convertimos a texto para no romper el render de {err} en React.
+const errMsg = (e, fallback) => {
+  const d = e?.response?.data?.detail
+  if (Array.isArray(d)) return d[0]?.msg || 'Datos inválidos'
+  if (typeof d === 'string') return d
+  return d ? 'Datos inválidos' : (fallback || 'Ocurrió un error.')
+}
+
 export default function Cobranza() {
   const hoy = new Date()
   const [mes, setMes]           = useState(`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`)
@@ -295,20 +313,15 @@ function TablaConceptos({ conceptos, onUpdate, onRemove, onAdd, montoTransferenc
                 </div>
               )}
 
-              {/* Monto — Alquiler es fijo (viene del contrato y se actualiza por ICL/IPC) */}
-              <input type="number" placeholder="0"
-                readOnly={c.label === 'Alquiler'}
+              {/* Monto — el Alquiler viene prellenado con el valor del período
+                  (índice ICL/IPC del contrato) pero el usuario lo puede editar. */}
+              <input type="number" placeholder="0" min="0" step="0.01"
                 title={c.label === 'Alquiler'
-                  ? 'El alquiler es fijo y se actualiza automáticamente según el índice del contrato'
+                  ? 'Prellenado con el valor del período según el índice del contrato. Podés editarlo si hace falta.'
                   : undefined}
-                className={`input !py-1.5 !px-2 text-right tabular-nums text-[12px] ${
-                  c.label === 'Alquiler' ? '!cursor-default !bg-neutral-100 dark:!bg-[#1A1A1A]' : ''
-                }`}
+                className="input !py-1.5 !px-2 text-right tabular-nums text-[12px]"
                 value={c.monto || ''}
-                onChange={e => {
-                  if (c.label === 'Alquiler') return  // no editable
-                  onUpdate(i, 'monto', e.target.value === '' ? 0 : Number(e.target.value))
-                }} />
+                onChange={e => onUpdate(i, 'monto', sanitizeMonto(e.target.value))} />
 
               {/* El Alquiler SIEMPRE lo cobra la inmobiliaria y se lo rinde
                   al propietario, así que no mostramos los radios para esa fila. */}
@@ -464,7 +477,8 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
     notas: '',
     conceptos: [
       // El alquiler SIEMPRE lo cobra la inmobiliaria y se lo rinde al propietario,
-      // por eso arranca con estado='cobrar' y no se puede cambiar desde la UI.
+      // por eso arranca con estado='cobrar'. El monto viene prellenado con el
+      // valor del período (índice del contrato) pero el usuario lo puede editar.
       { label: 'Alquiler',          fijo: true, monto: Number(item.monto_alquiler_sug ?? item.monto_total ?? 0) || 0, estado: 'cobrar' },
       { label: 'Expensas',          fijo: true, monto: extraSug('Expensas', item.monto_expensas_sug),               estado: null },
       { label: 'Tasas municipales', fijo: false, monto: extraSug('Tasas municipales', item.monto_tasas_sug),         estado: null },
@@ -522,6 +536,11 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
       // - Filas con estado=null (sin marcar) → se ignoran (no van en este pago)
       const filaAlquiler = form.conceptos.find(c => c.label === 'Alquiler' && c.estado === 'cobrar') || { monto: 0 }
       const montoAlquilerTotal = Number(filaAlquiler.monto) || 0
+      if (montoAlquilerTotal <= 0) {
+        setErr('El monto del alquiler debe ser mayor a 0.')
+        setLoading(false)
+        return
+      }
 
       const conceptos = []
       for (const c of form.conceptos) {
@@ -554,7 +573,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
       const r = await api.post(`/api/cobranza/${item.contrato_id}/registrar-pago`, payload)
       onSaved(r.data)
     } catch (e) {
-      setErr(e.response?.data?.detail || 'Error al registrar el pago.')
+      setErr(errMsg(e, 'Error al registrar el pago.'))
     } finally { setLoading(false) }
   }
 

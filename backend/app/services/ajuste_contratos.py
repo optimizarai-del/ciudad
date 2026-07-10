@@ -88,6 +88,51 @@ def monto_vigente(contrato: models.Contrato) -> float:
         return float(contrato.monto_inicial or 0)
 
 
+def monto_para_mes(contrato: models.Contrato, mes: str | None) -> float:
+    """Precio del alquiler que corresponde a un mes puntual (`mes` = 'YYYY-MM').
+
+    A diferencia de `monto_vigente` (que devuelve SIEMPRE el último precio), acá
+    el precio queda atado al período al que pertenece el mes: se toma el monto
+    del último ajuste cuyo mes sea <= `mes`, o `monto_inicial` si a ese mes
+    todavía no le aplicó ningún ajuste.
+
+    Así, si en junio el alquiler valía 350 y en septiembre se ajustó a 400,
+    consultar junio sigue devolviendo 350 aunque ya exista el ajuste de
+    septiembre. Los meses pasados NO se mueven cuando llega un ajuste nuevo.
+
+    Defensivo: ante cualquier fallo (tabla ausente, lazy-load roto) cae a
+    monto_inicial. NO consulta tasas vivas — solo lee ajustes guardados."""
+    if not contrato:
+        return 0.0
+    base = float(contrato.monto_inicial or 0)
+    if not mes:
+        return base
+    # Normalizamos `mes` a (año, mes) numérico y comparamos por número, NO por
+    # string: así '2026-7' (sin zero-pad) funciona igual que '2026-07'.
+    try:
+        _y, _m = str(mes).split("-")[:2]
+        objetivo = (int(_y), int(_m))
+    except Exception:
+        return base
+    try:
+        aplicables = [
+            a for a in (contrato.ajustes or [])
+            if a.fecha and (a.fecha.year, a.fecha.month) <= objetivo
+        ]
+        if not aplicables:
+            return base
+        # Último ajuste aplicable con monto positivo. Si el más nuevo viniera en
+        # 0/None (fila parcial/dato faltante), caemos al anterior real —no a
+        # monto_inicial— para no bajar el alquiler por debajo de lo ya ajustado.
+        for a in sorted(aplicables, key=lambda a: (a.fecha, a.id), reverse=True):
+            if a.monto_nuevo:
+                return float(a.monto_nuevo)
+        return base
+    except Exception as e:
+        print(f"[monto_para_mes] {type(e).__name__}: {e} — fallback a monto_inicial")
+        return base
+
+
 def aplicar_ajustes_pendientes(
     db: Session, contrato: models.Contrato, hoy: _date | None = None
 ) -> int:

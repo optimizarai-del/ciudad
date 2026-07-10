@@ -218,10 +218,12 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
         conceptos_pendientes = _conceptos_desde_pagos(prior_pagos.get(c.id, []))
         refs_pend          = refs_map.get(c.id, [])
 
-        # Monto vigente: último ajuste registrado, o monto_inicial si no hay
-        # ajustes. La lazy de arriba ya creó los que correspondan.
-        from app.services.ajuste_contratos import monto_vigente
-        alquiler_sug = monto_vigente(c) or float((prop.precio_alquiler if prop else 0) or 0)
+        # Monto del alquiler ATADO al mes que se está cobrando: el valor del
+        # período al que pertenece `mes` (no el último precio vigente). Así un
+        # mes pasado sigue mostrando su valor aunque después haya otro ajuste.
+        # La lazy de arriba ya creó los ajustes que correspondan hasta hoy.
+        from app.services.ajuste_contratos import monto_para_mes
+        alquiler_sug = monto_para_mes(c, mes) or float((prop.precio_alquiler if prop else 0) or 0)
         tasas_sug    = float((prop.tasa_municipal if prop else 0) or 0) + float((prop.impuesto_inmobiliario if prop else 0) or 0)
         expensas_sug = float((prop.expensas if prop else 0) or 0)
 
@@ -339,9 +341,11 @@ def resumen_cobranza(mes: Optional[str] = None, db: Session = Depends(get_db), u
                 pendiente += monto
         else:
             # Sin pago registrado → estimación del esperado para que la barra
-            # de cobranza tenga base real.
+            # de cobranza tenga base real. Usamos el precio del período al que
+            # pertenece el mes (mismo criterio que /mensual), no monto_inicial.
+            from app.services.ajuste_contratos import monto_para_mes
             prop = c.propiedad
-            base = float(c.monto_inicial or (prop.precio_alquiler if prop else 0) or 0)
+            base = monto_para_mes(c, mes) or float((prop.precio_alquiler if prop else 0) or 0)
             tasas = (prop.tasa_municipal if prop else 0) + (prop.impuesto_inmobiliario if prop else 0)
             extras = (prop.expensas if prop else 0) + (tasas or 0)
             pendiente += round(base + (extras or 0), 2)
