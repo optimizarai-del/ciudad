@@ -782,3 +782,62 @@ class VentasScrapingJob(Base):
     encolado_por = Column(Integer, ForeignKey("ventas_vendedores.id"))
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     finalizado_at = Column(DateTime)
+
+
+# ─────────────────────────── Radar Instagram (Fase 4.7) ─────────────────────
+# Seguimiento de cuentas de Instagram (inmobiliarias / particulares) que
+# publican propiedades. Una vez al día se scrapean sus publicaciones y quedan
+# listadas para analizar. Fuente: Apify (con modo mock sin token).
+
+class IgCuenta(Base):
+    """Cuenta de Instagram que seguimos para traer sus publicaciones."""
+    __tablename__ = "ventas_ig_cuentas"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
+
+    username = Column(String, index=True)       # handle sin @, en minúsculas
+    nombre = Column(String)                      # etiqueta opcional (ej "Inmob. X")
+    activa = Column(Boolean, default=True, index=True)
+    notas = Column(Text)
+
+    ultima_corrida = Column(DateTime)            # cuándo se scrapeó por última vez
+    ultimo_estado = Column(String)               # "ok" | "error" | mensaje corto
+    ultimo_nuevas = Column(Integer, default=0)   # posts nuevos en la última corrida
+
+    creada_por = Column(Integer, ForeignKey("ventas_vendedores.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IgPublicacion(Base):
+    """Publicación scrapeada de una cuenta de Instagram. Dedup por
+    (workspace_id, ig_post_id). Guarda los datos del post y de quién lo publicó."""
+    __tablename__ = "ventas_ig_publicaciones"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
+
+    cuenta_id = Column(Integer, ForeignKey("ventas_ig_cuentas.id"), index=True)
+    ig_post_id = Column(String, index=True)      # id/shortCode del post (idempotencia)
+
+    url = Column(String)                         # permalink del post
+    caption = Column(Text)                       # texto de la publicación
+    imagen_url = Column(String)                  # foto principal (displayUrl)
+    tipo = Column(String)                        # image | video | sidecar
+    fecha_post = Column(DateTime, index=True)    # cuándo se publicó
+    likes = Column(Integer, default=0)
+    comentarios = Column(Integer, default=0)
+
+    # Quién publicó
+    autor_username = Column(String, index=True)
+    autor_nombre = Column(String)
+    autor_foto = Column(String)
+
+    # Parseo liviano del caption (para análisis)
+    operacion = Column(String)                   # venta | alquiler | None
+    precio_texto = Column(String)                # ej "USD 120.000" si se detecta
+
+    scraped_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)

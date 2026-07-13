@@ -5,7 +5,7 @@ import {
   BarChart2, TrendingUp, Settings, DollarSign,
   Home, CreditCard, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History,
   ClipboardList, Handshake, Network, LayoutGrid, Sparkles, CalendarClock, Map, Globe, Plug,
-  Menu, ChevronDown,
+  Instagram, Menu, ChevronDown,
 } from 'lucide-react'
 import { useRole } from '../../context/RoleContext'
 
@@ -111,6 +111,7 @@ export default function Sidebar({ onNavigate }) {
         { label: 'Catálogo', items: [
           { to: '/ventas-crm/propiedades', icon: Building2, label: 'Propiedades' },
           { to: '/ventas-crm/red-tokko',   icon: Globe,     label: 'Red Tokko' },
+          { to: '/ventas-crm/instagram',   icon: Instagram, label: 'Instagram' },
           { to: '/ventas-crm/webs',        icon: Network,   label: 'Webs' },
           { to: '/ventas-crm/mapas',       icon: Map,       label: 'Mapas' },
         ]},
