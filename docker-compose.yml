@@ -48,6 +48,15 @@ services:
       INSTAGRAM_VERIFY_TOKEN: ${INSTAGRAM_VERIFY_TOKEN:-ciudad_verify_token}
       WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-ciudad_whatsapp_token}
       REDIS_URL: ${REDIS_URL:-}
+      # Radar Instagram — sin APIFY_TOKEN el scraper corre en modo mock (datos
+      # de ejemplo). Con token, scrapea de verdad vía el actor de Apify.
+      APIFY_TOKEN: ${APIFY_TOKEN:-}
+      APIFY_ACTOR: ${APIFY_ACTOR:-apify/instagram-scraper}
+      IG_SCRAPER_MAX_POSTS: ${IG_SCRAPER_MAX_POSTS:-12}
+      # Corrida diaria automática del radar (opt-in). También se puede disparar
+      # por cron externo: POST /api/ventas-instagram/jobs/run-daily?token=...
+      IG_SCRAPER_ENABLED: ${IG_SCRAPER_ENABLED:-false}
+      IG_SCRAPER_INTERVALO_SEG: ${IG_SCRAPER_INTERVALO_SEG:-86400}
       # Sandbox demo: crea admin_demo@ciudad.demo / demo1234 con datos demo aislados.
       DEMO_SEED_ENABLED: ${DEMO_SEED_ENABLED:-true}
     volumes:
