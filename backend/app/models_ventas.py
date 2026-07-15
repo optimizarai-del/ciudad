@@ -839,5 +839,8 @@ class IgPublicacion(Base):
     operacion = Column(String)                   # venta | alquiler | None
     precio_texto = Column(String)                # ej "USD 120.000" si se detecta
 
+    # Notas del equipo sobre esta publicación (se editan desde la ficha).
+    notas = Column(Text)
+
     scraped_at = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)

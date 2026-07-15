@@ -513,6 +513,35 @@ def _migrar_workspace_demo():
 
 
 @app.on_event("startup")
+def _migrar_ig_publicaciones_notas():
+    """Agrega ventas_ig_publicaciones.notas (ficha del Radar Instagram) en bases
+    donde la tabla ya existía sin la columna. Idempotente."""
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+    db = SessionLocal()
+    try:
+        ins = inspect(engine)
+        if "ventas_ig_publicaciones" not in ins.get_table_names(schema=schema):
+            return
+        existentes = {c["name"] for c in ins.get_columns("ventas_ig_publicaciones", schema=schema)}
+        if "notas" in existentes:
+            return
+        db.execute(text(f"ALTER TABLE {qual}ventas_ig_publicaciones ADD COLUMN notas TEXT"))
+        db.commit()
+        print("[migrar] ventas_ig_publicaciones.notas agregada")
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.exception("[migrar] _migrar_ig_publicaciones_notas falló; se continúa el arranque")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _migrar_tokko_conexiones():
     """Agrega a ventas_tokko_config las columnas de la sección Conexiones
     (credenciales web + estado de la última prueba). Idempotente."""

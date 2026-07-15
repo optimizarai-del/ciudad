@@ -52,6 +52,10 @@ class CuentaUpdate(BaseModel):
     notas: Optional[str] = None
 
 
+class PublicacionUpdate(BaseModel):
+    notas: Optional[str] = None
+
+
 def _cuenta_dict(c: mv.IgCuenta) -> dict:
     return {
         "id": c.id,
@@ -81,6 +85,7 @@ def _pub_dict(p: mv.IgPublicacion) -> dict:
         "autor_foto": p.autor_foto,
         "operacion": p.operacion,
         "precio_texto": p.precio_texto,
+        "notas": p.notas,
         "scraped_at": p.scraped_at.isoformat() if p.scraped_at else None,
     }
 
@@ -148,26 +153,32 @@ def borrar_cuenta(cuenta_id: int, db: Session = Depends(get_db), user=Depends(ge
 
 @router.post("/cuentas/{cuenta_id}/scrapear")
 def scrapear_una(cuenta_id: int, limite: Optional[int] = None,
+                 operacion: Optional[str] = None, q: Optional[str] = None,
                  db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Corre el scraper de una cuenta. `operacion` ('venta'|'alquiler') y `q`
+    (palabra clave) filtran los posts ANTES de guardarlos."""
     v = get_vendedor(db, user)
     _solo_admin(v)
     c = _demo(db.query(mv.IgCuenta), mv.IgCuenta, v).filter(mv.IgCuenta.id == cuenta_id).first()
     if not c:
         raise HTTPException(404, "Cuenta no encontrada")
-    resumen = ig.correr_scrape(db, [c], limite)
+    resumen = ig.correr_scrape(db, [c], limite, operacion=operacion, q=q)
     db.commit()
     return resumen
 
 
 @router.post("/scrapear")
 def scrapear_todas(limite: Optional[int] = None,
+                   operacion: Optional[str] = None, q: Optional[str] = None,
                    db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Corre el scraper de todas las cuentas activas. `operacion` y `q` filtran
+    los posts ANTES de guardarlos (solo se traen los que matchean)."""
     v = get_vendedor(db, user)
     _solo_admin(v)
     cuentas = _demo(db.query(mv.IgCuenta), mv.IgCuenta, v).filter(mv.IgCuenta.activa.is_(True)).all()
     if not cuentas:
         return {"cuentas": 0, "nuevas": 0, "usando_mock": True, "detalle": []}
-    resumen = ig.correr_scrape(db, cuentas, limite)
+    resumen = ig.correr_scrape(db, cuentas, limite, operacion=operacion, q=q)
     db.commit()
     return resumen
 
@@ -197,6 +208,33 @@ def listar_publicaciones(cuenta_id: Optional[int] = None, operacion: Optional[st
         .offset(skip).limit(limit).all()
     )
     return {"total": total, "publicaciones": [_pub_dict(p) for p in rows]}
+
+
+@router.get("/publicaciones/{pub_id}")
+def ver_publicacion(pub_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Ficha de una publicación."""
+    v = get_vendedor(db, user)
+    p = _demo(db.query(mv.IgPublicacion), mv.IgPublicacion, v).filter(
+        mv.IgPublicacion.id == pub_id).first()
+    if not p:
+        raise HTTPException(404, "Publicación no encontrada")
+    return _pub_dict(p)
+
+
+@router.patch("/publicaciones/{pub_id}")
+def editar_publicacion(pub_id: int, data: PublicacionUpdate,
+                       db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Guarda las notas del equipo sobre una publicación. Cualquier usuario de
+    ventas puede anotar (no solo admin)."""
+    v = get_vendedor(db, user)
+    p = _demo(db.query(mv.IgPublicacion), mv.IgPublicacion, v).filter(
+        mv.IgPublicacion.id == pub_id).first()
+    if not p:
+        raise HTTPException(404, "Publicación no encontrada")
+    for k, val in data.model_dump(exclude_unset=True).items():
+        setattr(p, k, val)
+    db.commit(); db.refresh(p)
+    return _pub_dict(p)
 
 
 # ───────────────────────── Job diario (cron externo) ─────────────────────────

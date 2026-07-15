@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Instagram, Plus, Trash2, RefreshCw, ExternalLink, Search,
   Heart, MessageCircle, AlertTriangle, Loader2, Power,
+  Filter, StickyNote, X,
 } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
 import api from '../../utils/api'
@@ -27,6 +28,16 @@ export default function RadarInstagram() {
   const [cargando, setCargando] = useState(true)
   const [toast, setToast] = useState(null)   // {kind, text}
   const [usandoMock, setUsandoMock] = useState(false)
+  // Filtros de búsqueda del scraping (se aplican antes de guardar)
+  const [scrOper, setScrOper] = useState('')
+  const [scrQ, setScrQ] = useState('')
+  const [scrLimite, setScrLimite] = useState(12)
+  // Ficha de una publicación
+  const [ficha, setFicha] = useState(null)
+  const [notasEdit, setNotasEdit] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  const abrirFicha = (p) => { setFicha(p); setNotasEdit(p.notas || '') }
 
   const aviso = (kind, text) => setToast({ kind, text })
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 4500); return () => clearTimeout(t) }, [toast])
@@ -77,19 +88,40 @@ export default function RadarInstagram() {
     } catch (e) { aviso('error', e?.response?.data?.detail || 'No se pudo eliminar.') }
   }
 
+  // Filtros que se aplican AL TRAER (solo se guardan los posts que matchean).
   const correr = async (cuentaId) => {
     setCorriendo(true)
     try {
-      const url = cuentaId
+      const params = new URLSearchParams()
+      if (scrOper) params.set('operacion', scrOper)
+      if (scrQ.trim()) params.set('q', scrQ.trim())
+      if (scrLimite) params.set('limite', scrLimite)
+      const base = cuentaId
         ? `/api/ventas-instagram/cuentas/${cuentaId}/scrapear`
         : '/api/ventas-instagram/scrapear'
-      const { data } = await api.post(url)
+      const { data } = await api.post(`${base}?${params}`)
       setUsandoMock(!!data.usando_mock)
-      aviso('success', `Listo: ${data.nuevas} publicaciones nuevas de ${data.cuentas} cuenta(s).${data.usando_mock ? ' (modo demo)' : ''}`)
+      const desc = data.descartados_por_filtro
+        ? ` · ${data.descartados_por_filtro} descartadas por el filtro`
+        : ''
+      aviso('success', `Listo: ${data.nuevas} publicaciones nuevas de ${data.cuentas} cuenta(s)${desc}.${data.usando_mock ? ' (modo demo)' : ''}`)
       cargarCuentas(); cargarPubs()
     } catch (e) {
       aviso('error', e?.response?.data?.detail || 'Error al correr el scraper.')
     } finally { setCorriendo(false) }
+  }
+
+  const guardarNotas = async () => {
+    if (!ficha) return
+    setGuardando(true)
+    try {
+      const { data } = await api.patch(`/api/ventas-instagram/publicaciones/${ficha.id}`, { notas: notasEdit })
+      setPubs(ps => ps.map(p => (p.id === data.id ? data : p)))
+      setFicha(data)
+      aviso('success', 'Notas guardadas.')
+    } catch (e) {
+      aviso('error', e?.response?.data?.detail || 'No se pudieron guardar las notas.')
+    } finally { setGuardando(false) }
   }
 
   return (
@@ -117,6 +149,36 @@ export default function RadarInstagram() {
             Modo demo: sin <code className="mx-1">APIFY_TOKEN</code> se traen publicaciones de ejemplo. Cargá el token en las variables de entorno para scrapear de verdad.
           </div>
         )}
+
+        {/* Filtros de la búsqueda — se aplican AL TRAER */}
+        <div className="card p-4 mb-5 border-[#B8893A]/30">
+          <div className="flex items-center gap-2 mb-3">
+            <Filter size={14} style={{ color: ORO }} />
+            <p className="font-semibold text-[13px] tracking-tight">Qué traer</p>
+            <span className="text-[11px] text-muted">— se aplica al correr el scraper: solo se guardan las publicaciones que matcheen</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div>
+              <label className="label">Operación</label>
+              <select className="input" value={scrOper} onChange={e => setScrOper(e.target.value)}>
+                <option value="">Todas</option>
+                <option value="venta">Solo Venta</option>
+                <option value="alquiler">Solo Alquiler</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Palabra clave (opcional)</label>
+              <input className="input" placeholder="ej: Toay, dormitorios, USD…"
+                value={scrQ} onChange={e => setScrQ(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Posts por cuenta</label>
+              <input className="input" type="number" min="1" max="50"
+                value={scrLimite}
+                onChange={e => setScrLimite(Math.max(1, Math.min(50, Number(e.target.value) || 12)))} />
+            </div>
+          </div>
+        </div>
 
         {/* Cuentas seguidas */}
         <div className="card p-5 mb-5">
@@ -216,7 +278,8 @@ export default function RadarInstagram() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {pubs.map(p => (
-              <div key={p.id} className="card overflow-hidden flex flex-col">
+              <div key={p.id} onClick={() => abrirFicha(p)} title="Ver ficha"
+                className="card overflow-hidden flex flex-col cursor-pointer transition-all hover:-translate-y-0.5 hover:shadow-lift">
                 {p.imagen_url && (
                   <div className="relative aspect-square bg-neutral-100 dark:bg-[#141414] overflow-hidden">
                     <img src={p.imagen_url} alt="" loading="lazy" className="w-full h-full object-cover"
@@ -244,8 +307,10 @@ export default function RadarInstagram() {
                   <div className="flex items-center gap-3 text-[11px] text-muted mt-auto pt-1">
                     <span className="flex items-center gap-1"><Heart size={11} /> {p.likes}</span>
                     <span className="flex items-center gap-1"><MessageCircle size={11} /> {p.comentarios}</span>
+                    {p.notas && <span title="Tiene notas"><StickyNote size={11} style={{ color: ORO }} /></span>}
                     {p.url && (
                       <a href={p.url} target="_blank" rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
                         className="ml-auto flex items-center gap-1 hover:text-primary dark:hover:text-white transition">
                         <ExternalLink size={11} /> Ver post
                       </a>
@@ -257,6 +322,75 @@ export default function RadarInstagram() {
           </div>
         )}
       </div>
+
+      {/* Ficha de la publicación */}
+      {ficha && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 grid place-items-center p-4 overflow-auto"
+          onClick={() => setFicha(null)}>
+          <div className="card w-full max-w-3xl shadow-lift animate-scale-in my-6 overflow-hidden"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between p-4 pb-3 border-b border-border dark:border-[#2A2A2A]">
+              <div className="flex items-center gap-2 min-w-0">
+                {ficha.autor_foto
+                  ? <img src={ficha.autor_foto} alt="" className="w-9 h-9 rounded-full object-cover" onError={e => { e.currentTarget.style.display = 'none' }} />
+                  : <span className="w-9 h-9 rounded-full grid place-items-center" style={{ background: `${ORO}22`, color: ORO }}><Instagram size={15} /></span>}
+                <div className="min-w-0">
+                  <p className="font-semibold text-[14px] truncate">@{ficha.autor_username}</p>
+                  <p className="text-[11px] text-muted truncate">{ficha.autor_nombre || '—'}</p>
+                </div>
+              </div>
+              <button onClick={() => setFicha(null)} className="btn-ghost p-2 shrink-0"><X size={16} /></button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-0">
+              {ficha.imagen_url && (
+                <div className="bg-neutral-100 dark:bg-[#141414] aspect-square">
+                  <img src={ficha.imagen_url} alt="" className="w-full h-full object-cover"
+                    onError={e => { e.currentTarget.style.display = 'none' }} />
+                </div>
+              )}
+              <div className="p-4 flex flex-col gap-3 min-w-0">
+                <div className="flex flex-wrap gap-1.5">
+                  {ficha.operacion && <span className="chip-success capitalize">{ficha.operacion}</span>}
+                  {ficha.precio_texto && <span className="chip-dark">{ficha.precio_texto}</span>}
+                  {ficha.tipo && <span className="chip-muted capitalize">{ficha.tipo}</span>}
+                </div>
+
+                <div className="text-[12px] text-muted flex flex-wrap gap-x-4 gap-y-1">
+                  <span className="flex items-center gap-1"><Heart size={11} /> {ficha.likes}</span>
+                  <span className="flex items-center gap-1"><MessageCircle size={11} /> {ficha.comentarios}</span>
+                  <span>Publicado: {fechaCorta(ficha.fecha_post) || '—'}</span>
+                </div>
+
+                <div className="min-w-0">
+                  <p className="label mb-1">Texto de la publicación</p>
+                  <p className="text-[12.5px] whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
+                    {ficha.caption || '— sin texto —'}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="label">Notas del equipo</label>
+                  <textarea rows={4} className="input resize-none"
+                    placeholder="Ej: llamé al vendedor, pide USD 120k, coordinar visita…"
+                    value={notasEdit} onChange={e => setNotasEdit(e.target.value)} />
+                </div>
+
+                <div className="flex gap-2 mt-auto">
+                  {ficha.url && (
+                    <a href={ficha.url} target="_blank" rel="noopener noreferrer" className="btn-secondary flex-1 text-center">
+                      <ExternalLink size={14} /> Ver en Instagram
+                    </a>
+                  )}
+                  <button className="btn-primary flex-1" onClick={guardarNotas} disabled={guardando}>
+                    {guardando ? 'Guardando…' : 'Guardar notas'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-2xl shadow-lift animate-fade-in text-[13px] text-white max-w-md

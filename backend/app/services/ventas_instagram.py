@@ -210,21 +210,48 @@ def _upsert_publicaciones(db, cuenta: mv.IgCuenta, posts: list[dict]) -> int:
     return nuevas
 
 
-def correr_scrape(db, cuentas: Iterable[mv.IgCuenta], limite: int | None = None) -> dict:
-    """Scrapea cada cuenta y hace upsert de sus posts. Actualiza el estado de
-    la cuenta. NO hace commit — lo decide el caller. Devuelve un resumen."""
+def filtrar_posts(posts: list[dict], operacion: str | None = None,
+                  q: str | None = None) -> list[dict]:
+    """Filtra los posts traídos ANTES de guardarlos.
+
+    - operacion: 'venta' | 'alquiler' → deja solo los que matchean (los posts
+      que mencionan ambas cosas cuentan para las dos).
+    - q: palabra clave → el caption la tiene que contener (case-insensitive).
+    """
+    out = posts
+    if operacion:
+        op = operacion.strip().lower()
+        if op in ("venta", "alquiler"):
+            out = [p for p in out if (p.get("operacion") or "") in (op, "venta/alquiler")]
+    if q and q.strip():
+        needle = q.strip().lower()
+        out = [p for p in out if needle in (p.get("caption") or "").lower()]
+    return out
+
+
+def correr_scrape(db, cuentas: Iterable[mv.IgCuenta], limite: int | None = None,
+                  operacion: str | None = None, q: str | None = None) -> dict:
+    """Scrapea cada cuenta y hace upsert de sus posts. Si se pasan `operacion`
+    o `q`, solo se guardan los posts que matchean (se descartan antes de tocar
+    la DB). Actualiza el estado de la cuenta. NO hace commit — lo decide el
+    caller. Devuelve un resumen."""
     total_nuevas = 0
+    total_descartados = 0
     detalle = []
     ahora = datetime.utcnow()
     for c in cuentas:
         try:
             posts = scrapear_cuenta(c.username, limite)
+            traidos = len(posts)
+            posts = filtrar_posts(posts, operacion, q)
+            total_descartados += traidos - len(posts)
             nuevas = _upsert_publicaciones(db, c, posts)
             c.ultima_corrida = ahora
             c.ultimo_estado = "ok"
             c.ultimo_nuevas = nuevas
             total_nuevas += nuevas
-            detalle.append({"cuenta": c.username, "posts": len(posts), "nuevas": nuevas})
+            detalle.append({"cuenta": c.username, "traidos": traidos,
+                            "tras_filtro": len(posts), "nuevas": nuevas})
         except Exception as e:
             msg = f"{type(e).__name__}: {str(e)[:180]}"
             c.ultima_corrida = ahora
@@ -235,6 +262,7 @@ def correr_scrape(db, cuentas: Iterable[mv.IgCuenta], limite: int | None = None)
     return {
         "cuentas": len(detalle),
         "nuevas": total_nuevas,
+        "descartados_por_filtro": total_descartados,
         "usando_mock": not bool(_token()),
         "detalle": detalle,
     }
