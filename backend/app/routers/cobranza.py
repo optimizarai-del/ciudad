@@ -331,9 +331,11 @@ def resumen_cobranza(mes: Optional[str] = None, db: Session = Depends(get_db), u
             .first()
         )
         if pago:
-            pagos_count += 1
             monto = pago.monto_total or 0
             if pago.estado == models.PagoEstado.pagado:
+                # "Contratos cobrados" cuenta SOLO los efectivamente pagados.
+                # Un pago parcial/pendiente/vencido no es un contrato cobrado.
+                pagos_count += 1
                 cobrado += monto
             elif pago.estado == models.PagoEstado.vencido:
                 vencido += monto
