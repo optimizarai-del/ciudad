@@ -18,6 +18,33 @@ export default function ProgresoContrato({ inicio, fin, estado, mode = 'compact'
   const ini = new Date(inicio), end = new Date(fin), now = new Date()
   if (isNaN(ini) || isNaN(end) || end <= ini) return null
 
+  // Contrato que todavía no arrancó: su fecha de inicio es futura. En vez de
+  // mostrar la barra de tiempo restante (que arrancaría llena), avisamos que
+  // está "por comenzar" y en cuántos días.
+  if (now < ini) {
+    const dias = Math.ceil((ini - now) / (1000 * 60 * 60 * 24))
+    const label = dias <= 1 ? 'Arranca mañana' : `Arranca en ${dias} días`
+    if (mode === 'compact') {
+      return (
+        <div className={`flex flex-col items-end gap-0.5 ${className}`} title={`Empieza el ${inicio}`}>
+          <span className="text-[9px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">Por comenzar</span>
+          <span className="text-[9px] text-blue-500/80 dark:text-blue-400/70">{label}</span>
+        </div>
+      )
+    }
+    return (
+      <div className={className}>
+        <div className="flex items-center justify-between text-[10px] mb-1">
+          <span className="text-muted">Por comenzar</span>
+          <span className="font-medium text-blue-600 dark:text-blue-400">{label}</span>
+        </div>
+        <div className="h-1.5 rounded-full overflow-hidden bg-blue-100 dark:bg-blue-900/30">
+          <div className="h-full bg-blue-500" style={{ width: '100%' }} />
+        </div>
+      </div>
+    )
+  }
+
   const total = end - ini
   const elapsed = Math.max(0, Math.min(total, now - ini))
   const pctElapsed = Math.round((elapsed / total) * 100)

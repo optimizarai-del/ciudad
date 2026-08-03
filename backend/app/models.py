@@ -299,6 +299,27 @@ class Contrato(Base):
     monto_inicial = Column(Float, default=0)
     deposito = Column(Float, default=0)
 
+    # Renovación: si este contrato surgió de renovar otro, apunta al anterior.
+    # Permite trazar la cadena de renovaciones (contrato viejo → nuevo).
+    # ON DELETE SET NULL: si se borra el contrato viejo, el nuevo no se rompe
+    # (queda sin antecedente). En Postgres fresco el FK se crea con esta regla;
+    # en la migración de DBs existentes la columna se agrega sin constraint.
+    renovado_de_id = Column(
+        Integer, ForeignKey("contratos.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+
+    @property
+    def vigencia(self) -> str:
+        """Etiqueta temporal (por_comenzar/en_curso/finalizado/sin_fechas) según
+        las fechas del contrato vs hoy. Es property para que pydantic la capture
+        con from_attributes=True. Defensiva: nunca rompe la response."""
+        try:
+            from app.services.contrato_vigencia import vigencia_actual
+            return vigencia_actual(self.fecha_inicio, self.fecha_fin)
+        except Exception:
+            return "en_curso"
+
     # Ajuste
     indice_ajuste = Column(SQLEnum(IndiceAjuste), default=IndiceAjuste.ipc)
     periodicidad_meses = Column(Integer, default=3)

@@ -225,6 +225,14 @@ def _sync_garantes(db: Session, contrato: models.Contrato,
 
 @router.post("/", response_model=schemas.ContratoOut)
 def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    return _crear_contrato(data, db, user)
+
+
+def _crear_contrato(data: schemas.ContratoCreate, db: Session, user,
+                    renovado_de_id: Optional[int] = None) -> models.Contrato:
+    """Núcleo de creación de contrato. Lo usan `crear` (POST /) y `renovar`
+    (POST /{id}/renovar). Si `renovado_de_id` viene, deja trazada la cadena de
+    renovación en el contrato nuevo."""
     # Mensajes de error claros para los validaciones más comunes en vez de
     # un 500 genérico que aparezca como toast rojo sin información.
     payload = data.model_dump()
@@ -288,6 +296,8 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
     try:
         obj = models.Contrato(**payload)
         obj.is_demo = is_demo
+        if renovado_de_id:
+            obj.renovado_de_id = renovado_de_id
         db.add(obj); db.flush()  # flush para tener obj.id antes de _sync
 
         # Sincronizar inquilinos en la tabla pivote (defensivo: si la tabla
@@ -377,6 +387,53 @@ def crear(data: schemas.ContratoCreate, db: Session = Depends(get_db), user=Depe
         db.rollback()
         print(f"[contratos.crear] {type(e).__name__}: {e}")
         raise HTTPException(400, f"No se pudo guardar el contrato: {type(e).__name__}: {str(e)[:300]}")
+
+
+@router.post("/{id}/renovar", response_model=schemas.ContratoOut)
+def renovar(id: int, data: schemas.ContratoCreate,
+            db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Renueva un contrato: crea uno NUEVO con los datos que manda el front (ya
+    editados por el operador — típicamente nuevas fechas y monto actualizado),
+    lo deja enlazado al anterior vía `renovado_de_id`, y anota la renovación en
+    el historial del contrato viejo.
+
+    El contrato anterior NO se marca vencido a mano: su vigencia la determina su
+    fecha de fin (misma lógica que usa la cobranza). Así, si la renovación
+    arranca después de que termina el viejo, no se pisan; el nuevo empieza a
+    figurar recién desde su fecha de inicio.
+    """
+    fuente = _scope(db, user).filter_by(id=id).first()
+    if not fuente:
+        raise HTTPException(404, "El contrato a renovar no existe.")
+
+    # Crear el nuevo contrato (misma validación/generación de pagos que crear).
+    nuevo = _crear_contrato(data, db, user, renovado_de_id=fuente.id)
+
+    # Anotar en el historial del contrato viejo que fue renovado. Best-effort:
+    # si falla, la renovación ya quedó creada igual.
+    try:
+        snap = historial.snapshot(fuente)
+        nota_prev = (fuente.notas or "").rstrip()
+        marca = f"Renovado en contrato {nuevo.codigo or nuevo.id}."
+        if marca not in nota_prev:
+            fuente.notas = (nota_prev + ("\n" if nota_prev else "") + marca)
+        db.flush()
+        historial.registrar(
+            db, user,
+            entidad="contratos",
+            entidad_id=fuente.id,
+            accion=models.AccionTipo.update,
+            descripcion=f"Renovó el contrato {fuente.codigo or fuente.id} → {nuevo.codigo or nuevo.id}",
+            antes=snap,
+            despues=historial.snapshot(fuente),
+        )
+        db.commit()
+        db.refresh(nuevo)
+    except Exception as e:
+        db.rollback()
+        print(f"[contratos.renovar] no se pudo anotar la renovación en el viejo: {type(e).__name__}: {e}")
+
+    return nuevo
 
 
 @router.get("/{id}", response_model=schemas.ContratoOut)

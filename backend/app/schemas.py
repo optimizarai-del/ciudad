@@ -193,6 +193,11 @@ class ContratoOut(ContratoBase):
     archivo_subido_at: Optional[datetime] = None
     archivado: Optional[bool] = False
     fecha_archivado: Optional[datetime] = None
+    # Etiqueta temporal derivada de las fechas: por_comenzar / en_curso /
+    # finalizado / sin_fechas. La calcula el modelo (property).
+    vigencia: Optional[str] = None
+    # Si es una renovación, id del contrato anterior del que surgió.
+    renovado_de_id: Optional[int] = None
     # Lista completa de firmantes — siempre presente en respuestas.
     # Cada item: {id, cliente_id, nombre, apellido, documento, email,
     #             es_principal, rol}

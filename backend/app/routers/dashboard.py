@@ -47,6 +47,10 @@ def stats(mes: Optional[str] = None, db: Session = Depends(get_db), user=Depends
     propiedades_disponibles = qp.filter_by(estado=models.PropiedadEstado.disponible).count()
 
     contratos = _ws(db.query(models.Contrato), models.Contrato, user).filter_by(estado=models.ContratoEstado.vigente).all()
+    # Solo los contratos efectivamente vigentes en el mes pedido: los de inicio
+    # futuro todavía no cuentan y los ya finalizados dejan de contar.
+    from app.services.contrato_vigencia import activo_en_mes
+    contratos = [c for c in contratos if activo_en_mes(c.fecha_inicio, c.fecha_fin, mes)]
     contratos_activos = len(contratos)
 
     cobrado_mes = pendiente_cobro = vencido_mes = 0.0

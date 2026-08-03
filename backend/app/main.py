@@ -537,6 +537,33 @@ def _migrar_contrato_archivado():
 
 
 @app.on_event("startup")
+def _migrar_contrato_renovacion():
+    """Agrega columna `renovado_de_id` a contratos (cadena de renovaciones).
+    Idempotente. Se agrega como INTEGER simple (sin constraint FK en el ALTER,
+    igual que el resto de las columnas agregadas post-hoc)."""
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+    db = SessionLocal()
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns("contratos", schema=schema)}
+        if "renovado_de_id" not in cols:
+            db.execute(text(f"ALTER TABLE {qual}contratos ADD COLUMN renovado_de_id INTEGER"))
+            db.execute(text(
+                f"CREATE INDEX IF NOT EXISTS ix_contratos_renovado_de_id "
+                f"ON {qual}contratos(renovado_de_id)"
+            ))
+            db.commit()
+            print("[migrar] contratos.renovado_de_id agregada")
+    except Exception as e:
+        db.rollback()
+        print(f"[migrar] contratos.renovado_de_id: {e}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _migrar_detalle_conceptos():
     """Agrega columna `detalle_conceptos` (TEXT/JSON) a `pagos`. Idempotente."""
     from sqlalchemy import text, inspect

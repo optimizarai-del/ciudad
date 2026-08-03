@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, DollarSign, FileType2, Upload, FileCheck2, Sparkles, Eye, Archive, ArchiveRestore } from 'lucide-react'
+import { Plus, FileText, Pencil, Trash2, X, Calendar, TrendingUp, Download, DollarSign, FileType2, Upload, FileCheck2, Sparkles, Eye, Archive, ArchiveRestore, RotateCw } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import HistorialPagos from '../components/HistorialPagos'
 import SearchBar, { match } from '../components/SearchBar'
@@ -104,6 +104,7 @@ export default function Contratos() {
   const [busqueda, setBusqueda] = useState('')
   const [open, setOpen]         = useState(false)
   const [editing, setEditing]   = useState(null)
+  const [renovando, setRenovando] = useState(null)  // contrato fuente al renovar
   const [historialContrato, setHistorialContrato] = useState(null)
   const [importOpen, setImportOpen] = useState(false)
   const [incluirArchivados, setIncluirArchivados] = useState(false)
@@ -217,6 +218,47 @@ export default function Contratos() {
     }
   }
 
+  // Renovar: abre el modal precargado con los datos del contrato, sugiriendo
+  // el próximo período (arranca el día después del fin actual, misma duración)
+  // y dejando todo editable. Al guardar crea un contrato nuevo enlazado.
+  const fmtISO = (d) => {
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+  // Meses enteros entre dos fechas ISO (aprox, para replicar la duración).
+  const mesesEntre = (isoA, isoB) => {
+    const a = new Date(`${isoA}T00:00:00`), b = new Date(`${isoB}T00:00:00`)
+    return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth())
+  }
+  const renovar = (c) => {
+    const base = { ...c }
+    delete base.id  // sin id → no es un PATCH; se crea vía /renovar
+    // Sugerir el próximo período. Aritmética por componentes (no milisegundos)
+    // para no arrastrar corrimientos de zona horaria.
+    if (c.fecha_fin) {
+      const fin = new Date(`${c.fecha_fin}T00:00:00`)
+      const nuevoInicio = new Date(fin); nuevoInicio.setDate(nuevoInicio.getDate() + 1)
+      const meses = (c.fecha_inicio ? mesesEntre(c.fecha_inicio, c.fecha_fin) : 0) || 12
+      const nuevoFin = new Date(nuevoInicio); nuevoFin.setMonth(nuevoFin.getMonth() + meses)
+      base.fecha_inicio = fmtISO(nuevoInicio)
+      base.fecha_fin = fmtISO(nuevoFin)
+    } else {
+      // Contrato sin fecha de fin: no podemos derivar el próximo período, así
+      // que arrancamos hoy por 12 meses y dejamos que el operador lo ajuste.
+      const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+      const fin = new Date(hoy); fin.setFullYear(fin.getFullYear() + 1)
+      base.fecha_inicio = fmtISO(hoy)
+      base.fecha_fin = fmtISO(fin)
+    }
+    base.estado = 'vigente'
+    base.codigo = ''  // autogenerar código nuevo
+    setRenovando(c)
+    setEditing(base)
+    setOpen(true)
+  }
+
+  const cerrarModal = () => { setOpen(false); setRenovando(null); setEditing(null) }
+
   return (
     <Layout>
       <div className="max-w-6xl mx-auto animate-fade-in">
@@ -232,7 +274,7 @@ export default function Contratos() {
                 title="Importar contrato desde PDF — la IA crea propietario, inquilino, propiedad y contrato">
                 <Sparkles size={14} /> Importar PDF
               </button>
-              <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
+              <button className="btn-primary" onClick={() => { setRenovando(null); setEditing(null); setOpen(true) }}>
                 <Plus size={14} /> Nuevo contrato
               </button>
             </div>
@@ -267,7 +309,7 @@ export default function Contratos() {
           <div className="card text-center py-24">
             <FileText size={40} className="mx-auto text-[#C8C8C8] dark:text-[#3A3A3A] mb-4" />
             <p className="text-[#737373] dark:text-[#9A9A9A] text-[15px] mb-4">No hay contratos en esta categoría.</p>
-            <button className="btn-primary" onClick={() => { setEditing(null); setOpen(true) }}>
+            <button className="btn-primary" onClick={() => { setRenovando(null); setEditing(null); setOpen(true) }}>
               <Plus size={14} /> Crear contrato
             </button>
           </div>
@@ -293,6 +335,12 @@ export default function Contratos() {
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <div className="flex items-center gap-1.5">
                       {c.archivado && <span className="chip-muted">archivado</span>}
+                      {c.estado === 'vigente' && c.vigencia === 'por_comenzar' && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">Por comenzar</span>
+                      )}
+                      {c.estado === 'vigente' && c.vigencia === 'finalizado' && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#F5F5F5] text-[#737373] dark:bg-[#2A2A2A] dark:text-[#9A9A9A]">Finalizado</span>
+                      )}
                       <span className={ESTADO_CHIP[c.estado] || 'chip-muted'}>{c.estado}</span>
                     </div>
                     <ProgresoContrato inicio={c.fecha_inicio} fin={c.fecha_fin} estado={c.estado} />
@@ -333,8 +381,12 @@ export default function Contratos() {
                     <Eye size={12} />
                   </button>
                   <button className="btn-ghost py-2 px-3 text-[12px]" title="Editar"
-                    onClick={() => { setEditing(c); setOpen(true) }}>
+                    onClick={() => { setRenovando(null); setEditing(c); setOpen(true) }}>
                     <Pencil size={12} />
+                  </button>
+                  <button className="btn-ghost py-2 px-3 text-[12px]" title="Renovar contrato"
+                    onClick={() => renovar(c)}>
+                    <RotateCw size={12} />
                   </button>
                   <button className="btn-ghost py-2 px-3 text-[12px]" title="Descargar PDF legal"
                     onClick={() => descargarPDF(c)}>
@@ -368,10 +420,11 @@ export default function Contratos() {
       {open && (
         <Modal
           initial={editing}
+          renovarDeId={renovando?.id || null}
           propiedades={propiedades}
           clientes={clientes}
-          onClose={() => setOpen(false)}
-          onSaved={() => { setOpen(false); load() }}
+          onClose={cerrarModal}
+          onSaved={() => { cerrarModal(); load() }}
         />
       )}
 
@@ -414,7 +467,7 @@ function FilterPill({ active, onClick, label }) {
   )
 }
 
-function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
+function Modal({ initial, renovarDeId = null, propiedades, clientes, onClose, onSaved }) {
   // Cuando se edita un contrato existente, normalizar inquilinos_ids desde
   // initial.inquilinos_lista (formato del backend) o desde el legacy inquilino_id.
   const _normalizeInitial = (i) => {
@@ -521,6 +574,9 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
     delete payload.inquilinos_ids
     delete payload.inquilinos_lista  // solo lectura
     delete payload.garantes_lista    // solo lectura
+    delete payload.vigencia          // derivado (solo lectura)
+    delete payload.renovado_de_id    // lo setea el backend al renovar
+    delete payload.id                // por si viene de un objeto copiado (renovar)
 
     // Garantes: mandar la lista tal cual (sin filas vacías). Una lista vacía
     // en un PATCH borra todos los garantes del contrato.
@@ -541,7 +597,8 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
 
     try {
       let saved
-      if (initial) saved = (await api.patch(`/api/contratos/${initial.id}`, payload)).data
+      if (renovarDeId) saved = (await api.post(`/api/contratos/${renovarDeId}/renovar`, payload)).data
+      else if (initial?.id) saved = (await api.patch(`/api/contratos/${initial.id}`, payload)).data
       else saved = (await api.post('/api/contratos', payload)).data
 
       // Descripción del inmueble: si cambió respecto a la propiedad, PATCH a
@@ -586,9 +643,16 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
       <div className="card p-8 w-full max-w-xl shadow-lift animate-scale-in my-6"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="hero-title text-xl sm:text-2xl">{initial ? 'Editar contrato' : 'Nuevo contrato'}</h2>
+          <h2 className="hero-title text-xl sm:text-2xl">{renovarDeId ? 'Renovar contrato' : (initial?.id ? 'Editar contrato' : 'Nuevo contrato')}</h2>
           <button onClick={onClose} className="btn-ghost p-2"><X size={16} /></button>
         </div>
+
+        {renovarDeId && (
+          <div className="mb-5 text-[13px] text-[#737373] dark:text-[#9A9A9A] bg-[#F5F5F5] dark:bg-[#1A1A1A] border border-[#E5E5E5] dark:border-[#2A2A2A] rounded-xl px-4 py-3">
+            Se creará un <b>contrato nuevo</b> a partir de este, con los datos que ajustes acá.
+            Revisá las fechas y el monto. El contrato original queda enlazado como antecedente.
+          </div>
+        )}
 
         <form onSubmit={submit} className="space-y-4">
           <div>
@@ -727,7 +791,7 @@ function Modal({ initial, propiedades, clientes, onClose, onSaved }) {
           <div className="flex gap-3 pt-1">
             <button type="button" className="btn-secondary flex-1" onClick={onClose}>Cancelar</button>
             <button className="btn-primary flex-1" disabled={loading}>
-              {loading ? 'Guardando…' : initial ? 'Guardar' : 'Crear contrato'}
+              {loading ? (renovarDeId ? 'Renovando…' : 'Guardando…') : renovarDeId ? 'Renovar contrato' : initial?.id ? 'Guardar' : 'Crear contrato'}
             </button>
           </div>
         </form>

@@ -126,6 +126,12 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
         .all()
     )
 
+    # Un contrato solo figura en el mes pedido si su rango [inicio, fin] lo
+    # incluye. Así un contrato con inicio futuro no aparece hasta que arranca,
+    # y uno ya finalizado deja de aparecer pasada su fecha de fin.
+    from app.services.contrato_vigencia import activo_en_mes
+    contratos = [c for c in contratos if activo_en_mes(c.fecha_inicio, c.fecha_fin, mes)]
+
     if not contratos:
         return []
 
@@ -319,6 +325,11 @@ def resumen_cobranza(mes: Optional[str] = None, db: Session = Depends(get_db), u
     contratos = apply_workspace_filter(db.query(models.Contrato), models.Contrato, user).filter(
         models.Contrato.estado == models.ContratoEstado.vigente
     ).all()
+
+    # Solo los contratos vigentes DURANTE este mes (un contrato con inicio
+    # futuro o ya finalizado no cuenta para el resumen del período).
+    from app.services.contrato_vigencia import activo_en_mes
+    contratos = [c for c in contratos if activo_en_mes(c.fecha_inicio, c.fecha_fin, mes)]
 
     cobrado = pendiente = vencido = 0.0
     pagos_count = 0
