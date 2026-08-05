@@ -4,6 +4,7 @@ Cachea las consultas en memoria para evitar pegarle a INDEC/BCRA en cada cálcul
 """
 import time
 from datetime import date, timedelta
+from dateutil.relativedelta import relativedelta
 import httpx
 
 # Cache simple en memoria (se invalida cada 30 minutos).
@@ -195,13 +196,18 @@ def _valor_icl_en(pares: list, objetivo: date):
 def factor_acumulado(indice: str, desde: date, hasta: date):
     """Factor de ajuste REAL entre dos fechas: nivel(hasta) / nivel(desde).
 
-    - ICL: razón del índice diario del BCRA (método legal del ajuste).
-    - IPC: razón del nivel mensual del INDEC (mes de `hasta` / mes de `desde`).
+    - ICL: razón del índice diario del BCRA (método legal del ajuste), usando
+      las fechas reales del contrato.
+    - IPC: razón del nivel mensual del INDEC tomando los N meses YA PUBLICADOS
+      anteriores a la fecha de ajuste. Ej.: un ajuste que rige en agosto usa la
+      inflación de mayo+junio+julio (no la de agosto, que INDEC publica ~1 mes
+      después). En la práctica eso es correr ambos extremos un mes hacia atrás:
+      nivel(mes_hasta − 1) / nivel(mes_desde − 1).
 
     Devuelve (factor, fuente) con factor > 0, o (None, motivo) si todavía no
-    hay dato publicado para ese período (ej. IPC del mes en curso). En ese caso
-    el ajuste NO se crea — se reintenta cuando el organismo publique el dato.
-    NUNCA usa valores de fallback: si no hay dato real, no ajusta.
+    hay dato publicado para ese período. En ese caso el ajuste NO se crea — se
+    reintenta cuando el organismo publique el dato. NUNCA usa valores de
+    fallback: si no hay dato real, no ajusta.
     """
     indice = (indice or "").lower()
     if desde is None or hasta is None or hasta <= desde:
@@ -211,11 +217,17 @@ def factor_acumulado(indice: str, desde: date, hasta: date):
         serie = _serie_ipc_sync()
         if not serie:
             return None, "sin_datos_ipc"
-        k_desde, k_hasta = desde.strftime("%Y-%m"), hasta.strftime("%Y-%m")
+        # Corremos ambos extremos un mes atrás para usar los meses de índice ya
+        # publicados a la fecha del ajuste (mayo+junio+julio para un ajuste de
+        # agosto), en vez de exigir el índice del propio mes del ajuste.
+        d_ref = desde - relativedelta(months=1)
+        h_ref = hasta - relativedelta(months=1)
+        k_desde, k_hasta = d_ref.strftime("%Y-%m"), h_ref.strftime("%Y-%m")
         nivel_desde = serie.get(k_desde)
         nivel_hasta = serie.get(k_hasta)
-        # El mes del ajuste puede no estar publicado aún (INDEC tiene ~1 mes de
-        # rezago). En ese caso NO ajustamos todavía: reintenta el mes que viene.
+        # El último mes de la ventana puede no estar publicado aún (INDEC tiene
+        # ~1 mes de rezago). En ese caso NO ajustamos todavía: reintenta cuando
+        # el organismo publique el dato.
         if nivel_desde is None or nivel_hasta is None or nivel_desde <= 0:
             return None, "ipc_no_publicado"
         return round(nivel_hasta / nivel_desde, 8), "INDEC"
