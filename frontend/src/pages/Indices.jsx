@@ -109,7 +109,7 @@ export default function Indices() {
             <div className="mt-8 p-4 rounded-2xl border border-[#E5E5E5] dark:border-[#2A2A2A] bg-[#FAFAFA] dark:bg-[#141414]">
               <p className="text-[11px] text-[#737373] dark:text-[#7A7A7A] leading-relaxed">
                 <strong className="text-[#0A0A0A] dark:text-[#E0E0E0]">Fuentes:</strong>{' '}
-                IPC — INDEC (Series de Tiempo) · ICL y UVA — BCRA API v2.0 · Tipo de cambio — DolarAPI.
+                IPC — INDEC (Series de Tiempo) · ICL y UVA — BCRA API v4.0 · Tipo de cambio — DolarAPI.
                 Los datos se actualizan en tiempo real al cargar la página o al presionar "Actualizar".
               </p>
             </div>
