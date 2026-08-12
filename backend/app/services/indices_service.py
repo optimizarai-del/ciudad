@@ -198,11 +198,13 @@ def factor_acumulado(indice: str, desde: date, hasta: date):
 
     - ICL: razón del índice diario del BCRA (método legal del ajuste), usando
       las fechas reales del contrato.
-    - IPC: razón del nivel mensual del INDEC tomando los N meses YA PUBLICADOS
-      anteriores a la fecha de ajuste. Ej.: un ajuste que rige en agosto usa la
-      inflación de mayo+junio+julio (no la de agosto, que INDEC publica ~1 mes
-      después). En la práctica eso es correr ambos extremos un mes hacia atrás:
-      nivel(mes_hasta − 1) / nivel(mes_desde − 1).
+    - IPC: razón del nivel mensual del INDEC tomando los DATOS YA PUBLICADOS a
+      la fecha del ajuste. INDEC publica cada IPC ~1 mes después del mes que
+      mide (el IPC de junio sale ~13 de julio). Entonces un ajuste que rige en
+      agosto usa los datos que SALIERON en mayo, junio y julio — que son los
+      IPC de abril, mayo y junio → nivel(junio)/nivel(marzo). Así el ajuste
+      aparece a tiempo (a inicio del mes) sin esperar dato del propio mes.
+      En la práctica: correr ambos extremos DOS meses hacia atrás.
 
     Devuelve (factor, fuente) con factor > 0, o (None, motivo) si todavía no
     hay dato publicado para ese período. En ese caso el ajuste NO se crea — se
@@ -217,11 +219,12 @@ def factor_acumulado(indice: str, desde: date, hasta: date):
         serie = _serie_ipc_sync()
         if not serie:
             return None, "sin_datos_ipc"
-        # Corremos ambos extremos un mes atrás para usar los meses de índice ya
-        # publicados a la fecha del ajuste (mayo+junio+julio para un ajuste de
-        # agosto), en vez de exigir el índice del propio mes del ajuste.
-        d_ref = desde - relativedelta(months=1)
-        h_ref = hasta - relativedelta(months=1)
+        # Corremos ambos extremos DOS meses atrás para usar los IPC que YA
+        # están publicados a la fecha del ajuste. Ajuste de agosto → usa los
+        # datos salidos en mayo/junio/julio, que son los IPC de abril/mayo/junio
+        # = nivel(junio)/nivel(marzo). (INDEC publica con ~1 mes de rezago.)
+        d_ref = desde - relativedelta(months=2)
+        h_ref = hasta - relativedelta(months=2)
         k_desde, k_hasta = d_ref.strftime("%Y-%m"), h_ref.strftime("%Y-%m")
         nivel_desde = serie.get(k_desde)
         nivel_hasta = serie.get(k_hasta)
