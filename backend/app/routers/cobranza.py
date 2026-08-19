@@ -12,6 +12,7 @@ Cobranza:
 """
 import base64
 import logging
+import os
 from datetime import date, datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -440,9 +441,13 @@ def _crear_comprobante(db: Session, pago: models.Pago, tipo: models.ComprobanteT
     db.add(comp)
     db.flush()  # obtener id antes del envío
 
-    if enviar_mail and email and smtp_configurado():
+    # Copia oculta a la oficina: cada comprobante también llega a estos correos
+    # (uno o varios, separados por coma). Configurable sin tocar código.
+    copia = os.getenv("COMPROBANTES_COPIA", "").strip()
+    if enviar_mail and smtp_configurado() and (email or copia):
         ok, msg = enviar_email(
-            email, asunto, cuerpo, pdf_bytes, f"comprobante-{tipo.value}-{comp.id}.pdf"
+            email or "", asunto, cuerpo, pdf_bytes,
+            f"comprobante-{tipo.value}-{comp.id}.pdf", copia=copia,
         )
         comp.enviado_email = ok
         comp.fecha_envio = datetime.utcnow() if ok else None
