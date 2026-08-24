@@ -1,0 +1,50 @@
+name: Ajustes diarios de alquiler (respaldo)
+
+# Respaldo externo del motor de ajustes. El servidor ya corre el loop interno
+# cada 24 h; esto es un cinturón + tiradores: aunque el proceso se hubiera
+# caído, este cron le pega una vez por día al endpoint de disparo para
+# garantizar que los índices se refresquen y los ajustes se apliquen.
+#
+# Requiere dos secrets en el repo (Settings → Secrets and variables → Actions):
+#   AJUSTES_ENDPOINT  → URL del backend, ej. https://ciudad.optimizar-ia.com
+#                       (sin barra final; se le agrega /api/ajustes/correr)
+#   AJUSTES_CRON_TOKEN → el mismo valor que la env var AJUSTES_CRON_TOKEN del
+#                        servidor en Easypanel.
+
+on:
+  schedule:
+    - cron: "0 12 * * *"   # 12:00 UTC = 09:00 Argentina, todos los días
+  workflow_dispatch: {}     # permite dispararlo a mano desde la pestaña Actions
+
+jobs:
+  correr-ajustes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disparar corrida de ajustes
+        env:
+          ENDPOINT: ${{ secrets.AJUSTES_ENDPOINT }}
+          TOKEN: ${{ secrets.AJUSTES_CRON_TOKEN }}
+        run: |
+          if [ -z "$ENDPOINT" ] || [ -z "$TOKEN" ]; then
+            echo "::error::Faltan los secrets AJUSTES_ENDPOINT y/o AJUSTES_CRON_TOKEN."
+            exit 1
+          fi
+          URL="${ENDPOINT%/}/api/ajustes/correr"
+          echo "POST $URL"
+          # Hasta 3 intentos con backoff por si el server está reiniciando.
+          for i in 1 2 3; do
+            code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
+              -X POST "$URL" \
+              -H "X-Cron-Token: $TOKEN" \
+              --max-time 120 || echo "000")
+            echo "Intento $i → HTTP $code"
+            cat /tmp/resp.json 2>/dev/null || true
+            echo ""
+            if [ "$code" = "200" ]; then
+              echo "Corrida disparada OK."
+              exit 0
+            fi
+            sleep $((i * 15))
+          done
+          echo "::error::No se pudo disparar la corrida tras 3 intentos."
+          exit 1

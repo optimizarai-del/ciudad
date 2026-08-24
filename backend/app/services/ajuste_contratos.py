@@ -246,6 +246,29 @@ def aplicar_ajustes_pendientes_bulk(
 #  —sin depender de que alguien abra Cobranza—. Idempotente: no duplica ajustes.
 # ════════════════════════════════════════════════════════════════════════════
 
+# Latido en memoria: registra la última corrida del motor para poder verificar
+# desde afuera que está vivo (endpoint /api/ajustes/estado). Se resetea al
+# reiniciar el proceso, pero el loop corre apenas arranca, así que se repuebla
+# en segundos. El histórico real de ajustes vive en la tabla ajustes_contrato.
+_HEARTBEAT: dict = {
+    "ultima_corrida": None,   # ISO datetime UTC de la última vez que corrió
+    "ok": None,               # True si la última corrida no tuvo error
+    "resumen": None,          # dict con el detalle de la última corrida
+}
+
+
+def estado_actualizacion() -> dict:
+    """Devuelve una copia del latido de la última corrida del motor."""
+    return dict(_HEARTBEAT)
+
+
+def _registrar_corrida(resumen: dict) -> None:
+    from datetime import datetime as _dt, timezone as _tz
+    _HEARTBEAT["ultima_corrida"] = _dt.now(_tz.utc).isoformat()
+    _HEARTBEAT["ok"] = "error" not in (resumen or {})
+    _HEARTBEAT["resumen"] = resumen
+
+
 def correr_actualizacion_diaria() -> dict:
     """Refresca los índices y aplica ajustes pendientes a todos los contratos
     vigentes. Crea y cierra su propia sesión. Devuelve un resumen."""
@@ -272,6 +295,7 @@ def correr_actualizacion_diaria() -> dict:
             "fecha": _date.today().isoformat(),
         }
         print(f"[ajustes-diarios] {resumen}")
+        _registrar_corrida(resumen)
         return resumen
     except Exception as e:
         try:
@@ -279,8 +303,10 @@ def correr_actualizacion_diaria() -> dict:
         except Exception:
             pass
         print(f"[ajustes-diarios] error aplicando ajustes: {e}")
-        return {"indices": estado_idx, "error": str(e),
-                "fecha": _date.today().isoformat()}
+        resumen = {"indices": estado_idx, "error": str(e),
+                   "fecha": _date.today().isoformat()}
+        _registrar_corrida(resumen)
+        return resumen
     finally:
         db.close()
 
