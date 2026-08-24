@@ -622,7 +622,10 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
               <p className="font-semibold">
                 Alquiler actualizado por {String(item.ultimo_ajuste.indice_usado || '').toUpperCase()}
                 {item.ultimo_ajuste.fecha && (
-                  <> el {new Date(item.ultimo_ajuste.fecha).toLocaleDateString('es-AR')}</>
+                  // Parseamos como fecha local (T00:00:00) para que no reste un
+                  // día en zonas UTC-negativas (Argentina): un ajuste del 1/9
+                  // no debe mostrarse como 31/8.
+                  <> el {new Date(String(item.ultimo_ajuste.fecha).slice(0, 10) + 'T00:00:00').toLocaleDateString('es-AR')}</>
                 )}
               </p>
               <p className="text-blue-700/80 dark:text-blue-300/80 mt-0.5">

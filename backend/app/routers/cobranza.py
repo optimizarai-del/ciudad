@@ -61,12 +61,27 @@ def _count_ajustes_safe(c: models.Contrato) -> int:
         return 0
 
 
-def _last_ajuste_info(c: models.Contrato) -> dict | None:
-    """Devuelve los datos del último ajuste registrado, o None si no hay.
-    Defensivo: si la tabla ajustes_contrato aún no existe en este deploy,
+def _last_ajuste_info(c: models.Contrato, mes: str | None = None) -> dict | None:
+    """Devuelve el último ajuste que RIGE en el mes que se está cobrando
+    (fecha del ajuste <= fin del mes `mes`), o None si no hay. Así el cartel
+    "Alquiler actualizado por…" siempre coincide con el monto del período que
+    se muestra (no con un ajuste futuro). Defensivo: si la tabla no existe,
     devuelve None sin romper la response."""
     try:
         ajustes = list(c.ajustes or [])
+        if not ajustes:
+            return None
+        # Limitar a los ajustes cuya fecha cae dentro o antes del mes cobrado.
+        if mes:
+            try:
+                _y, _m = str(mes).split("-")[:2]
+                objetivo = (int(_y), int(_m))
+                ajustes = [
+                    a for a in ajustes
+                    if a.fecha and (a.fecha.year, a.fecha.month) <= objetivo
+                ]
+            except Exception:
+                pass
         if not ajustes:
             return None
         ultimo = max(ajustes, key=lambda a: (a.fecha or None, a.id))
@@ -140,10 +155,21 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
     # Cada vez que se carga el mes de cobranza, revisamos si algún contrato
     # tiene ajustes pendientes según su índice (IPC/ICL/fijo) y periodicidad,
     # y los aplicamos antes de armar el listado. Así el monto sugerido del
-    # alquiler siempre refleja el valor ajustado al período actual.
+    # alquiler siempre refleja el valor ajustado al período que se cobra.
+    #
+    # Importante: aplicamos los ajustes que rigen HASTA EL FIN DEL MES QUE SE
+    # ESTÁ COBRANDO (no solo hasta hoy). Si se cobra septiembre por adelantado
+    # y ese mes tiene ajuste, el alquiler ya viene ajustado. Solo se crean los
+    # ajustes cuyo índice ya está publicado (si falta el dato, no se crea).
     try:
         from app.services.ajuste_contratos import aplicar_ajustes_pendientes_bulk
-        creados = aplicar_ajustes_pendientes_bulk(db, contratos)
+        from app.services.contrato_vigencia import _mes_bounds
+        try:
+            _, fin_mes = _mes_bounds(mes)
+        except Exception:
+            fin_mes = date.today()
+        hoy_efectivo = max(date.today(), fin_mes)
+        creados = aplicar_ajustes_pendientes_bulk(db, contratos, hoy=hoy_efectivo)
         if creados:
             db.commit()
     except Exception as e:
@@ -273,7 +299,7 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
             "monto_alquiler_base":      float(c.monto_inicial or 0),
             "indice_ajuste":            _indice_str_safe(c),
             "ajustes_aplicados":        _count_ajustes_safe(c),
-            "ultimo_ajuste":            _last_ajuste_info(c),
+            "ultimo_ajuste":            _last_ajuste_info(c, mes),
             "monto_expensas_sug":       round(expensas_sug, 2),
             "monto_tasas_sug":          round(tasas_sug, 2),
             "conceptos_pendientes":     conceptos_pendientes,
