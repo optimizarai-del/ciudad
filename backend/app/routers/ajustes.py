@@ -29,8 +29,9 @@ from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.security import SECRET_KEY, ALGORITHM
+from app.security import SECRET_KEY, ALGORITHM, get_current_user
 from app.services import ajuste_contratos
+from app.services.workspace import apply_workspace_filter
 
 router = APIRouter(prefix="/api/ajustes", tags=["ajustes"])
 
@@ -128,18 +129,23 @@ def correr(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/recalcular")
-def recalcular(request: Request, dry_run: bool = True, db: Session = Depends(get_db)):
+def recalcular(dry_run: bool = True, db: Session = Depends(get_db),
+               user=Depends(get_current_user)):
     """Recalcula los ajustes YA EXISTENTES con la fórmula actual (corrige los
     que se guardaron con una versión anterior del cálculo). SOLO ADMIN.
+
+    Respeta el WORKSPACE del usuario: un admin real solo recalcula contratos
+    reales (is_demo=false); nunca toca datos del sandbox demo (y viceversa).
 
     - `dry_run=true` (default): NO toca nada, solo devuelve qué cambiaría.
     - `dry_run=false`: aplica los cambios (corrige la tabla de ajustes). No
       toca los pagos ya cobrados: esos conservan su monto histórico.
     """
     from app import models
-    if not _es_admin_por_jwt(request, db):
-        raise HTTPException(401, "Solo un admin puede recalcular ajustes")
-    contratos = (db.query(models.Contrato)
+    role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    if role not in ("admin", "admin_demo"):
+        raise HTTPException(403, "Solo un admin puede recalcular ajustes")
+    contratos = (apply_workspace_filter(db.query(models.Contrato), models.Contrato, user)
                  .filter(models.Contrato.estado == "vigente").all())
     cambios = ajuste_contratos.recalcular_ajustes(db, contratos, dry_run=dry_run)
     if not dry_run and cambios:
