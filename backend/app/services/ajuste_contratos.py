@@ -385,13 +385,29 @@ def correr_actualizacion_diaria() -> dict:
     try:
         contratos = (db.query(models.Contrato)
                      .filter(models.Contrato.estado == "vigente").all())
+        # 1) Crear los ajustes que falten (períodos ya cumplidos con índice
+        #    publicado que todavía no tienen su fila de ajuste).
         creados = aplicar_ajustes_pendientes_bulk(db, contratos)
-        if creados:
+        # 2) AUTO-SANADO: recalcular los ajustes YA EXISTENTES con la fórmula
+        #    actual. El motor es idempotente y nunca reescribe un ajuste creado,
+        #    así que si alguno se guardó con una versión anterior del cálculo
+        #    quedaría con el valor viejo para siempre. Este paso lo corrige solo,
+        #    todos los días —sin intervención manual—. No toca pagos ya cobrados
+        #    (esos conservan su monto histórico); solo corrige la tabla de
+        #    ajustes, que define el precio vigente y el sugerido de lo no cobrado.
+        corregidos = 0
+        try:
+            cambios = recalcular_ajustes(db, contratos, dry_run=False)
+            corregidos = len(cambios)
+        except Exception as e:
+            print(f"[ajustes-diarios] auto-sanado (recalcular) falló: {e}")
+        if creados or corregidos:
             db.commit()
         resumen = {
             "indices": estado_idx,
             "contratos_vigentes": len(contratos),
             "ajustes_creados": creados,
+            "ajustes_corregidos": corregidos,
             "fecha": _date.today().isoformat(),
         }
         print(f"[ajustes-diarios] {resumen}")
