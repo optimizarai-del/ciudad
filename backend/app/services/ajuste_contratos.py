@@ -237,6 +237,106 @@ def aplicar_ajustes_pendientes_bulk(
     return total
 
 
+def recalcular_ajustes(
+    db: Session, contratos: Iterable[models.Contrato], dry_run: bool = True
+) -> list[dict]:
+    """Recalcula los ajustes YA EXISTENTES de cada contrato con la fórmula
+    ACTUAL. El motor normal es idempotente: nunca reescribe un ajuste ya creado,
+    así que si un ajuste se guardó con una versión anterior del cálculo, queda
+    con el valor viejo. Esta función corrige eso.
+
+    NO crea ni borra filas: recorre los ajustes existentes (respeta sus fechas)
+    y recalcula monto_anterior / monto_nuevo / porcentaje encadenando desde
+    `monto_inicial`. Con `dry_run=True` no persiste: solo devuelve el detalle
+    de qué cambiaría. Con `dry_run=False` aplica los cambios (no hace commit;
+    lo deja al caller).
+
+    Importante: NO toca los pagos ya cobrados (esos conservan su monto_total
+    histórico); solo corrige la tabla de ajustes, que es lo que define el precio
+    vigente y el sugerido de los meses no cobrados.
+
+    Devuelve una lista de dicts (uno por contrato con cambios) con el detalle
+    período a período: viejo vs. correcto.
+    """
+    cambios: list[dict] = []
+    for c in contratos:
+        try:
+            indice = _indice_str(c)
+            if indice == "sin_ajuste":
+                continue
+            ajustes = sorted(
+                [a for a in (c.ajustes or []) if a.fecha],
+                key=lambda a: (a.fecha, a.id),
+            )
+            if not ajustes:
+                continue
+            per = int(c.periodicidad_meses or 0)
+            if not c.fecha_inicio or per <= 0:
+                # Sin fecha_inicio/periodicidad no podemos derivar los períodos
+                # igual que la creación: no arriesgamos y saltamos el contrato.
+                continue
+            porcentaje_fijo = (c.porcentaje_fijo or 0) / 100.0
+            monto = float(c.monto_inicial or 0)
+            detalle: list[dict] = []
+            corta = False
+            for i, a in enumerate(ajustes):
+                n = i + 1
+                # Períodos derivados EXACTO como en la creación (aplicar_ajustes_
+                # pendientes): así el recálculo = lo que el motor generaría hoy.
+                fa = _fecha_periodo(c.fecha_inicio, n * per)
+                pi = _fecha_periodo(c.fecha_inicio, (n - 1) * per)
+                if indice == "fijo":
+                    factor, fuente = 1 + porcentaje_fijo, "fijo"
+                else:
+                    factor, fuente = factor_acumulado(indice, pi, fa)
+                if factor is None:
+                    # Sin dato publicado para ese período: no tocamos esta fila
+                    # ni las siguientes (dependen de su monto). Conservador.
+                    detalle.append({"fecha": fa.isoformat(), "estado": "sin_dato",
+                                    "motivo": fuente})
+                    corta = True
+                    break
+                nuevo_anterior = round(monto, 2)
+                nuevo_monto = round(monto * factor, 2)
+                viejo_monto = float(a.monto_nuevo or 0)
+                cambia = abs(nuevo_monto - viejo_monto) > 0.005
+                detalle.append({
+                    "fecha": fa.isoformat(),
+                    "monto_nuevo_viejo": round(viejo_monto, 2),
+                    "monto_nuevo_correcto": nuevo_monto,
+                    "porcentaje_viejo": round(float(a.porcentaje or 0), 4),
+                    "porcentaje_correcto": round((factor - 1) * 100, 4),
+                    "cambia": cambia,
+                })
+                # Solo persistimos las filas que realmente cambian de monto, así
+                # lo que se escribe coincide con lo que reporta `cambios`. El
+                # encadenamiento (`monto`) se actualiza igual aunque no se escriba,
+                # porque si no cambia, el monto guardado ya es igual a nuevo_monto.
+                if not dry_run and cambia:
+                    a.fecha = fa  # alinear a la fecha canónica del período
+                    a.monto_anterior = nuevo_anterior
+                    a.monto_nuevo = nuevo_monto
+                    a.porcentaje = round((factor - 1) * 100, 4)
+                    a.indice_usado = indice if indice != "fijo" else "fijo"
+                monto = nuevo_monto
+            if any(d.get("cambia") for d in detalle):
+                cambios.append({
+                    "contrato": c.codigo or f"#{c.id}",
+                    "contrato_id": c.id,
+                    "indice": indice,
+                    "monto_inicial": float(c.monto_inicial or 0),
+                    "monto_final_viejo": round(float(ajustes[-1].monto_nuevo or 0), 2),
+                    "monto_final_correcto": round(monto, 2),
+                    "incompleto": corta,
+                    "detalle": detalle,
+                })
+        except Exception as e:
+            print(f"[recalcular] contrato {getattr(c, 'id', '?')}: {type(e).__name__}: {e}")
+    if not dry_run:
+        db.flush()
+    return cambios
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  Actualización DIARIA de índices + aplicación automática de ajustes
 #

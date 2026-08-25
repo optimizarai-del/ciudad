@@ -84,7 +84,7 @@ def _last_ajuste_info(c: models.Contrato, mes: str | None = None) -> dict | None
                 pass
         if not ajustes:
             return None
-        ultimo = max(ajustes, key=lambda a: (a.fecha or None, a.id))
+        ultimo = max(ajustes, key=lambda a: (a.fecha or date.min, a.id))
         return {
             "fecha":          ultimo.fecha.isoformat() if ultimo.fecha else None,
             "porcentaje":     float(ultimo.porcentaje or 0),
@@ -269,9 +269,17 @@ def cobranza_mensual(mes: Optional[str] = None, db: Session = Depends(get_db), u
 
         if pago:
             estado     = pago.estado.value if hasattr(pago.estado, "value") else pago.estado
-            monto_total = pago.monto_total or 0
             fecha_venc  = pago.fecha_vencimiento.isoformat() if pago.fecha_vencimiento else None
             fecha_pago  = pago.fecha_pago.isoformat() if pago.fecha_pago else None
+            # Un pago AÚN NO cobrado (pendiente/vencido) debe mostrar el alquiler
+            # AJUSTADO al período, no el valor con que se generó el pago —que
+            # queda viejo si el ajuste del índice llegó DESPUÉS de crearlo—. Así
+            # la lista, el "Total esperado" y el modal de cobro muestran lo mismo.
+            # Un pago YA cobrado conserva su monto histórico (lo realmente cobrado).
+            if estado in ("pendiente", "vencido"):
+                monto_total = round(alquiler_sug + expensas_sug + tasas_sug, 2)
+            else:
+                monto_total = pago.monto_total or 0
         else:
             estado      = "pendiente"
             monto_total = round(alquiler_sug + expensas_sug + tasas_sug, 2)
@@ -368,27 +376,36 @@ def resumen_cobranza(mes: Optional[str] = None, db: Session = Depends(get_db), u
             .order_by(models.Pago.id.desc())
             .first()
         )
+        # Monto esperado del período con el alquiler AJUSTADO al mes (mismo
+        # criterio que /mensual). Se usa para todo lo que TODAVÍA NO se cobró,
+        # así el "Total esperado" y "Pendiente" reflejan el valor real a cobrar
+        # y no el monto viejo con que se pudo haber pre-generado el pago.
+        from app.services.ajuste_contratos import monto_para_mes
+        prop = c.propiedad
+        base = monto_para_mes(c, mes) or float((prop.precio_alquiler if prop else 0) or 0)
+        tasas = float((prop.tasa_municipal if prop else 0) or 0) + float((prop.impuesto_inmobiliario if prop else 0) or 0)
+        extras = float((prop.expensas if prop else 0) or 0) + tasas
+        esperado_ajustado = round(base + extras, 2)
+
         if pago:
-            monto = pago.monto_total or 0
             if pago.estado == models.PagoEstado.pagado:
-                # "Contratos cobrados" cuenta SOLO los efectivamente pagados.
-                # Un pago parcial/pendiente/vencido no es un contrato cobrado.
+                # "Contratos cobrados" cuenta SOLO los efectivamente pagados, y
+                # suma el monto REALMENTE cobrado (histórico, no se recalcula).
                 pagos_count += 1
-                cobrado += monto
+                cobrado += pago.monto_total or 0
             elif pago.estado == models.PagoEstado.vencido:
-                vencido += monto
+                # Impago vencido → se espera el monto ajustado (no el viejo).
+                vencido += esperado_ajustado
+            elif pago.estado == models.PagoEstado.parcial:
+                # Pago parcial: conserva su monto ya registrado (no se recalcula,
+                # tiene un abono real hecho). Mismo criterio que antes.
+                pendiente += pago.monto_total or 0
             else:
-                pendiente += monto
+                # Pendiente (impago sin vencer) → monto ajustado.
+                pendiente += esperado_ajustado
         else:
-            # Sin pago registrado → estimación del esperado para que la barra
-            # de cobranza tenga base real. Usamos el precio del período al que
-            # pertenece el mes (mismo criterio que /mensual), no monto_inicial.
-            from app.services.ajuste_contratos import monto_para_mes
-            prop = c.propiedad
-            base = monto_para_mes(c, mes) or float((prop.precio_alquiler if prop else 0) or 0)
-            tasas = (prop.tasa_municipal if prop else 0) + (prop.impuesto_inmobiliario if prop else 0)
-            extras = (prop.expensas if prop else 0) + (tasas or 0)
-            pendiente += round(base + (extras or 0), 2)
+            # Sin pago registrado → mismo esperado ajustado.
+            pendiente += esperado_ajustado
 
     total = cobrado + pendiente + vencido
 

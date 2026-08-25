@@ -125,3 +125,32 @@ def correr(request: Request, db: Session = Depends(get_db)):
     _autorizar(request, db)
     resumen = ajuste_contratos.correr_actualizacion_diaria()
     return {"disparado": True, "resumen": resumen}
+
+
+@router.post("/recalcular")
+def recalcular(request: Request, dry_run: bool = True, db: Session = Depends(get_db)):
+    """Recalcula los ajustes YA EXISTENTES con la fórmula actual (corrige los
+    que se guardaron con una versión anterior del cálculo). SOLO ADMIN.
+
+    - `dry_run=true` (default): NO toca nada, solo devuelve qué cambiaría.
+    - `dry_run=false`: aplica los cambios (corrige la tabla de ajustes). No
+      toca los pagos ya cobrados: esos conservan su monto histórico.
+    """
+    from app import models
+    if not _es_admin_por_jwt(request, db):
+        raise HTTPException(401, "Solo un admin puede recalcular ajustes")
+    contratos = (db.query(models.Contrato)
+                 .filter(models.Contrato.estado == "vigente").all())
+    cambios = ajuste_contratos.recalcular_ajustes(db, contratos, dry_run=dry_run)
+    if not dry_run and cambios:
+        db.commit()
+    total_dif = round(sum(
+        (c.get("monto_final_correcto", 0) - c.get("monto_final_viejo", 0))
+        for c in cambios
+    ), 2)
+    return {
+        "dry_run": dry_run,
+        "contratos_con_cambios": len(cambios),
+        "diferencia_total_precio_vigente": total_dif,
+        "cambios": cambios,
+    }
