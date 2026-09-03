@@ -632,6 +632,20 @@ def _registrar_pago_impl(
     pago.detalle_conceptos = _json.dumps(conceptos_list, ensure_ascii=False)
     db.flush()
 
+    # Override manual del alquiler: si el monto cargado difiere del que el sistema
+    # sugiere para este período (y el período es un mes de actualización del
+    # contrato), se guarda como ajuste MANUAL. El motor no lo pisa: ese precio se
+    # mantiene hasta la próxima actualización, donde el índice se aplica sobre él.
+    try:
+        from app.services.ajuste_contratos import monto_para_mes, registrar_override_manual
+        sug = float(monto_para_mes(contrato, periodo) or 0)
+        manual_val = float(data.monto_alquiler or 0)
+        if manual_val > 0 and abs(manual_val - sug) > 0.5:
+            if registrar_override_manual(db, contrato, periodo, manual_val):
+                db.flush()
+    except Exception as e:
+        print(f"[cobranza] override manual del alquiler falló: {e}")
+
     # Marcar las refacciones del inquilino como aplicadas a este pago.
     # Validamos que pertenezcan al contrato y estén pendientes para evitar
     # vincular cualquier ID arbitrario.

@@ -538,6 +538,30 @@ def _migrar_contrato_archivado():
 
 
 @app.on_event("startup")
+def _migrar_ajuste_manual():
+    """Agrega columna `manual` (BOOLEAN) a ajustes_contrato. Marca los ajustes
+    cargados a mano por el usuario al cobrar; el motor no los pisa. Idempotente."""
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+    db = SessionLocal()
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns("ajustes_contrato", schema=schema)}
+        if "manual" not in cols:
+            db.execute(text(
+                f"ALTER TABLE {qual}ajustes_contrato ADD COLUMN manual BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            db.commit()
+            print("[migrar] ajustes_contrato.manual agregada")
+    except Exception as e:
+        db.rollback()
+        print(f"[migrar] ajustes_contrato.manual: {e}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _migrar_contrato_renovacion():
     """Agrega columna `renovado_de_id` a contratos (cadena de renovaciones).
     Idempotente. Se agrega como INTEGER simple (sin constraint FK en el ALTER,

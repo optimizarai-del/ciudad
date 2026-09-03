@@ -36,6 +36,7 @@ Este servicio expone:
 """
 from __future__ import annotations
 
+import math
 from datetime import date as _date
 from typing import Iterable
 
@@ -43,6 +44,27 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.services.indices_service import factor_acumulado
+
+# Paso de redondeo del alquiler ajustado: se redondea HACIA ARRIBA al próximo
+# múltiplo de este valor (ej. 34.657 -> 35.000). Así el alquiler queda en un
+# número "prolijo" y se mantiene por todo el período hasta la próxima
+# actualización. Configurable si en algún momento se quiere otro paso.
+REDONDEO_PASO = 1000
+
+
+def _redondear_arriba(monto, paso: int = REDONDEO_PASO):
+    """Redondea `monto` hacia arriba al próximo múltiplo de `paso`.
+    Defensivo: si no es un número válido lo devuelve tal cual; 0 o negativos
+    se devuelven redondeados a 2 decimales sin tocar."""
+    try:
+        m = float(monto)
+    except (TypeError, ValueError):
+        return monto
+    if m <= 0:
+        return round(m, 2)
+    if not paso or paso <= 0:
+        return round(m, 2)
+    return float(math.ceil(m / paso) * paso)
 
 
 def _fecha_periodo(inicio: _date, offset_meses: int) -> _date:
@@ -186,11 +208,20 @@ def aplicar_ajustes_pendientes(
     # reintenta la próxima vez (mejor no ajustar que ajustar con datos inventados).
     porcentaje_fijo = (contrato.porcentaje_fijo or 0) / 100.0
     monto_actual = monto_vigente(contrato)
+    # Fechas que YA tienen un ajuste (p. ej. un override manual): no las
+    # duplicamos aunque el conteo por período las alcance.
+    fechas_existentes = {a.fecha: a for a in (contrato.ajustes or []) if a.fecha}
     creados = 0
     for i in range(faltan):
         n_periodo = ajustes_actuales + i + 1
         fecha_ajuste = _fecha_periodo(contrato.fecha_inicio, n_periodo * periodicidad)
         periodo_inicio = _fecha_periodo(contrato.fecha_inicio, (n_periodo - 1) * periodicidad)
+
+        # Si ya hay un ajuste en esa fecha (override manual u otro), no creamos
+        # otro: encadenamos desde su valor y seguimos. Evita duplicados.
+        if fecha_ajuste in fechas_existentes:
+            monto_actual = float(fechas_existentes[fecha_ajuste].monto_nuevo or monto_actual)
+            continue
 
         if indice == "fijo":
             factor = 1 + porcentaje_fijo
@@ -206,11 +237,12 @@ def aplicar_ajustes_pendientes(
                       f"se reintentara. Creados hasta ahora: {creados}")
                 break
 
-        monto_nuevo = round(monto_actual * factor, 2)
+        # Redondeo hacia arriba a $1.000 (número prolijo, se mantiene el período).
+        monto_nuevo = _redondear_arriba(round(monto_actual * factor, 2))
         db.add(models.AjusteContrato(
             contrato_id=contrato.id,
             fecha=fecha_ajuste,
-            porcentaje=round((factor - 1) * 100, 4),
+            porcentaje=round((monto_nuevo / monto_actual - 1) * 100, 4) if monto_actual else round((factor - 1) * 100, 4),
             monto_anterior=monto_actual,
             monto_nuevo=monto_nuevo,
             indice_usado=(indice if indice != "fijo" else "fijo"),
@@ -281,6 +313,11 @@ def recalcular_ajustes(
             corta = False
             for i, a in enumerate(ajustes):
                 n = i + 1
+                # Ajuste MANUAL: se respeta tal cual —el usuario lo cargó a mano—.
+                # No se recalcula ni se redondea, y la cadena sigue desde su valor.
+                if getattr(a, "manual", False):
+                    monto = float(a.monto_nuevo if a.monto_nuevo is not None else monto)
+                    continue
                 # Períodos derivados EXACTO como en la creación (aplicar_ajustes_
                 # pendientes): así el recálculo = lo que el motor generaría hoy.
                 fa = _fecha_periodo(c.fecha_inicio, n * per)
@@ -297,15 +334,17 @@ def recalcular_ajustes(
                     corta = True
                     break
                 nuevo_anterior = round(monto, 2)
-                nuevo_monto = round(monto * factor, 2)
+                # Redondeo hacia arriba a $1.000 (igual que en la creación).
+                nuevo_monto = _redondear_arriba(round(monto * factor, 2))
                 viejo_monto = float(a.monto_nuevo or 0)
                 cambia = abs(nuevo_monto - viejo_monto) > 0.005
+                pct = round((nuevo_monto / nuevo_anterior - 1) * 100, 4) if nuevo_anterior else round((factor - 1) * 100, 4)
                 detalle.append({
                     "fecha": fa.isoformat(),
                     "monto_nuevo_viejo": round(viejo_monto, 2),
                     "monto_nuevo_correcto": nuevo_monto,
                     "porcentaje_viejo": round(float(a.porcentaje or 0), 4),
-                    "porcentaje_correcto": round((factor - 1) * 100, 4),
+                    "porcentaje_correcto": pct,
                     "cambia": cambia,
                 })
                 # Solo persistimos las filas que realmente cambian de monto, así
@@ -316,7 +355,7 @@ def recalcular_ajustes(
                     a.fecha = fa  # alinear a la fecha canónica del período
                     a.monto_anterior = nuevo_anterior
                     a.monto_nuevo = nuevo_monto
-                    a.porcentaje = round((factor - 1) * 100, 4)
+                    a.porcentaje = pct
                     a.indice_usado = indice if indice != "fijo" else "fijo"
                 monto = nuevo_monto
             if any(d.get("cambia") for d in detalle):
@@ -335,6 +374,91 @@ def recalcular_ajustes(
     if not dry_run:
         db.flush()
     return cambios
+
+
+def _boundary_de_periodo(contrato: models.Contrato, periodo: str):
+    """Devuelve la fecha del ajuste (boundary) que GOBIERNA el mes `periodo`
+    (YYYY-MM), o None si `periodo` es anterior al primer ajuste del contrato.
+    Es el boundary con fecha <= último día del mes pedido."""
+    if not contrato or not contrato.fecha_inicio:
+        return None
+    per = int(contrato.periodicidad_meses or 0)
+    if per <= 0:
+        return None
+    try:
+        y, m = [int(x) for x in str(periodo).split("-")[:2]]
+    except Exception:
+        return None
+    from calendar import monthrange
+    fin_periodo = _date(y, m, monthrange(y, m)[1])
+    n = _meses_entre(contrato.fecha_inicio, fin_periodo) // per
+    if n < 1:
+        return None
+    return _fecha_periodo(contrato.fecha_inicio, n * per)
+
+
+def registrar_override_manual(
+    db: Session, contrato: models.Contrato, periodo: str, monto_manual: float
+) -> bool:
+    """Registra/actualiza un ajuste MANUAL para el período que gobierna `periodo`.
+
+    Se llama al COBRAR: si el usuario carga un monto de alquiler distinto al que
+    sugiere el sistema, ese valor se ancla al boundary de ajuste vigente para ese
+    mes y se marca `manual=True`. El motor no lo pisa: se mantiene hasta la próxima
+    actualización del contrato (donde el índice se aplica SOBRE el valor manual).
+
+    Devuelve True si registró/actualizó un override. No hace commit (lo deja al
+    caller). Defensivo: ante cualquier problema devuelve False sin romper el cobro.
+    """
+    try:
+        indice = _indice_str(contrato)
+        if indice == "sin_ajuste":
+            return False
+        monto_manual = round(float(monto_manual or 0), 2)
+        if monto_manual <= 0:
+            return False
+        boundary = _boundary_de_periodo(contrato, periodo)
+        if boundary is None:
+            return False  # período anterior al primer ajuste: no hay qué overridear
+        # Solo se registra el override si el mes que se cobra ES el mes de
+        # actualización del contrato (el boundary). Un cambio manual en un mes
+        # intermedio del período no redefine el precio del período.
+        try:
+            y, m = [int(x) for x in str(periodo).split("-")[:2]]
+        except Exception:
+            return False
+        if not (boundary.year == y and boundary.month == m):
+            return False
+        # Valor previo (informativo, para monto_anterior/porcentaje).
+        prev_ajustes = sorted(
+            [a for a in (contrato.ajustes or []) if a.fecha and a.fecha < boundary],
+            key=lambda a: (a.fecha, a.id),
+        )
+        prev_val = (float(prev_ajustes[-1].monto_nuevo) if prev_ajustes
+                    else float(contrato.monto_inicial or 0))
+        pct = round((monto_manual / prev_val - 1) * 100, 4) if prev_val else 0.0
+        existente = next((a for a in (contrato.ajustes or []) if a.fecha == boundary), None)
+        if existente:
+            existente.manual = True
+            existente.monto_anterior = prev_val
+            existente.monto_nuevo = monto_manual
+            existente.porcentaje = pct
+            existente.indice_usado = "manual"
+        else:
+            db.add(models.AjusteContrato(
+                contrato_id=contrato.id,
+                fecha=boundary,
+                porcentaje=pct,
+                monto_anterior=prev_val,
+                monto_nuevo=monto_manual,
+                indice_usado="manual",
+                manual=True,
+            ))
+        db.flush()
+        return True
+    except Exception as e:
+        print(f"[override_manual] contrato {getattr(contrato, 'id', '?')}: {type(e).__name__}: {e}")
+        return False
 
 
 # ════════════════════════════════════════════════════════════════════════════

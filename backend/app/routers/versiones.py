@@ -36,19 +36,19 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from urllib.request import urlopen, Request
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy import text
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app.database import get_db, engine, IS_POSTGRES, CIUDAD_SCHEMA
 from app.security import get_current_user
-from app.services.workspace import is_demo_user
+from app.services.workspace import is_demo_user, apply_workspace_filter, workspace_flag
 from app import models
 
 router = APIRouter(prefix="/api/versiones", tags=["versiones"])
@@ -154,6 +154,61 @@ _TABLAS_FILTRADAS_POR_PADRE = {
 _TABLAS_GLOBALES = {"users", "ciudad_settings", "alembic_version"}
 
 
+# Afinidad SQLite por "kind" de columna, para preservar tipos en el export.
+_SQLITE_DECL = {"bool": "INTEGER", "int": "INTEGER", "num": "REAL", "text": "TEXT"}
+
+
+def _col_kind(sqltype) -> str:
+    """Clasifica un tipo SQLAlchemy en 'bool' | 'int' | 'num' | 'text' para
+    decidir cómo declararlo y convertirlo al exportar a SQLite."""
+    from sqlalchemy import (Boolean, Integer, BigInteger, SmallInteger,
+                            Float, Numeric)
+    try:
+        if isinstance(sqltype, Boolean):
+            return "bool"
+        if isinstance(sqltype, (Integer, BigInteger, SmallInteger)):
+            return "int"
+        if isinstance(sqltype, (Float, Numeric)):
+            return "num"
+    except Exception:
+        pass
+    return "text"
+
+
+def _conv_val(v, kind: str):
+    """Convierte un valor de la DB origen al tipo correcto para SQLite.
+    Clave: booleanos → 0/1 (no "True"/"False"), así los filtros is_demo==0/1
+    matchean. Fechas → ISO string (formato que SQLAlchemy lee de vuelta)."""
+    if v is None:
+        return None
+    import datetime as _dt
+    import decimal as _dec
+    if kind == "bool":
+        if isinstance(v, str):
+            return 1 if v.strip().lower() in ("true", "t", "1", "yes", "y") else 0
+        return 1 if v else 0
+    if kind == "int":
+        if isinstance(v, bool):
+            return 1 if v else 0
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return v
+    if kind == "num":
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return v
+    # text: fechas/horas en ISO compatible con SQLAlchemy-SQLite; resto string
+    if isinstance(v, _dt.datetime):
+        return str(v)          # "YYYY-MM-DD HH:MM:SS[.ffffff]"
+    if isinstance(v, _dt.date):
+        return v.isoformat()   # "YYYY-MM-DD"
+    if isinstance(v, _dec.Decimal):
+        return str(v)
+    return v if isinstance(v, str) else str(v)
+
+
 def _export_sqlite(sqlite_path: str, is_demo_workspace: bool | None) -> dict:
     """Exporta a SQLite las tablas filtradas por el workspace del usuario.
 
@@ -198,8 +253,20 @@ def _export_sqlite(sqlite_path: str, is_demo_workspace: bool | None) -> dict:
                 col_names = [c["name"] for c in cols_info]
                 if not col_names:
                     continue
-                cols_ddl = ", ".join(f'"{c}" TEXT' for c in col_names)
-                conn.execute(f'CREATE TABLE IF NOT EXISTS "{tabla}" ({cols_ddl})')
+                # PRESERVAR TIPOS: crear cada columna con su afinidad real y
+                # convertir los valores al tipo correcto. Antes se guardaba TODO
+                # como TEXT con str(v): los booleanos quedaban "True"/"False" y el
+                # filtro `is_demo == 0/1` de SQLite NUNCA matcheaba → la versión
+                # local mostraba 0 propiedades/clientes/contratos aunque estaban
+                # en la DB. Ahora los bool van como 0/1, los números tipados y las
+                # fechas en ISO, y se agrega PRIMARY KEY en `id`.
+                kinds = [_col_kind(c["type"]) for c in cols_info]
+                parts = []
+                for c, kind in zip(cols_info, kinds):
+                    decl = _SQLITE_DECL[kind]
+                    pk = " PRIMARY KEY" if c["name"] == "id" else ""
+                    parts.append(f'"{c["name"]}" {decl}{pk}')
+                conn.execute(f'CREATE TABLE IF NOT EXISTS "{tabla}" ({", ".join(parts)})')
 
                 sql = f"SELECT * FROM {_qual(tabla)}{_where_workspace(tabla)}"
                 rows = src.execute(text(sql)).fetchall()
@@ -207,7 +274,7 @@ def _export_sqlite(sqlite_path: str, is_demo_workspace: bool | None) -> dict:
                     placeholders = ", ".join(["?"] * len(col_names))
                     conn.executemany(
                         f'INSERT INTO "{tabla}" VALUES ({placeholders})',
-                        [tuple(None if v is None else str(v) for v in r) for r in rows],
+                        [tuple(_conv_val(v, kinds[i]) for i, v in enumerate(r)) for r in rows],
                     )
                 resumen[tabla] = len(rows)
             except Exception as e:
@@ -715,3 +782,187 @@ def crear_version(
             "Content-Length":      str(size_bytes),
         },
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Sincronización local → online: exportar cambios (pagos cobrados + overrides
+#  manuales) desde la versión local y reimportarlos en el online.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _pago_to_dict(p: models.Pago, contrato_codigo: str) -> dict:
+    est = p.estado.value if hasattr(p.estado, "value") else p.estado
+    return {
+        "contrato_codigo": contrato_codigo,
+        "periodo": p.periodo,
+        "estado": est,
+        "fecha_pago": p.fecha_pago.isoformat() if p.fecha_pago else None,
+        "fecha_vencimiento": p.fecha_vencimiento.isoformat() if p.fecha_vencimiento else None,
+        "monto_alquiler": p.monto_alquiler,
+        "monto_expensas": p.monto_expensas,
+        "monto_impuestos": p.monto_impuestos,
+        "monto_municipal": p.monto_municipal,
+        "monto_otros": p.monto_otros,
+        "monto_total": p.monto_total,
+        "monto_pagado_transferencia": p.monto_pagado_transferencia,
+        "notas": p.notas,
+        "detalle_conceptos": p.detalle_conceptos,
+    }
+
+
+@router.get("/exportar-cambios")
+def exportar_cambios(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Descarga un archivo JSON con los CAMBIOS de la versión local para subir al
+    online: los pagos cobrados/parciales y los ajustes MANUALES del workspace del
+    usuario. El online los reimporta con /importar-cambios (merge idempotente).
+    Pensado para: cobrás en local → descargás este archivo → lo subís al online."""
+    contratos = apply_workspace_filter(db.query(models.Contrato), models.Contrato, user).all()
+    cod_por_id = {c.id: (c.codigo or f"#{c.id}") for c in contratos}
+    cids = list(cod_por_id.keys())
+
+    pagos = []
+    ajustes = []
+    if cids:
+        pagos_q = db.query(models.Pago).filter(
+            models.Pago.contrato_id.in_(cids),
+            models.Pago.estado.in_([models.PagoEstado.pagado, models.PagoEstado.parcial]),
+        ).all()
+        pagos = [_pago_to_dict(p, cod_por_id[p.contrato_id]) for p in pagos_q]
+
+        ajustes_q = db.query(models.AjusteContrato).filter(
+            models.AjusteContrato.contrato_id.in_(cids),
+            models.AjusteContrato.manual == True,  # noqa: E712
+        ).all()
+        ajustes = [{
+            "contrato_codigo": cod_por_id[a.contrato_id],
+            "fecha": a.fecha.isoformat() if a.fecha else None,
+            "monto_anterior": a.monto_anterior,
+            "monto_nuevo": a.monto_nuevo,
+            "porcentaje": a.porcentaje,
+        } for a in ajustes_q]
+
+    data = {
+        "tipo": "ciudad-cambios",
+        "version": 1,
+        "generado": datetime.utcnow().isoformat(),
+        "workspace": "demo" if is_demo_user(user) else "real",
+        "pagos": pagos,
+        "ajustes_manuales": ajustes,
+    }
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return JSONResponse(
+        content=data,
+        headers={"Content-Disposition": f'attachment; filename="ciudad-cambios-{ts}.json"'},
+    )
+
+
+@router.post("/importar-cambios")
+async def importar_cambios(
+    archivo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Sube el JSON generado por /exportar-cambios en la versión local y aplica
+    los cambios al online: upsert idempotente de pagos por (contrato, período) y
+    de ajustes manuales por (contrato, fecha). Respeta el workspace del usuario
+    (nunca cruza demo↔real) y matchea contratos por su código."""
+    try:
+        raw = await archivo.read()
+        data = json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        raise HTTPException(400, f"Archivo inválido (no es JSON): {e}")
+    if not isinstance(data, dict) or data.get("tipo") != "ciudad-cambios":
+        raise HTTPException(400, "El archivo no es un export de cambios de CIUDAD.")
+
+    contratos = apply_workspace_filter(db.query(models.Contrato), models.Contrato, user).all()
+    by_code = {c.codigo: c for c in contratos if c.codigo}
+
+    creados = actualizados = ajustes_importados = 0
+    errores: list[str] = []
+    _flag = workspace_flag(user)
+
+    # Cada fila se aplica dentro de un SAVEPOINT (begin_nested): si una fila
+    # rompe (tipo inválido, JSON corrupto), se descarta SOLO esa fila y las
+    # demás se conservan. Los contadores se incrementan recién cuando la fila
+    # se persistió limpia (tras el flush del savepoint).
+    for p in (data.get("pagos") or []):
+        c = by_code.get(p.get("contrato_codigo"))
+        if not c:
+            errores.append(f"Contrato no encontrado: {p.get('contrato_codigo')}")
+            continue
+        periodo = p.get("periodo")
+        if not periodo:
+            continue
+        try:
+            with db.begin_nested():
+                pago = (db.query(models.Pago)
+                        .filter(models.Pago.contrato_id == c.id, models.Pago.periodo == periodo)
+                        .first())
+                es_nuevo = pago is None
+                if es_nuevo:
+                    pago = models.Pago(contrato_id=c.id, periodo=periodo, is_demo=_flag)
+                    db.add(pago)
+                est = p.get("estado") or "pagado"
+                try:
+                    pago.estado = models.PagoEstado(est)
+                except Exception:
+                    pago.estado = models.PagoEstado.pagado
+                pago.fecha_pago = date.fromisoformat(p["fecha_pago"]) if p.get("fecha_pago") else pago.fecha_pago
+                pago.fecha_vencimiento = date.fromisoformat(p["fecha_vencimiento"]) if p.get("fecha_vencimiento") else pago.fecha_vencimiento
+                for campo in ("monto_alquiler", "monto_expensas", "monto_impuestos",
+                              "monto_municipal", "monto_otros", "monto_total",
+                              "monto_pagado_transferencia"):
+                    if p.get(campo) is not None:
+                        setattr(pago, campo, float(p[campo]))
+                if p.get("notas") is not None:
+                    pago.notas = p["notas"]
+                det = p.get("detalle_conceptos")
+                if det is not None:
+                    # La columna es TEXT: si viniera como objeto/lista, serializar.
+                    pago.detalle_conceptos = det if isinstance(det, str) else json.dumps(det, ensure_ascii=False)
+                db.flush()
+            if es_nuevo:
+                creados += 1
+            else:
+                actualizados += 1
+        except Exception as e:
+            errores.append(f"Pago {p.get('contrato_codigo')}/{periodo}: {e}")
+
+    for a in (data.get("ajustes_manuales") or []):
+        c = by_code.get(a.get("contrato_codigo"))
+        if not c or not a.get("fecha"):
+            continue
+        try:
+            with db.begin_nested():
+                fecha = date.fromisoformat(a["fecha"])
+                aj = (db.query(models.AjusteContrato)
+                      .filter(models.AjusteContrato.contrato_id == c.id,
+                              models.AjusteContrato.fecha == fecha)
+                      .first())
+                if aj is None:
+                    aj = models.AjusteContrato(contrato_id=c.id, fecha=fecha)
+                    db.add(aj)
+                aj.manual = True
+                aj.indice_usado = "manual"
+                if a.get("monto_nuevo") is not None:
+                    aj.monto_nuevo = float(a["monto_nuevo"])
+                if a.get("monto_anterior") is not None:
+                    aj.monto_anterior = float(a["monto_anterior"])
+                if a.get("porcentaje") is not None:
+                    aj.porcentaje = float(a["porcentaje"])
+                db.flush()
+            ajustes_importados += 1
+        except Exception as e:
+            errores.append(f"Ajuste {a.get('contrato_codigo')}/{a.get('fecha')}: {e}")
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"No se pudo guardar la importación: {type(e).__name__}: {e}")
+    return {
+        "ok": True,
+        "pagos_creados": creados,
+        "pagos_actualizados": actualizados,
+        "ajustes_manuales_importados": ajustes_importados,
+        "errores": errores,
+    }

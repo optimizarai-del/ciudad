@@ -447,6 +447,10 @@ class AjusteContrato(Base):
     monto_anterior = Column(Float)
     monto_nuevo = Column(Float)
     indice_usado = Column(String)
+    # Ajuste MANUAL: valor cargado a mano por el usuario al cobrar (distinto del
+    # que sugiere el índice). El motor NO lo pisa: se respeta hasta la próxima
+    # actualización del contrato. indice_usado queda en "manual".
+    manual = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

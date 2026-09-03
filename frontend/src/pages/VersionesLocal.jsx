@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Layout from '../components/Layout/Layout'
 import api from '../utils/api'
 import {
   HardDrive, Download, Clock, Database, Package,
-  CheckCircle, AlertCircle, Loader2, Info,
+  CheckCircle, AlertCircle, Loader2, Info, Upload, FileUp, RefreshCw,
 } from 'lucide-react'
 
 // ─── Formateo de números estilo Argentina (300.000,54) ───────────────────────
@@ -43,6 +43,8 @@ export default function VersionesLocal() {
   const [generando, setGenerando]   = useState(false)
   const [error, setError]           = useState('')
   const [exito, setExito]           = useState('')
+  const [sincronizando, setSincronizando] = useState(false)
+  const fileRef = useRef(null)
 
   const cargar = async () => {
     setLoading(true)
@@ -91,6 +93,54 @@ export default function VersionesLocal() {
       )
     } finally {
       setGenerando(false)
+    }
+  }
+
+  // ─── Sincronización local → online (feature #3) ───────────────────────────
+  // Descarga un JSON con los cambios (pagos cobrados + ajustes manuales) para
+  // subirlo al online. Y permite subir ese JSON para aplicarlo a la base online.
+  const descargarCambios = async () => {
+    if (sincronizando) return
+    setSincronizando(true); setError(''); setExito('')
+    try {
+      const r = await api.get('/api/versiones/exportar-cambios', { responseType: 'blob', timeout: 120_000 })
+      const cd = r.headers['content-disposition'] || ''
+      const m = cd.match(/filename="?([^";\n]+)"?/)
+      const nombre = m ? m[1] : `ciudad-cambios-${Date.now()}.json`
+      const url = URL.createObjectURL(new Blob([r.data], { type: 'application/json' }))
+      const a = document.createElement('a')
+      a.href = url; a.download = nombre
+      document.body.appendChild(a); a.click(); a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+      setExito(`Archivo de cambios "${nombre}" descargado. Subilo al online para actualizar la base.`)
+    } catch (e) {
+      setError(e.response?.data?.detail || 'No se pudieron exportar los cambios.')
+    } finally {
+      setSincronizando(false)
+    }
+  }
+
+  const importarCambios = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setSincronizando(true); setError(''); setExito('')
+    try {
+      const fd = new FormData()
+      fd.append('archivo', file)
+      const r = await api.post('/api/versiones/importar-cambios', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120_000,
+      })
+      const d = r.data || {}
+      let msg = `Importado: ${d.pagos_creados ?? 0} pagos nuevos, ${d.pagos_actualizados ?? 0} actualizados, ${d.ajustes_manuales_importados ?? 0} ajustes manuales.`
+      if (d.errores?.length) msg += ` ${d.errores.length} con error (ver consola).`
+      if (d.errores?.length) console.warn('[importar-cambios] errores:', d.errores)
+      setExito(msg)
+      cargar()
+    } catch (e) {
+      setError(e.response?.data?.detail || 'No se pudo importar el archivo de cambios.')
+    } finally {
+      setSincronizando(false)
     }
   }
 
@@ -184,9 +234,52 @@ export default function VersionesLocal() {
           <p className="text-[11px] text-muted mt-4 border-t border-[#E8E0CC] dark:border-[#2A2518] pt-3">
             <strong>Requisitos:</strong> Python 3.10+ y Node.js 18+ instalados en la computadora.
             Sin Node.js el sistema funciona sólo a nivel API (sin interfaz visual).
-            La base de datos es una copia fija del momento de la descarga — los cambios locales
-            no se sincronizan con la nube.
+            La base de datos es una copia del momento de la descarga. Para llevar los cambios
+            que hagas en local (cobros, ajustes) de vuelta al online, usá la sección
+            "Sincronizar cambios" de acá abajo.
           </p>
+        </div>
+
+        {/* Sincronización local ↔ online (feature #3) */}
+        <div className="card p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <RefreshCw size={14} className="text-[#B8893A]" />
+            <p className="text-[12px] font-semibold uppercase tracking-widest text-[#B8893A]">
+              Sincronizar cambios
+            </p>
+          </div>
+          <p className="text-[12px] text-muted mb-4 max-w-2xl">
+            En la versión <strong>local</strong> descargá los cambios que hiciste (pagos cobrados
+            y ajustes manuales) en un archivo. Después, en el <strong>online</strong>, subí ese
+            archivo para actualizar la base de datos con esos cambios.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={descargarCambios}
+              disabled={sincronizando}
+              className="btn-secondary gap-2 justify-center"
+            >
+              {sincronizando
+                ? <><Loader2 size={15} className="animate-spin" /> Procesando…</>
+                : <><FileUp size={15} /> Descargar cambios (local)</>}
+            </button>
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={sincronizando}
+              className="btn-secondary gap-2 justify-center"
+            >
+              {sincronizando
+                ? <><Loader2 size={15} className="animate-spin" /> Procesando…</>
+                : <><Upload size={15} /> Importar cambios (online)</>}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              onChange={importarCambios}
+              className="hidden"
+            />
+          </div>
         </div>
 
         {/* Historial */}
