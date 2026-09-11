@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Network, Download, Check, MapPin, Building2, RefreshCw, ExternalLink, Play, Settings2 } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
 import { useRole } from '../../context/RoleContext'
+import AsociarCliente from '../../components/ventas/AsociarCliente'
 import api from '../../utils/api'
 
 const OPERACIONES = [['venta', 'Venta'], ['alquiler', 'Alquiler']]
@@ -254,6 +255,12 @@ export default function Webs() {
                         <a href={p.ficha_url} target="_blank" rel="noreferrer"
                           className="btn-ghost !p-1.5" title="Ver ficha"><ExternalLink size={14} /></a>
                       )}
+                      <AsociarCliente propiedad={{
+                        fuente: 'web', ref_externa: String(p.referencia ?? ''),
+                        titulo: p.direccion, direccion: p.ubicacion,
+                        precio_texto: p.precio_display, operacion: filtros.operacion || null,
+                        imagen_url: p.foto, link_externo: p.ficha_url,
+                      }} />
                       {p.ya_importada ? (
                         <button disabled className="btn-secondary flex-1 text-[12px] opacity-60">Ya en catálogo</button>
                       ) : (

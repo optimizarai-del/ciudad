@@ -2,12 +2,13 @@ import { useEffect, useState, useRef } from 'react'
 import { Plus, X, Pencil, Trash2, Building2, Handshake, Calculator, Sparkles, Upload, FileText } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
 import SearchBar from '../../components/SearchBar'
+import AsociarCliente from '../../components/ventas/AsociarCliente'
 import api from '../../utils/api'
 
 const TIPOS = ['casa', 'departamento', 'lote', 'local', 'oficina', 'galpon', 'campo', 'otro']
 const ESTADOS = ['disponible', 'reservada', 'vendida', 'inactiva']
 const empty = {
-  titulo: '', tipo: 'casa', estado: 'disponible', fuente: 'propia', direccion: '', ciudad: '',
+  titulo: '', tipo: 'casa', estado: 'disponible', fuente: 'propia', operacion: 'venta', direccion: '', ciudad: '',
   precio_usd: '', superficie_m2: '', dormitorios: '', banos: '', antiguedad_anios: '',
   descripcion: '', apreciacion: '', link_externo: '', inmobiliaria: '',
 }
@@ -22,9 +23,10 @@ export default function Propiedades() {
   const [tasarOpen, setTasarOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [busqueda, setBusqueda] = useState('')
+  const [modalidad, setModalidad] = useState('')   // '' | venta | alquiler
 
-  const load = () => api.get('/api/ventas-crm/propiedades').then(r => setList(r.data || []))
-  useEffect(() => { load() }, [])
+  const load = () => api.get(`/api/ventas-crm/propiedades${modalidad ? `?operacion=${modalidad}` : ''}`).then(r => setList(r.data || []))
+  useEffect(() => { load() }, [modalidad])
 
   const filtrados = list.filter(p => {
     if (!busqueda.trim()) return true
@@ -52,8 +54,18 @@ export default function Propiedades() {
           </div>
         </header>
 
-        <div className="mb-4 max-w-md">
-          <SearchBar value={busqueda} onChange={setBusqueda} placeholder="Buscar por dirección, ciudad, inmobiliaria…" />
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="max-w-md flex-1 min-w-[220px]">
+            <SearchBar value={busqueda} onChange={setBusqueda} placeholder="Buscar por dirección, ciudad, inmobiliaria…" />
+          </div>
+          <div className="flex gap-1">
+            {[['', 'Todas'], ['venta', 'Venta'], ['alquiler', 'Alquiler']].map(([v, l]) => (
+              <button key={v} onClick={() => setModalidad(v)}
+                className={`text-[12px] rounded-xl px-3 py-1.5 border transition ${modalidad === v ? 'bg-[#B8893A] text-white border-[#B8893A]' : 'border-border text-muted hover:border-[#B8893A]'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
         </div>
 
         {filtrados.length === 0 ? (
@@ -69,7 +81,7 @@ export default function Propiedades() {
                   <p className="font-medium text-[14px] truncate">{p.titulo || p.direccion || `Propiedad #${p.id}`}</p>
                   <span className="chip-muted capitalize">{p.estado}</span>
                 </div>
-                <p className="text-[12px] text-muted capitalize mt-0.5">{p.tipo} · {p.ciudad || 's/ciudad'}</p>
+                <p className="text-[12px] text-muted capitalize mt-0.5">{p.tipo}{p.operacion ? ` · ${p.operacion}` : ''} · {p.ciudad || 's/ciudad'}</p>
                 <p className="stat-value text-xl mt-2">{fmtUSD(p.precio_usd)}</p>
                 <div className="flex flex-wrap gap-x-3 text-[11px] text-muted mt-1">
                   {p.superficie_m2 && <span>{p.superficie_m2} m²</span>}
@@ -79,6 +91,12 @@ export default function Propiedades() {
                 {p.fuente !== 'propia' && <span className="chip-muted mt-2 w-fit capitalize">{p.fuente}</span>}
                 <div className="flex gap-1 mt-3 pt-3 border-t border-border">
                   <button onClick={() => setOfertasDe(p)} className="flex-1 flex items-center justify-center gap-1 text-[12px] text-[#B8893A]"><Handshake size={13} /> Negociación</button>
+                  <AsociarCliente propiedad={{
+                    fuente: 'catalogo', ref_externa: String(p.id), propiedad_id: p.id,
+                    titulo: p.titulo || p.direccion, direccion: p.direccion,
+                    precio_texto: p.precio_usd ? `USD ${Number(p.precio_usd).toLocaleString('es-AR')}` : '',
+                    operacion: p.operacion || null, link_externo: p.link_externo,
+                  }} className="p-1.5 text-muted hover:text-[#B8893A]" />
                   <button onClick={() => { setEditing(p); setOpen(true) }} className="p-1.5 text-muted hover:text-[#B8893A]"><Pencil size={13} /></button>
                   <button onClick={() => del(p)} className="p-1.5 text-muted hover:text-danger"><Trash2 size={13} /></button>
                 </div>
@@ -129,6 +147,7 @@ function PropModal({ initial, onClose, onSaved }) {
             <div><label className="label">Tipo</label><select className="input" value={form.tipo} onChange={set('tipo')}>{TIPOS.map(t => <option key={t}>{t}</option>)}</select></div>
             <div><label className="label">Estado</label><select className="input" value={form.estado} onChange={set('estado')}>{ESTADOS.map(t => <option key={t}>{t}</option>)}</select></div>
             <div><label className="label">Fuente</label><select className="input" value={form.fuente} onChange={set('fuente')}>{['propia', 'tokko', 'scraping', 'instagram'].map(t => <option key={t}>{t}</option>)}</select></div>
+            <div><label className="label">Operación</label><select className="input" value={form.operacion || 'venta'} onChange={set('operacion')}>{[['venta', 'Venta'], ['alquiler', 'Alquiler'], ['ambas', 'Ambas']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
             <div><label className="label">Precio USD</label><input className="input" type="number" value={form.precio_usd ?? ''} onChange={set('precio_usd')} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">

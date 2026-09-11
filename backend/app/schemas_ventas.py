@@ -147,6 +147,7 @@ class PropiedadCreate(BaseModel):
     tipo: str = "casa"
     estado: str = "disponible"
     fuente: str = "propia"
+    operacion: Optional[str] = None   # venta | alquiler | ambas
     direccion: Optional[str] = None
     ciudad: Optional[str] = None
     barrio_id: Optional[int] = None
@@ -177,6 +178,7 @@ class PedidoCreate(BaseModel):
     estado: str = "nuevo"
     prioridad: str = "media"
     tipo: Optional[str] = None
+    operacion: Optional[str] = None   # venta | alquiler — qué busca el cliente
     zona: Optional[str] = None
     barrio_id: Optional[int] = None
     precio_min_usd: Optional[float] = None

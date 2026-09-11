@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.security import get_current_user
 from app import models_ventas as mv
+from app.services import ventas_matching
 from app.routers.ventas_crm import get_vendedor, _enum, _post_import_propiedades
 from app.services import ventas_scraping as scraping
 from app.services import ventas_geo
@@ -259,6 +260,9 @@ def importar(payload: dict, db: Session = Depends(get_db), user=Depends(get_curr
             tipo=_enum(mv.VPropiedadTipo, _TIPO_MAP.get(r.tipo, "otro"), "tipo"),
             estado=mv.VPropiedadEstado.disponible,
             fuente=mv.VPropiedadFuente.scraping,
+            # Preservar la operación (venta/alquiler) que traía el staging: antes
+            # se perdía y el catálogo/matching mezclaba ventas con alquileres.
+            operacion=ventas_matching.normalizar_operacion(r.operacion),
             direccion=r.direccion, ciudad=r.ubicacion,
             lat=lat, lng=lng, precio_usd=r.precio_num,
             dormitorios=r.dormitorios_num, banos=r.banos_num,

@@ -15,6 +15,7 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text, bindparam
 
@@ -161,6 +162,86 @@ def crear_cliente(data: sv.ClienteCreate,
     return obj
 
 
+# ───────────────────── Selecciones (propiedad ↔ cliente) ─────────────────────
+
+class _SeleccionIn(BaseModel):
+    cliente_id: int
+    fuente: str = "web"                 # instagram | web | tokko | catalogo
+    ref_externa: Optional[str] = None
+    propiedad_id: Optional[int] = None
+    titulo: Optional[str] = None
+    direccion: Optional[str] = None
+    precio_texto: Optional[str] = None
+    operacion: Optional[str] = None     # venta | alquiler
+    imagen_url: Optional[str] = None
+    link_externo: Optional[str] = None
+    notas: Optional[str] = None
+
+
+def _seleccion_out(s: "mv.VentasSeleccion") -> dict:
+    return {
+        "id": s.id, "cliente_id": s.cliente_id,
+        "cliente_nombre": (s.cliente.nombre if s.cliente else None),
+        "fuente": s.fuente, "ref_externa": s.ref_externa, "propiedad_id": s.propiedad_id,
+        "titulo": s.titulo, "direccion": s.direccion, "precio_texto": s.precio_texto,
+        "operacion": s.operacion, "imagen_url": s.imagen_url,
+        "link_externo": s.link_externo, "notas": s.notas,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
+
+
+@router.get("/selecciones")
+def listar_selecciones(cliente_id: Optional[int] = None,
+                       db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Propiedades seleccionadas/guardadas para clientes. Si viene `cliente_id`,
+    filtra por ese cliente."""
+    v = get_vendedor(db, user)
+    q = _scope(db.query(mv.VentasSeleccion), mv.VentasSeleccion, v)
+    if cliente_id is not None:
+        q = q.filter(mv.VentasSeleccion.cliente_id == cliente_id)
+    return [_seleccion_out(s) for s in q.order_by(mv.VentasSeleccion.id.desc()).all()]
+
+
+@router.post("/selecciones")
+def crear_seleccion(data: _SeleccionIn,
+                    db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Asocia una propiedad (de cualquier fuente: instagram/web/tokko/catálogo)
+    a un cliente. Idempotente por (cliente_id, fuente, ref_externa)."""
+    v = get_vendedor(db, user)
+    cli = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).filter_by(id=data.cliente_id).first()
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    if data.ref_externa:
+        ya = (_scope(db.query(mv.VentasSeleccion), mv.VentasSeleccion, v)
+              .filter(mv.VentasSeleccion.cliente_id == data.cliente_id,
+                      mv.VentasSeleccion.fuente == data.fuente,
+                      mv.VentasSeleccion.ref_externa == data.ref_externa).first())
+        if ya:
+            return {**_seleccion_out(ya), "ya_existia": True}
+    obj = mv.VentasSeleccion(
+        vendedor_id=v.id, is_demo=bool(v.is_demo),
+        cliente_id=data.cliente_id, fuente=data.fuente, ref_externa=data.ref_externa,
+        propiedad_id=data.propiedad_id, titulo=data.titulo, direccion=data.direccion,
+        precio_texto=data.precio_texto, operacion=data.operacion,
+        imagen_url=data.imagen_url, link_externo=data.link_externo, notas=data.notas,
+    )
+    db.add(obj); db.flush()
+    _audit(db, v, "ventas_selecciones", obj.id, mv.AuditAccion.create, data.model_dump())
+    db.commit(); db.refresh(obj)
+    return {**_seleccion_out(obj), "ya_existia": False}
+
+
+@router.delete("/selecciones/{sid}")
+def borrar_seleccion(sid: int,
+                     db: Session = Depends(get_db), user=Depends(get_current_user)):
+    v = get_vendedor(db, user)
+    obj = _scope(db.query(mv.VentasSeleccion), mv.VentasSeleccion, v).filter_by(id=sid).first()
+    if not obj:
+        raise HTTPException(404, "Selección no encontrada")
+    db.delete(obj); db.commit()
+    return {"ok": True}
+
+
 @router.patch("/clientes/{cid}", response_model=sv.ClienteOut)
 def editar_cliente(cid: int, data: sv.ClienteUpdate,
                    db: Session = Depends(get_db), user=Depends(get_current_user)):
@@ -199,6 +280,9 @@ def eliminar_cliente(cid: int, db: Session = Depends(get_db), user=Depends(get_c
     db.query(mv.VentasPedido).filter_by(cliente_id=cid).delete(synchronize_session=False)
     db.query(mv.VentasTarea).filter_by(cliente_id=cid).update({"cliente_id": None}, synchronize_session=False)
     db.query(mv.VentasOperacion).filter_by(cliente_id=cid).update({"cliente_id": None}, synchronize_session=False)
+    # Selecciones (favoritos) del cliente: FK NOT NULL sin cascade → hay que
+    # borrarlas antes que el cliente o Postgres tira IntegrityError.
+    db.query(mv.VentasSeleccion).filter_by(cliente_id=cid).delete(synchronize_session=False)
     _audit(db, v, "ventas_clientes", cid, mv.AuditAccion.delete)
     db.delete(obj); db.commit()
     return {"ok": True}
@@ -869,12 +953,22 @@ def ficha_cliente(cid: int, db: Session = Depends(get_db), user=Depends(get_curr
 @router.get("/propiedades", response_model=List[sv.PropiedadOut])
 def listar_propiedades(barrio_id: Optional[int] = None, tipo: Optional[str] = None,
                        estado: Optional[str] = None, q: Optional[str] = None,
+                       operacion: Optional[str] = None,
                        skip: int = 0, limit: int = Query(200, le=500),
                        db: Session = Depends(get_db), user=Depends(get_current_user)):
     v = get_vendedor(db, user)  # garantiza acceso
     query = _demo(db.query(mv.VentasPropiedad), mv.VentasPropiedad, v)
     if barrio_id is not None:
         query = query.filter(mv.VentasPropiedad.barrio_id == barrio_id)
+    # Filtro por modalidad (venta/alquiler): excluye la modalidad OPUESTA, pero
+    # deja pasar 'ambas' y las aún sin clasificar (NULL) para no ocultar datos.
+    op = ventas_matching.normalizar_operacion(operacion)
+    if op in ("venta", "alquiler"):
+        opuesta = "alquiler" if op == "venta" else "venta"
+        query = query.filter(
+            (mv.VentasPropiedad.operacion.is_(None)) |
+            (mv.VentasPropiedad.operacion != opuesta)
+        )
     if tipo:
         query = query.filter(mv.VentasPropiedad.tipo == _enum(mv.VPropiedadTipo, tipo, "tipo"))
     if estado:
@@ -897,6 +991,9 @@ def crear_propiedad(data: sv.PropiedadCreate,
     payload["tipo"] = _enum(mv.VPropiedadTipo, payload.get("tipo"), "tipo")
     payload["estado"] = _enum(mv.VPropiedadEstado, payload.get("estado"), "estado")
     payload["fuente"] = _enum(mv.VPropiedadFuente, payload.get("fuente"), "fuente")
+    # Normalizar operación (venta/alquiler/ambas) para que el filtro —que compara
+    # contra literales en minúscula— funcione aunque llegue "Venta" o texto libre.
+    payload["operacion"] = ventas_matching.normalizar_operacion(payload.get("operacion"))
     obj = mv.VentasPropiedad(**payload, cargada_por=v.id, is_demo=bool(v.is_demo))
     # Auto-geocoding (Mod #5): si hay dirección y no se asignó barrio a mano,
     # intentar resolver lat/lng y barrio. Best-effort, no bloquea el alta.
@@ -928,6 +1025,7 @@ def editar_propiedad(pid: int, data: sv.PropiedadCreate,
     if "tipo" in payload: payload["tipo"] = _enum(mv.VPropiedadTipo, payload["tipo"], "tipo")
     if "estado" in payload: payload["estado"] = _enum(mv.VPropiedadEstado, payload["estado"], "estado")
     if "fuente" in payload: payload["fuente"] = _enum(mv.VPropiedadFuente, payload["fuente"], "fuente")
+    if "operacion" in payload: payload["operacion"] = ventas_matching.normalizar_operacion(payload["operacion"])
     for k, val in payload.items():
         setattr(obj, k, val)
     _audit(db, v, "ventas_propiedades", pid, mv.AuditAccion.update, data.model_dump(exclude_unset=True))
@@ -1728,6 +1826,7 @@ def propiedad_importar_confirmar(payload: dict,
         tipo=tipo,
         estado=mv.VPropiedadEstado.disponible,
         fuente=mv.VPropiedadFuente.propia,
+        operacion=ventas_matching.normalizar_operacion(d.get("operacion")),
         direccion=d.get("direccion"),
         ciudad=" ".join(x for x in [d.get("ciudad"), d.get("provincia")] if x) or None,
         precio_usd=d.get("precio_usd"),
@@ -1818,6 +1917,7 @@ def red_tokko_importar(payload: dict,
             tipo=_enum(mv.VPropiedadTipo, _map_tokko_tipo(r.get("tipo")), "tipo"),
             estado=mv.VPropiedadEstado.disponible,
             fuente=mv.VPropiedadFuente.tokko,
+            operacion=ventas_matching.normalizar_operacion(r.get("operacion")),
             direccion=r.get("direccion"), ciudad=r.get("ubicacion"),
             lat=r.get("lat"), lng=r.get("lng"),
             precio_usd=r.get("precio_num"),

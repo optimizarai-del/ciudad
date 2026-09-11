@@ -317,6 +317,9 @@ class VentasPropiedad(Base):
     tipo = Column(SQLEnum(VPropiedadTipo), default=VPropiedadTipo.casa)
     estado = Column(SQLEnum(VPropiedadEstado), default=VPropiedadEstado.disponible)
     fuente = Column(SQLEnum(VPropiedadFuente), default=VPropiedadFuente.propia)
+    # Modalidad de la operación: venta | alquiler | ambas. String (no enum) para
+    # migración portable SQLite/Postgres. Se copia desde la fuente al importar.
+    operacion = Column(String, index=True)
 
     # Ubicación
     direccion = Column(String)
@@ -364,6 +367,7 @@ class VentasPedido(Base):
 
     # Criterios de búsqueda
     tipo = Column(SQLEnum(VPropiedadTipo))
+    operacion = Column(String)         # venta | alquiler — qué busca el cliente
     zona = Column(String)              # texto libre / barrio buscado
     barrio_id = Column(Integer, ForeignKey("ventas_barrios.id"))
     precio_min_usd = Column(Float)
@@ -389,6 +393,68 @@ class VentasPedidoPropiedad(Base):
     propiedad_id = Column(Integer, ForeignKey("ventas_propiedades.id"), index=True, nullable=False)
     estado = Column(String, default="sugerida")  # sugerida | mostrada | descartada
     nota = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class VentasSeleccion(Base):
+    """Propiedad SELECCIONADA/guardada directamente para un cliente (favorito).
+
+    A diferencia de VentasPedidoPropiedad (que exige un Pedido y que la
+    propiedad esté importada al catálogo), esta tabla asocia DIRECTO
+    cliente ↔ propiedad y funciona con propiedades de CUALQUIER fuente
+    (Instagram, web/scraping, red Tokko o catálogo propio) SIN necesidad de
+    importarlas: guarda un snapshot (título, precio, foto, link) más la
+    referencia de origen para deduplicar. Si la propiedad ya vive en el
+    catálogo, `propiedad_id` la enlaza; si viene de un scraping/post, queda el
+    snapshot igual.
+    """
+    __tablename__ = "ventas_selecciones"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
+    vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"), index=True)
+    cliente_id = Column(Integer, ForeignKey("ventas_clientes.id"), index=True, nullable=False)
+
+    fuente = Column(String, index=True)          # instagram | web | tokko | catalogo
+    ref_externa = Column(String, index=True)     # id/URL en la fuente (para dedup)
+    propiedad_id = Column(Integer, ForeignKey("ventas_propiedades.id"))  # si es del catálogo
+
+    # Snapshot para mostrar la selección sin depender de la fuente original.
+    titulo = Column(String)
+    direccion = Column(String)
+    precio_texto = Column(String)     # "USD 120.000" | "$350.000/mes"
+    operacion = Column(String)        # venta | alquiler (si se conoce)
+    imagen_url = Column(String)
+    link_externo = Column(String)
+    notas = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    cliente = relationship("VentasCliente")
+
+
+class VentasApiKey(Base):
+    """Clave de API de un usuario para acceso EXTERNO al módulo de Ventas.
+
+    Permite que un sistema de terceros (sin login web) consulte y cree clientes
+    en la base, atribuidos al usuario dueño de la key (su `vendedor_id`). El
+    secreto NUNCA se guarda en claro: se guarda su hash (sha256). El secreto se
+    muestra UNA sola vez al generarla.
+    """
+    __tablename__ = "ventas_api_keys"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, default=WORKSPACE_DEFAULT, index=True)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    vendedor_id = Column(Integer, ForeignKey("ventas_vendedores.id"), index=True)
+
+    nombre = Column(String)                 # etiqueta legible ("Integración web")
+    prefijo = Column(String, index=True)    # primeros chars visibles (cvk_ab12…)
+    key_hash = Column(String, nullable=False, index=True)  # sha256 del secreto
+    activa = Column(Boolean, default=True, nullable=False, index=True)
+    last_used_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

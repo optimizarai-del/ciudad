@@ -34,11 +34,35 @@ def _val(x):
     return x.value if hasattr(x, "value") else x
 
 
+def normalizar_operacion(v):
+    """Normaliza un texto libre de operación a 'venta' | 'alquiler' | 'ambas' |
+    None. Se usa al importar (para no perder la modalidad) y en el matching."""
+    if not v:
+        return None
+    s = str(v).strip().lower()
+    tiene_v = ("venta" in s or "vende" in s or "compra" in s)
+    tiene_a = ("alqui" in s or "renta" in s or "arrienda" in s)
+    if tiene_v and tiene_a:
+        return "ambas"
+    if tiene_a:
+        return "alquiler"
+    if tiene_v:
+        return "venta"
+    return None
+
+
 def evaluar_match(pedido: mv.VentasPedido, prop: mv.VentasPropiedad):
     """Devuelve (score, razones) o (0, []) si no aplica la hard rule."""
     # Hard rule: tipo
     pt, rt = _val(pedido.tipo), _val(prop.tipo)
     if pt and rt and pt != rt:
+        return 0, []
+
+    # Hard rule: modalidad (venta vs alquiler). Si ambos lados la tienen
+    # definida y no son compatibles, descarta. 'ambas' matchea con cualquiera.
+    po = normalizar_operacion(getattr(pedido, "operacion", None))
+    ro = normalizar_operacion(getattr(prop, "operacion", None))
+    if po and ro and po != "ambas" and ro != "ambas" and po != ro:
         return 0, []
 
     score = 0

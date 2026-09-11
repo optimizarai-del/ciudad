@@ -42,6 +42,7 @@ import VentasInstagram    from './pages/ventas/Instagram'
 import VentasWebs         from './pages/ventas/Webs'
 import VentasOperaciones  from './pages/ventas/Operaciones'
 import VentasContactos    from './pages/ventas/Contactos'
+import VentasSeleccionadas from './pages/ventas/Seleccionadas'
 import VersionesLocal     from './pages/VersionesLocal'
 import HistorialAcciones  from './pages/HistorialAcciones'
 
@@ -134,6 +135,9 @@ export default function App() {
         } />
         <Route path="/ventas-crm/matches" element={
           <ProtectedRoute requireVentas><VentasMatches /></ProtectedRoute>
+        } />
+        <Route path="/ventas-crm/seleccionadas" element={
+          <ProtectedRoute requireVentas><VentasSeleccionadas /></ProtectedRoute>
         } />
         <Route path="/ventas-crm/tareas" element={
           <ProtectedRoute requireVentas><VentasTareas /></ProtectedRoute>

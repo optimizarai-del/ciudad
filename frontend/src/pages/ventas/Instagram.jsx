@@ -5,6 +5,7 @@ import {
   Filter, StickyNote, X,
 } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
+import AsociarCliente from '../../components/ventas/AsociarCliente'
 import api from '../../utils/api'
 
 const ORO = '#B8893A'
@@ -308,13 +309,22 @@ export default function RadarInstagram() {
                     <span className="flex items-center gap-1"><Heart size={11} /> {p.likes}</span>
                     <span className="flex items-center gap-1"><MessageCircle size={11} /> {p.comentarios}</span>
                     {p.notas && <span title="Tiene notas"><StickyNote size={11} style={{ color: ORO }} /></span>}
-                    {p.url && (
-                      <a href={p.url} target="_blank" rel="noopener noreferrer"
-                        onClick={e => e.stopPropagation()}
-                        className="ml-auto flex items-center gap-1 hover:text-primary dark:hover:text-white transition">
-                        <ExternalLink size={11} /> Ver post
-                      </a>
-                    )}
+                    <span className="ml-auto flex items-center gap-2">
+                      <AsociarCliente
+                        propiedad={{
+                          fuente: 'instagram', ref_externa: String(p.id),
+                          titulo: (p.caption || '').slice(0, 60), precio_texto: p.precio_texto,
+                          operacion: p.operacion || null, imagen_url: p.imagen_url, link_externo: p.url,
+                        }}
+                        className="flex items-center gap-1 hover:text-[#B8893A] transition" label="Asociar" />
+                      {p.url && (
+                        <a href={p.url} target="_blank" rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          className="flex items-center gap-1 hover:text-primary dark:hover:text-white transition">
+                          <ExternalLink size={11} /> Ver post
+                        </a>
+                      )}
+                    </span>
                   </div>
                 </div>
               </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Globe, Download, Check, MapPin, Building2, RefreshCw, ExternalLink, Search, Radar, X } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
 import { useRole } from '../../context/RoleContext'
+import AsociarCliente from '../../components/ventas/AsociarCliente'
 import api from '../../utils/api'
 
 const OPERACIONES = [['', 'Todas'], ['venta', 'Venta'], ['alquiler', 'Alquiler']]
@@ -308,6 +309,12 @@ export default function RedTokko() {
                         <a href={p.ficha_url} target="_blank" rel="noreferrer"
                           className="btn-ghost !p-1.5" title="Ver ficha"><ExternalLink size={14} /></a>
                       )}
+                      <AsociarCliente propiedad={{
+                        fuente: 'tokko', ref_externa: String(p.referencia ?? ''),
+                        titulo: p.direccion, direccion: p.ubicacion,
+                        precio_texto: p.precio_display, operacion: filtros.operacion || null,
+                        imagen_url: p.foto, link_externo: p.ficha_url,
+                      }} />
                       {p.ya_importada ? (
                         <button disabled className="btn-secondary flex-1 text-[12px] opacity-60">Ya en catálogo</button>
                       ) : (

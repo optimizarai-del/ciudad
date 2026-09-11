@@ -18,6 +18,7 @@ from app import models_ventas  # noqa: F401
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
 from app.routers import cobranza, ventas_router, ventas_crm, ventas_fase23, comprobantes
 from app.routers import ventas_scraping, ventas_captacion, ventas_instagram
+from app.routers import ventas_api_externa
 from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr, tasas_mensuales, refacciones, versiones
 from app.routers import historial as historial_router
 from app.security import get_current_user
@@ -92,6 +93,8 @@ app.include_router(ventas_fase23.router)
 app.include_router(ventas_scraping.router)
 app.include_router(ventas_captacion.router)
 app.include_router(ventas_instagram.router)
+app.include_router(ventas_api_externa.router)       # gestión de API keys (JWT)
+app.include_router(ventas_api_externa.router_ext)   # endpoints externos (X-API-Key)
 app.include_router(comprobantes.router)
 app.include_router(liquidaciones.router)
 app.include_router(finanzas.router)
@@ -291,6 +294,58 @@ def _migrar_schema():
     except Exception:
         logger.exception("[migrar] _migrar_schema falló; se hace rollback y se continúa el arranque")
         db.rollback()
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def _migrar_ventas_operacion():
+    """Agrega la columna `operacion` (venta|alquiler|ambas) a las tablas del
+    módulo Ventas `ventas_propiedades` y `ventas_pedidos` si no existe todavía.
+    Idempotente (SQLite + Postgres). Feature: filtro alquiler vs venta."""
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+    db = SessionLocal()
+    try:
+        ins = inspect(engine)
+        for tabla in ("ventas_propiedades", "ventas_pedidos"):
+            try:
+                cols = {c["name"] for c in ins.get_columns(tabla, schema=schema)}
+            except Exception:
+                continue  # la tabla puede no existir aún en un deploy nuevo
+            if "operacion" not in cols:
+                db.execute(text(f"ALTER TABLE {qual}{tabla} ADD COLUMN operacion VARCHAR"))
+                db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{tabla}_operacion ON {qual}{tabla}(operacion)"))
+                db.commit()
+        # Backfill best-effort: clasificar por texto (título/descripción) las
+        # propiedades ya importadas que quedaron sin operación. Dialect-agnostic
+        # (ORM). Solo asigna cuando el texto dice claramente venta/alquiler; el
+        # resto queda NULL (se muestra en ambos filtros, no se oculta).
+        try:
+            from app import models_ventas as _mv
+            from app.services.ventas_matching import normalizar_operacion as _nop
+            faltantes = (db.query(_mv.VentasPropiedad)
+                         .filter(_mv.VentasPropiedad.operacion.is_(None)).all())
+            n = 0
+            for p in faltantes:
+                op = _nop(p.titulo) or _nop(p.descripcion)
+                if op:
+                    p.operacion = op
+                    n += 1
+            if n:
+                db.commit()
+                print(f"[migrar] ventas.operacion backfill: {n} clasificadas por texto")
+        except Exception as e:
+            db.rollback()
+            print(f"[migrar] ventas.operacion backfill: {e}")
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print(f"[migrar] ventas.operacion: {e}")
     finally:
         db.close()
 

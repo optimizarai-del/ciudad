@@ -5,7 +5,7 @@ import {
   BarChart2, TrendingUp, Settings, DollarSign,
   Home, CreditCard, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History,
   ClipboardList, Handshake, Network, LayoutGrid, Sparkles, CalendarClock, Map, Globe, Plug,
-  Instagram, Menu, ChevronDown,
+  Instagram, Menu, ChevronDown, Bookmark,
 } from 'lucide-react'
 import { useRole } from '../../context/RoleContext'
 
@@ -107,6 +107,7 @@ export default function Sidebar({ onNavigate }) {
           { to: '/ventas-crm/crm',     icon: LayoutGrid,    label: 'CRM de Ventas' },
           { to: '/ventas-crm/pedidos', icon: ClipboardList, label: 'Pedidos' },
           { to: '/ventas-crm/matches', icon: Sparkles,      label: 'Matches' },
+          { to: '/ventas-crm/seleccionadas', icon: Bookmark, label: 'Seleccionadas' },
         ]},
         { label: 'Catálogo', items: [
           { to: '/ventas-crm/propiedades', icon: Building2, label: 'Propiedades' },

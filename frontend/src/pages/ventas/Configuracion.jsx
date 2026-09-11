@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Settings, Percent, MapPinned, Ruler, Plus, Trash2, Lock, Send, Store, CalendarClock, RefreshCw, Power, Globe } from 'lucide-react'
+import { Settings, Percent, MapPinned, Ruler, Plus, Trash2, Lock, Send, Store, CalendarClock, RefreshCw, Power, Globe, KeyRound, Copy } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
 import api from '../../utils/api'
 
@@ -12,6 +12,7 @@ const TABS = [
   { key: 'tokko', label: 'Tokko', icon: Store },
   { key: 'portales', label: 'Portales', icon: Globe },
   { key: 'plantillas', label: 'Seguimiento', icon: CalendarClock },
+  { key: 'apikeys', label: 'API', icon: KeyRound },
 ]
 
 export default function Configuracion() {
@@ -54,8 +55,102 @@ export default function Configuracion() {
         {tab === 'tokko' && <Tokko admin={me?.es_admin} />}
         {tab === 'portales' && <Portales admin={me?.es_admin} />}
         {tab === 'plantillas' && <Plantillas admin={me?.es_admin} />}
+        {tab === 'apikeys' && <ApiKeys />}
       </div>
     </Layout>
+  )
+}
+
+function ApiKeys() {
+  const [keys, setKeys] = useState([])
+  const [nombre, setNombre] = useState('')
+  const [creada, setCreada] = useState(null)   // { api_key, prefijo, nombre } — se muestra una sola vez
+  const [copiado, setCopiado] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  const load = () => api.get('/api/ventas-crm/api-keys').then(r => setKeys(r.data || [])).catch(() => setKeys([]))
+  useEffect(() => { load() }, [])
+
+  const crear = async () => {
+    setLoading(true)
+    try {
+      const { data } = await api.post('/api/ventas-crm/api-keys', { nombre: nombre || 'API key' })
+      setCreada(data); setNombre(''); load()
+    } catch {} finally { setLoading(false) }
+  }
+  const revocar = async (id) => {
+    if (!confirm('¿Revocar esta API key? Los sistemas que la usen dejarán de funcionar.')) return
+    try { await api.delete(`/api/ventas-crm/api-keys/${id}`); load() } catch {}
+  }
+  const copiar = () => {
+    if (!creada?.api_key) return
+    navigator.clipboard?.writeText(creada.api_key).then(() => { setCopiado(true); setTimeout(() => setCopiado(false), 1500) })
+  }
+
+  const base = window.location.origin.replace('ciudad.', 'api.ciudad.')
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4">
+        <p className="text-[14px] font-semibold flex items-center gap-2 mb-1"><KeyRound size={16} className="text-[#B8893A]" /> API keys</p>
+        <p className="text-[12px] text-muted mb-3">
+          Generá una clave para consultar y crear clientes en la base desde un sistema externo. Los clientes creados con la clave quedan asociados a tu usuario.
+        </p>
+        <div className="flex gap-2">
+          <input className="input !py-2 text-[13px]" placeholder="Nombre (ej. Integración web)" value={nombre} onChange={e => setNombre(e.target.value)} />
+          <button className="btn-primary !py-2 text-[13px] whitespace-nowrap" onClick={crear} disabled={loading}>
+            <Plus size={14} /> Generar clave
+          </button>
+        </div>
+      </div>
+
+      {creada && (
+        <div className="card p-4 border-[#B8893A]/40 bg-[#B8893A]/5">
+          <p className="text-[13px] font-semibold mb-1">Tu nueva clave «{creada.nombre}»</p>
+          <p className="text-[12px] text-muted mb-2">⚠️ Copiala ahora: por seguridad no se vuelve a mostrar.</p>
+          <div className="flex gap-2 items-center">
+            <code className="flex-1 text-[12px] bg-white dark:bg-[#141414] border border-border rounded-lg px-3 py-2 break-all">{creada.api_key}</code>
+            <button className="btn-secondary !py-2 text-[12px] whitespace-nowrap" onClick={copiar}>
+              <Copy size={13} /> {copiado ? 'Copiado' : 'Copiar'}
+            </button>
+          </div>
+          <button className="text-[12px] text-muted mt-2 hover:underline" onClick={() => setCreada(null)}>Ya la guardé, ocultar</button>
+        </div>
+      )}
+
+      <div className="card p-4">
+        <p className="text-[13px] font-semibold mb-2">Cómo usarla</p>
+        <p className="text-[12px] text-muted mb-2">Enviá la clave en el header <code className="text-[#B8893A]">X-API-Key</code>. Ejemplos:</p>
+        <pre className="text-[11px] bg-neutral-100 dark:bg-[#141414] rounded-lg p-3 overflow-x-auto whitespace-pre">{`# Listar clientes
+curl -H "X-API-Key: TU_CLAVE" ${base}/api/externo/clientes
+
+# Crear un cliente
+curl -X POST -H "X-API-Key: TU_CLAVE" -H "Content-Type: application/json" \\
+  -d '{"nombre":"Juan Perez","telefono":"2954...","origen":"web"}' \\
+  ${base}/api/externo/clientes`}</pre>
+      </div>
+
+      <div className="card p-4">
+        <p className="text-[13px] font-semibold mb-2">Tus claves</p>
+        {keys.length === 0 ? (
+          <p className="text-[12px] text-muted">No tenés claves generadas.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {keys.map(k => (
+              <div key={k.id} className="flex items-center justify-between py-2">
+                <div>
+                  <p className="text-[13px] font-medium">{k.nombre} {!k.activa && <span className="chip-muted text-[10px]">revocada</span>}</p>
+                  <p className="text-[11px] text-muted">{k.prefijo}··· · {k.last_used_at ? `último uso ${new Date(k.last_used_at).toLocaleDateString('es-AR')}` : 'sin uso'}</p>
+                </div>
+                {k.activa && (
+                  <button className="p-1.5 text-muted hover:text-danger" onClick={() => revocar(k.id)} title="Revocar"><Trash2 size={14} /></button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
