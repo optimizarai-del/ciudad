@@ -21,6 +21,7 @@ export default function AsociarCliente({ propiedad, className = '', label = '' }
   const [clientes, setClientes] = useState([])
   const [loading, setLoading] = useState(false)
   const [okMsg, setOkMsg] = useState('')
+  const [errMsg, setErrMsg] = useState('')
   const [saving, setSaving] = useState(null)
 
   const cargar = async (query = '') => {
@@ -33,16 +34,16 @@ export default function AsociarCliente({ propiedad, className = '', label = '' }
     } catch { setClientes([]) } finally { setLoading(false) }
   }
 
-  useEffect(() => { if (open) { setQ(''); setOkMsg(''); cargar('') } }, [open])
+  useEffect(() => { if (open) { setQ(''); setOkMsg(''); setErrMsg(''); cargar('') } }, [open])
 
   const asociar = async (cli) => {
-    setSaving(cli.id); setOkMsg('')
+    setSaving(cli.id); setOkMsg(''); setErrMsg('')
     try {
       const { data } = await api.post('/api/ventas-crm/selecciones', { cliente_id: cli.id, ...propiedad })
-      setOkMsg(data.ya_existia ? `Ya estaba asociada a ${cli.nombre}` : `✓ Asociada a ${cli.nombre}`)
-      setTimeout(() => { setOpen(false) }, 1100)
+      setOkMsg(data.ya_existia ? `Ya estaba asociada a ${cli.nombre}` : `Asociada a ${cli.nombre}`)
+      setTimeout(() => { setOpen(false) }, 1600)
     } catch (e) {
-      setOkMsg(e?.response?.data?.detail || 'Error al asociar')
+      setErrMsg(e?.response?.data?.detail || 'Error al asociar')
     } finally { setSaving(null) }
   }
 
@@ -78,7 +79,16 @@ export default function AsociarCliente({ propiedad, className = '', label = '' }
               onChange={e => { setQ(e.target.value); cargar(e.target.value) }}
             />
 
-            {okMsg && <div className="mb-2 text-[13px] text-[#B8893A]">{okMsg}</div>}
+            {okMsg && (
+              <div className="mb-2 flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-2 text-[13px] text-emerald-400">
+                <Check size={15} className="shrink-0" />{okMsg}
+              </div>
+            )}
+            {errMsg && (
+              <div className="mb-2 rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-[13px] text-red-400">
+                {errMsg}
+              </div>
+            )}
 
             <div className="max-h-72 overflow-y-auto divide-y divide-border">
               {loading ? (

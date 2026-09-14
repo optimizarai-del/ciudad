@@ -1703,7 +1703,9 @@ def dashboard(db: Session = Depends(get_db), user=Depends(get_current_user)):
     pedidos = _scope(db.query(mv.VentasPedido), mv.VentasPedido, v).all()
     clientes = _scope(db.query(mv.VentasCliente), mv.VentasCliente, v).all()
     ops = _scope(db.query(mv.VentasOperacion), mv.VentasOperacion, v).all()
-    props_disp = db.query(mv.VentasPropiedad).filter(
+    # Mismo scope demo que el catálogo (GET /propiedades usa _demo): así el KPI
+    # "en cartera" del dashboard coincide siempre con lo que se ve en Propiedades.
+    props_disp = _demo(db.query(mv.VentasPropiedad), mv.VentasPropiedad, v).filter(
         mv.VentasPropiedad.estado == mv.VPropiedadEstado.disponible
     ).count()
 
