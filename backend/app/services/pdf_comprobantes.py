@@ -190,6 +190,42 @@ def _tabla_desglose(rows: list[dict], total_pagado: float | None = None,
     return t
 
 
+def _bloque_forma_pago(story, sty, total, transferencia, notas,
+                       saldo_label="Saldo abonado en efectivo/caja"):
+    """Agrega al `story` (si corresponde) el detalle de la forma de pago y las
+    observaciones. Cuando parte del cobro se abonó por transferencia, el
+    comprobante debe dejarlo asentado junto con el saldo restante —antes no
+    aparecía y el operador no podía justificar el saldo—.
+
+    - transferencia > 0 → sección FORMA DE PAGO con lo abonado por transferencia
+      y el saldo (total − transferencia), que es lo cobrado en efectivo/caja.
+    - notas → sección OBSERVACIONES con la nota cargada al cobrar.
+    """
+    try:
+        transferencia = float(transferencia or 0)
+    except (TypeError, ValueError):
+        transferencia = 0.0
+    if transferencia > 0:
+        try:
+            saldo = round(float(total or 0) - transferencia, 2)
+        except (TypeError, ValueError):
+            saldo = 0.0
+        story += [
+            Spacer(1, 6 * mm),
+            Paragraph("FORMA DE PAGO", sty["CiudadSection"]),
+            _tabla_kv([
+                ("Pagado por transferencia", _money(transferencia)),
+                (saldo_label, _money(saldo)),
+            ]),
+        ]
+    if notas and str(notas).strip():
+        story += [
+            Spacer(1, 6 * mm),
+            Paragraph("OBSERVACIONES", sty["CiudadSection"]),
+            Paragraph(str(notas).strip(), sty["CiudadClause"]),
+        ]
+
+
 def generar_pdf_comprobante_inquilino(ctx: dict) -> bytes:
     """
     ctx = {
@@ -260,6 +296,10 @@ def generar_pdf_comprobante_inquilino(ctx: dict) -> bytes:
             ),
             _tabla_kv([(lbl, _money(monto)) for lbl, monto in items_pagado_directo]),
         ]
+
+    # Forma de pago (transferencia + saldo en caja) y observaciones, si las hubo.
+    _bloque_forma_pago(story, sty, ctx.get("total"),
+                       ctx.get("pagado_transferencia"), ctx.get("notas"))
 
     story += [
         Spacer(1, 10 * mm),
@@ -380,6 +420,12 @@ def generar_pdf_comprobante_propietario(ctx: dict) -> bytes:
             incluye_a_rendir=True,
         ),
     ]
+
+    # Forma de pago del inquilino (transferencia + saldo en caja) y observaciones.
+    # El saldo se calcula sobre lo cobrado al inquilino, no sobre el neto.
+    _bloque_forma_pago(story, sty,
+                       cobrado_total or sum(v for _, v in items_cobrados),
+                       ctx.get("pagado_transferencia"), ctx.get("notas"))
 
     story += [
         Spacer(1, 8 * mm),

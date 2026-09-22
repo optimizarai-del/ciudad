@@ -407,6 +407,12 @@ def registrar_override_manual(
     mes y se marca `manual=True`. El motor no lo pisa: se mantiene hasta la próxima
     actualización del contrato (donde el índice se aplica SOBRE el valor manual).
 
+    Un cambio manual hecho en CUALQUIER mes del período (no solo en el mes exacto
+    de actualización) se ancla al boundary del período vigente y por lo tanto vale
+    para TODO el período —hasta la próxima actualización, sean 3 o 6 meses según la
+    periodicidad del contrato—. Ese es el comportamiento pedido: si se cambia el
+    monto a mano, se mantiene durante todo el ciclo de ajuste.
+
     Devuelve True si registró/actualizó un override. No hace commit (lo deja al
     caller). Defensivo: ante cualquier problema devuelve False sin romper el cobro.
     """
@@ -420,15 +426,11 @@ def registrar_override_manual(
         boundary = _boundary_de_periodo(contrato, periodo)
         if boundary is None:
             return False  # período anterior al primer ajuste: no hay qué overridear
-        # Solo se registra el override si el mes que se cobra ES el mes de
-        # actualización del contrato (el boundary). Un cambio manual en un mes
-        # intermedio del período no redefine el precio del período.
-        try:
-            y, m = [int(x) for x in str(periodo).split("-")[:2]]
-        except Exception:
-            return False
-        if not (boundary.year == y and boundary.month == m):
-            return False
+        # NOTA: antes se exigía que el mes cobrado fuera EXACTAMENTE el mes de
+        # actualización (boundary) para registrar el override; un cambio en un mes
+        # intermedio se descartaba y "no se mantenía". Se quitó esa restricción a
+        # pedido: cualquier cambio manual dentro del período se ancla al boundary
+        # del período vigente y se mantiene hasta la próxima actualización.
         # Valor previo (informativo, para monto_anterior/porcentaje).
         prev_ajustes = sorted(
             [a for a in (contrato.ajustes or []) if a.fecha and a.fecha < boundary],

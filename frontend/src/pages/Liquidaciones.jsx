@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import {
   Receipt, CheckCircle2, Clock, RefreshCw, Search, X, AlertCircle,
-  RotateCcw, ChevronDown, ChevronRight, ListChecks,
+  RotateCcw, ChevronDown, ChevronRight, ListChecks, Printer,
 } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import api from '../utils/api'
@@ -312,6 +312,30 @@ function GrupoPropietario({ grupo, expandido, onToggle, onMarcar, onRevertir }) 
 
 function ItemLiquidacion({ item, onMarcar, onRevertir }) {
   const [verDesglose, setVerDesglose] = useState(false)
+  const [compLoading, setCompLoading] = useState(false)
+
+  // Abre el comprobante de liquidación (PDF del propietario) en una ventana
+  // nueva, desde donde se puede imprimir o descargar. El comprobante se genera
+  // al registrar el cobro; acá solo se recupera.
+  const verComprobante = async () => {
+    setCompLoading(true)
+    try {
+      const { data: comps } = await api.get(`/api/comprobantes/?pago_id=${item.pago_id}`)
+      const comp = (comps || []).find(c => c.tipo === 'propietario') || (comps || [])[0]
+      if (!comp) {
+        alert('No hay comprobante para esta liquidación. Se genera al registrar el cobro.')
+        return
+      }
+      const r = await api.get(`/api/comprobantes/${comp.id}/pdf`, { responseType: 'blob' })
+      const url = URL.createObjectURL(new Blob([r.data], { type: 'application/pdf' }))
+      window.open(url, '_blank', 'noopener')
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch {
+      alert('No se pudo abrir el comprobante.')
+    } finally {
+      setCompLoading(false)
+    }
+  }
   // Parsear el JSON granular si existe en el pago
   let conceptos = []
   if (item.detalle_conceptos) {
@@ -369,7 +393,15 @@ function ItemLiquidacion({ item, onMarcar, onRevertir }) {
         )}
       </div>
 
-      <div className="shrink-0">
+      <div className="shrink-0 flex items-center gap-1.5">
+        <button
+          onClick={verComprobante}
+          disabled={compLoading}
+          className="btn-ghost py-1.5 px-2 text-[11px]"
+          title="Ver / imprimir comprobante"
+        >
+          <Printer size={12} />
+        </button>
         {item.liquidado ? (
           <button
             onClick={onRevertir}

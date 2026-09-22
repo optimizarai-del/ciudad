@@ -705,6 +705,9 @@ def _registrar_pago_impl(
         # Conceptos que el inquilino pagó directamente al ente (informativo)
         "items_pagado_directo": items_pagado_directo,
         "total": monto_total,
+        # Forma de pago: parte por transferencia (el resto es saldo en caja) y nota.
+        "pagado_transferencia": float(data.monto_pagado_transferencia or 0),
+        "notas": data.notas,
     })
 
     # PDF propietario — incluye desglose de lo cobrado al inquilino y la
@@ -731,6 +734,9 @@ def _registrar_pago_impl(
         "comision_porc": comision_pct,
         "monto_comision": comision,
         "monto_neto": neto,
+        # Forma de pago del inquilino (transferencia + saldo) y nota del cobro.
+        "pagado_transferencia": float(data.monto_pagado_transferencia or 0),
+        "notas": data.notas,
     })
 
     # Crear comprobantes
