@@ -40,6 +40,9 @@ def normalizar_operacion(v):
     if not v:
         return None
     s = str(v).strip().lower()
+    # Valor explícito "ambas"/"ambos"/"todas" (lo que manda el selector del form).
+    if "amba" in s or "ambo" in s or s in ("todas", "todos", "todo"):
+        return "ambas"
     tiene_v = ("venta" in s or "vende" in s or "compra" in s)
     tiene_a = ("alqui" in s or "renta" in s or "arrienda" in s)
     if tiene_v and tiene_a:

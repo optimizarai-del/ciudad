@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { UserPlus, X, Check } from 'lucide-react'
 import api from '../../utils/api'
 
@@ -57,8 +58,8 @@ export default function AsociarCliente({ propiedad, className = '', label = '' }
         <UserPlus size={14} />{label ? <span className="ml-1 text-[12px]">{label}</span> : null}
       </button>
 
-      {open && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
+      {open && createPortal((
+        <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50 p-4"
           onClick={() => setOpen(false)}>
           <div className="card w-full max-w-md p-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
@@ -111,7 +112,7 @@ export default function AsociarCliente({ propiedad, className = '', label = '' }
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
     </>
   )
 }

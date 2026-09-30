@@ -19,9 +19,11 @@ const ESTADO_VINC = { sugerida: 'Sugerida', mostrada: 'Mostrada', descartada: 'D
 
 const empty = {
   cliente_id: '', estado: 'nuevo', prioridad: 'media', tipo: 'casa',
+  operacion: 'venta',
   zona: '', precio_min_usd: '', precio_max_usd: '', dormitorios_min: '',
   superficie_min_m2: '', detalle: '',
 }
+const OPERACIONES = { venta: 'Venta', alquiler: 'Alquiler', ambas: 'Ambas' }
 const num = v => v === '' || v == null ? null : Number(v)
 const fmtUSD = n => n ? 'USD ' + n.toLocaleString('es-AR') : '—'
 
@@ -45,7 +47,7 @@ export default function PedidoModal({ initial, clientes, onClose, onSaved }) {
     if (!form.cliente_id) { setErr('Elegí un cliente.'); setLoading(false); return }
     const payload = {
       cliente_id: Number(form.cliente_id), estado: form.estado, prioridad: form.prioridad,
-      tipo: form.tipo, zona: form.zona || null,
+      tipo: form.tipo, operacion: form.operacion || 'venta', zona: form.zona || null,
       precio_min_usd: num(form.precio_min_usd), precio_max_usd: num(form.precio_max_usd),
       dormitorios_min: num(form.dormitorios_min), superficie_min_m2: num(form.superficie_min_m2),
       detalle: form.detalle || null,
@@ -77,7 +79,11 @@ export default function PedidoModal({ initial, clientes, onClose, onSaved }) {
               {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div><label className="label">Operación</label>
+              <select className="input" value={form.operacion || 'venta'} onChange={set('operacion')}>
+                {Object.entries(OPERACIONES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select></div>
             <div><label className="label">Tipo</label>
               <select className="input" value={form.tipo} onChange={set('tipo')}>
                 {TIPOS.map(t => <option key={t} value={t}>{t}</option>)}

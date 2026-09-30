@@ -1237,6 +1237,7 @@ def crear_pedido(data: sv.PedidoCreate,
     payload["estado"] = _enum(mv.PedidoEstado, payload.get("estado"), "estado")
     payload["prioridad"] = _enum(mv.PedidoPrioridad, payload.get("prioridad"), "prioridad")
     payload["tipo"] = _enum(mv.VPropiedadTipo, payload.get("tipo"), "tipo")
+    payload["operacion"] = ventas_matching.normalizar_operacion(payload.get("operacion"))
     obj = mv.VentasPedido(**payload, vendedor_id=v.id, is_demo=bool(v.is_demo))
     db.add(obj); db.flush()
     _audit(db, v, "ventas_pedidos", obj.id, mv.AuditAccion.create, data.model_dump())
@@ -1259,6 +1260,7 @@ def editar_pedido(pid: int, data: sv.PedidoUpdate,
     if "estado" in payload: payload["estado"] = _enum(mv.PedidoEstado, payload["estado"], "estado")
     if "prioridad" in payload: payload["prioridad"] = _enum(mv.PedidoPrioridad, payload["prioridad"], "prioridad")
     if "tipo" in payload: payload["tipo"] = _enum(mv.VPropiedadTipo, payload["tipo"], "tipo")
+    if "operacion" in payload: payload["operacion"] = ventas_matching.normalizar_operacion(payload["operacion"])
     for k, val in payload.items():
         setattr(obj, k, val)
     try:

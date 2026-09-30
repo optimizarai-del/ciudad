@@ -35,10 +35,28 @@ def _token() -> str:
     return os.getenv("APIFY_TOKEN", "").strip()
 
 
+def _handle(raw: str) -> str:
+    """Normaliza una cuenta a su username puro (sin @, sin URL).
+
+    Acepta lo que cargue el operador: '@casa', 'casa',
+    'https://www.instagram.com/casa/', 'instagram.com/casa?hl=es'. Si viene una
+    URL, se queda con el primer segmento del path (el perfil). Así una cuenta
+    cargada como URL completa no rompe el scraper con un 400 de Apify."""
+    u = (raw or "").strip().lower()
+    # Sacar esquema y query/fragment
+    u = re.sub(r"^https?://", "", u).split("?")[0].split("#")[0]
+    # Si tiene dominio de instagram, quedarse con lo que sigue
+    if "instagram.com/" in u:
+        u = u.split("instagram.com/", 1)[1]
+    # Primer segmento del path (evita /p/, /reel/, sub-rutas)
+    u = u.strip("/").split("/")[0]
+    return u.lstrip("@").strip()
+
+
 def _apify_input(username: str, limite: int) -> dict[str, Any]:
     """Input del actor apify/instagram-scraper para traer los últimos posts
     de un perfil puntual."""
-    u = username.strip().lstrip("@").lower()
+    u = _handle(username)
     return {
         "directUrls": [f"https://www.instagram.com/{u}/"],
         "resultsType": "posts",
@@ -116,7 +134,7 @@ def scrapear_cuenta(username: str, limite: int | None = None) -> list[dict[str, 
     """Devuelve los últimos posts (normalizados) de una cuenta. Apify si hay
     token; si no, modo mock."""
     limite = min(int(limite or MAX_POSTS_DEFAULT), 50)
-    u = username.strip().lstrip("@").lower()
+    u = _handle(username)
     if not u:
         return []
 
@@ -126,16 +144,28 @@ def scrapear_cuenta(username: str, limite: int | None = None) -> list[dict[str, 
 
     actor = APIFY_ACTOR.replace("/", "~")  # la API usa ~ como separador
     url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
+    # El token va por header Authorization (NO como query param): así nunca queda
+    # en la URL y no se filtra si httpx incluye la URL en el mensaje de error.
+    headers = {"Authorization": f"Bearer {_token()}"}
     try:
         with httpx.Client(timeout=_TIMEOUT) as client:
-            resp = client.post(url, params={"token": _token()}, json=_apify_input(u, limite))
+            resp = client.post(url, headers=headers, json=_apify_input(u, limite))
             resp.raise_for_status()
             data = resp.json()
             items = data if isinstance(data, list) else data.get("items", [])
             return [_normalizar(it, u) for it in items if isinstance(it, dict)]
+    except httpx.HTTPStatusError as e:
+        # Mensaje SANITIZADO: solo status + cuenta. Nunca la URL/token ni el body
+        # crudo de Apify (que en el request lleva el token en claro).
+        code = e.response.status_code if e.response is not None else "?"
+        logger.error("Apify falló para @%s: HTTP %s", u, code)
+        detalle = ("la cuenta no existe o está mal cargada (revisá el usuario)"
+                   if code == 400 else f"HTTP {code}")
+        raise RuntimeError(f"Error consultando Apify para @{u}: {detalle}") from None
     except httpx.HTTPError as e:
-        logger.error("Apify falló para @%s: %s", u, e)
-        raise RuntimeError(f"Error consultando Apify: {e}") from e
+        # Error de red/timeout: log con el tipo, sin exponer detalles al front.
+        logger.error("Apify error de red para @%s: %s", u, type(e).__name__)
+        raise RuntimeError(f"Error de conexión con Apify para @{u}.") from None
 
 
 def _mock_posts(username: str, n: int) -> list[dict[str, Any]]:
