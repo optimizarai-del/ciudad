@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { UserPlus, X, Check } from 'lucide-react'
 import api from '../../utils/api'
@@ -24,15 +24,31 @@ export default function AsociarCliente({ propiedad, className = '', label = '' }
   const [okMsg, setOkMsg] = useState('')
   const [errMsg, setErrMsg] = useState('')
   const [saving, setSaving] = useState(null)
+  const seqRef = useRef(0)        // descarta respuestas que llegan fuera de orden
+  const debRef = useRef(null)     // timer de debounce
 
   const cargar = async (query = '') => {
+    const myseq = ++seqRef.current
     setLoading(true)
     try {
       const { data } = await api.get(
         `/api/ventas-crm/clientes?limit=50${query ? `&q=${encodeURIComponent(query)}` : ''}`
       )
-      setClientes(Array.isArray(data) ? data : [])
-    } catch { setClientes([]) } finally { setLoading(false) }
+      // Solo aplicamos si es la búsqueda más reciente (evita que una respuesta
+      // vieja de un prefijo más corto pise el resultado del texto actual).
+      if (myseq === seqRef.current) setClientes(Array.isArray(data) ? data : [])
+    } catch {
+      if (myseq === seqRef.current) setClientes([])
+    } finally {
+      if (myseq === seqRef.current) setLoading(false)
+    }
+  }
+
+  // Debounce: espera a que el usuario deje de tipear antes de pegarle al backend.
+  const buscar = (valor) => {
+    setQ(valor)
+    if (debRef.current) clearTimeout(debRef.current)
+    debRef.current = setTimeout(() => cargar(valor), 250)
   }
 
   useEffect(() => { if (open) { setQ(''); setOkMsg(''); setErrMsg(''); cargar('') } }, [open])
@@ -77,7 +93,7 @@ export default function AsociarCliente({ propiedad, className = '', label = '' }
             <input
               className="input !py-2 text-[13px] mb-2" placeholder="Buscar cliente por nombre, tel o email…"
               value={q} autoFocus
-              onChange={e => { setQ(e.target.value); cargar(e.target.value) }}
+              onChange={e => buscar(e.target.value)}
             />
 
             {okMsg && (

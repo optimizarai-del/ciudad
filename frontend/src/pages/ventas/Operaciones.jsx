@@ -4,6 +4,7 @@ import Layout from '../../components/Layout/Layout'
 import api from '../../utils/api'
 
 const ESTADOS = ['abierta', 'sena', 'cerrada', 'caida']
+const ESTADO_LABEL = { abierta: 'Abierta', sena: 'Seña', cerrada: 'Cerrada', caida: 'Caída' }
 const fmtUSD = n => n ? 'USD ' + n.toLocaleString('es-AR') : '—'
 const num = v => v === '' || v == null ? null : Number(v)
 
@@ -52,9 +53,9 @@ export default function Operaciones() {
                   <tr key={o.id} className="hover:bg-neutral-50 dark:hover:bg-[#1A1A1A]">
                     <td className="td font-medium text-[13px]">{cli(o.cliente_id)}</td>
                     <td className="td text-center">
-                      <select className="text-[12px] bg-transparent border border-border rounded-lg px-1.5 py-1 capitalize cursor-pointer"
+                      <select className="text-[12px] bg-transparent border border-border rounded-lg px-1.5 py-1 cursor-pointer"
                         value={o.estado} onChange={e => cambiarEstado(o, e.target.value)}>
-                        {ESTADOS.map(s => <option key={s} value={s}>{s}</option>)}
+                        {ESTADOS.map(s => <option key={s} value={s}>{ESTADO_LABEL[s]}</option>)}
                       </select>
                     </td>
                     <td className="td text-[13px]">{fmtUSD(o.monto_cierre_usd)}</td>
@@ -99,7 +100,7 @@ function OpModal({ clientes, props, onClose, onSaved }) {
           <div><label className="label">Cliente</label><select className="input" value={form.cliente_id} onChange={set('cliente_id')}><option value="">— elegir —</option>{clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></div>
           <div><label className="label">Propiedad</label><select className="input" value={form.propiedad_id} onChange={set('propiedad_id')}><option value="">— elegir —</option>{props.map(p => <option key={p.id} value={p.id}>{p.titulo || p.direccion || `#${p.id}`}</option>)}</select></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="label">Estado</label><select className="input" value={form.estado} onChange={set('estado')}>{ESTADOS.map(s => <option key={s}>{s}</option>)}</select></div>
+            <div><label className="label">Estado</label><select className="input" value={form.estado} onChange={set('estado')}>{ESTADOS.map(s => <option key={s} value={s}>{ESTADO_LABEL[s]}</option>)}</select></div>
             <div><label className="label">Monto cierre USD</label><input className="input" type="number" value={form.monto_cierre_usd} onChange={set('monto_cierre_usd')} /></div>
           </div>
           <div><label className="label">Fecha de cierre</label><input className="input" type="date" value={form.fecha_cierre} onChange={set('fecha_cierre')} /></div>

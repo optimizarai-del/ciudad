@@ -93,7 +93,7 @@ export default function Pedidos() {
               <table className="w-full">
                 <thead className="bg-neutral-50 dark:bg-[#141414] border-b border-border">
                   <tr>
-                    <th className="th">Cliente</th><th className="th">Tipo</th><th className="th">Zona</th>
+                    <th className="th">Cliente</th><th className="th">Tipo</th><th className="th">Operación</th><th className="th">Zona</th>
                     <th className="th">Presupuesto</th><th className="th text-center">Estado</th>
                     <th className="th text-center">Prioridad</th><th className="th w-20" />
                   </tr>
@@ -104,6 +104,7 @@ export default function Pedidos() {
                       onClick={() => { setEditing(p); setOpen(true) }}>
                       <td className="td font-medium text-[13px]">{clienteNombre(p.cliente_id)}</td>
                       <td className="td capitalize text-[12px] text-muted">{p.tipo || '—'}</td>
+                      <td className="td capitalize text-[12px] text-muted">{p.operacion || '—'}</td>
                       <td className="td text-[12px] text-muted">{p.zona || '—'}</td>
                       <td className="td text-[12px] text-muted">{p.precio_max_usd ? `hasta USD ${p.precio_max_usd.toLocaleString('es-AR')}` : '—'}</td>
                       <td className="td text-center"><span className="chip-muted">{COL_LABEL[p.estado]}</span></td>
