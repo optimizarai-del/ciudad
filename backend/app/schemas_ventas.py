@@ -211,6 +211,7 @@ class PedidoOut(BaseModel):
     estado: str
     prioridad: str
     tipo: Optional[str] = None
+    operacion: Optional[str] = None
     zona: Optional[str] = None
     barrio_id: Optional[int] = None
     precio_min_usd: Optional[float] = None

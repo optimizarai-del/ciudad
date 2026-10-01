@@ -122,6 +122,7 @@ function PropModal({ initial, onClose, onSaved }) {
     e.preventDefault(); setErr(''); setLoading(true)
     const payload = {
       titulo: form.titulo || null, tipo: form.tipo, estado: form.estado, fuente: form.fuente,
+      operacion: form.operacion || 'venta',
       direccion: form.direccion || null, ciudad: form.ciudad || null,
       precio_usd: num(form.precio_usd), superficie_m2: num(form.superficie_m2),
       dormitorios: num(form.dormitorios), banos: num(form.banos), antiguedad_anios: num(form.antiguedad_anios),

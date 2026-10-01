@@ -20,6 +20,10 @@ export default function Operaciones() {
   }
   useEffect(() => { load() }, [])
   const cli = id => clientes.find(c => c.id === id)?.nombre || '—'
+  const cambiarEstado = async (o, estado) => {
+    try { await api.patch(`/api/ventas-crm/operaciones/${o.id}`, { estado }); load() }
+    catch (e) { alert(e.response?.data?.detail || 'No se pudo cambiar el estado.') }
+  }
 
   return (
     <Layout>
@@ -47,7 +51,12 @@ export default function Operaciones() {
                 {list.map(o => (
                   <tr key={o.id} className="hover:bg-neutral-50 dark:hover:bg-[#1A1A1A]">
                     <td className="td font-medium text-[13px]">{cli(o.cliente_id)}</td>
-                    <td className="td text-center"><span className="chip-muted capitalize">{o.estado}</span></td>
+                    <td className="td text-center">
+                      <select className="text-[12px] bg-transparent border border-border rounded-lg px-1.5 py-1 capitalize cursor-pointer"
+                        value={o.estado} onChange={e => cambiarEstado(o, e.target.value)}>
+                        {ESTADOS.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
                     <td className="td text-[13px]">{fmtUSD(o.monto_cierre_usd)}</td>
                     <td className="td text-[13px]">{fmtUSD(o.comision_monto_usd)} <span className="text-[11px] text-muted">({o.comision_pct}%{o.comision_manual ? ' manual' : ''})</span></td>
                     <td className="td text-[12px] text-muted">{o.fecha_cierre || '—'}</td>
