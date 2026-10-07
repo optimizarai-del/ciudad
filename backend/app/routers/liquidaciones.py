@@ -21,7 +21,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
 from app.security import get_current_user
@@ -173,7 +173,7 @@ def _ajustar_residuo(partes: list, neto_total: float) -> None:
         partes[-1]["neto_parte"] = round(partes[-1]["neto_parte"] + residuo, 2)
 
 
-def _serializar_pago(pago: models.Pago) -> dict:
+def _serializar_pago(pago: models.Pago, refs_por_pago: dict | None = None) -> dict:
     contrato = pago.contrato
     prop = contrato.propiedad if contrato else None
     propietario = prop.propietario if prop else None
@@ -183,19 +183,23 @@ def _serializar_pago(pago: models.Pago) -> dict:
     # Refacciones que se descontaron en este pago — las mostramos en el
     # desglose del modal de liquidación para que el operador vea por qué
     # el monto cobrado al inquilino fue menor.
-    from sqlalchemy.orm import object_session
-    sess = object_session(pago)
+    # Si el caller ya trajo las refacciones en lote (`refs_por_pago`), las usamos
+    # de ahí (evita el N+1 en el listado "Todas"); si no, consultamos por pago.
     refacciones_aplicadas = []
-    if sess:
-        refs = sess.query(models.Refaccion).filter_by(pago_id=pago.id).all()
-        for r in refs:
-            refacciones_aplicadas.append({
-                "id": r.id,
-                "descripcion": r.descripcion,
-                "monto": r.monto,
-                "fecha": r.fecha.isoformat() if r.fecha else None,
-                "pagador": r.pagador.value if hasattr(r.pagador, "value") else r.pagador,
-            })
+    if refs_por_pago is not None:
+        refs = refs_por_pago.get(pago.id, [])
+    else:
+        from sqlalchemy.orm import object_session
+        sess = object_session(pago)
+        refs = sess.query(models.Refaccion).filter_by(pago_id=pago.id).all() if sess else []
+    for r in refs:
+        refacciones_aplicadas.append({
+            "id": r.id,
+            "descripcion": r.descripcion,
+            "monto": r.monto,
+            "fecha": r.fecha.isoformat() if r.fecha else None,
+            "pagador": r.pagador.value if hasattr(r.pagador, "value") else r.pagador,
+        })
     return {
         "pago_id": pago.id,
         "periodo": pago.periodo,
@@ -255,6 +259,10 @@ def listar(
           .options(
               joinedload(models.Pago.contrato).joinedload(models.Contrato.propiedad).joinedload(models.Propiedad.propietario),
               joinedload(models.Pago.contrato).joinedload(models.Contrato.inquilino),
+              # Co-propietarios (pivote) + su cliente, en lote: sin esto, el split
+              # lazy-loadea por cada pago y "Todas" se vuelve O(N) queries → timeout.
+              selectinload(models.Pago.contrato).selectinload(models.Contrato.propiedad)
+                .selectinload(models.Propiedad.propietarios).selectinload(models.PropiedadPropietario.cliente),
           )
           .filter(models.Pago.estado == models.PagoEstado.pagado)
     )
@@ -276,7 +284,13 @@ def listar(
         )
 
     rows = q.order_by(models.Pago.fecha_pago.desc().nullslast(), models.Pago.id.desc()).all()
-    items = [_serializar_pago(p) for p in rows]
+    # Refacciones de TODOS los pagos en una sola query (evita el N+1 por pago).
+    refs_por_pago: dict[int, list] = {}
+    ids = [p.id for p in rows]
+    if ids:
+        for r in db.query(models.Refaccion).filter(models.Refaccion.pago_id.in_(ids)).all():
+            refs_por_pago.setdefault(r.pago_id, []).append(r)
+    items = [_serializar_pago(p, refs_por_pago=refs_por_pago) for p in rows]
 
     # Agrupado por co-propietario: si una propiedad tiene 2 dueños, el pago
     # aparece en AMBOS grupos con su parte correspondiente. Esto es lo que

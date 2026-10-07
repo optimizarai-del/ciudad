@@ -40,7 +40,7 @@ export default function Liquidaciones() {
   const cargar = useCallback(() => {
     setLoading(true); setErr('')
     Promise.allSettled([
-      api.get(`/api/liquidaciones?estado=${estado}`, { timeout: 15000 }),
+      api.get(`/api/liquidaciones?estado=${estado}`, { timeout: 30000 }),
       api.get('/api/liquidaciones/resumen', { timeout: 10000 }),
     ]).then(([l, r]) => {
       if (l.status === 'fulfilled') setData(l.value.data)
