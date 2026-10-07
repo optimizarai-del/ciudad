@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, FileText, Users, Calculator,
   BarChart2, Bot, TrendingUp, Settings, DollarSign,
-  Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History
+  Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History, Wallet
 } from 'lucide-react'
 import { useRole } from '../../context/RoleContext'
 
@@ -65,6 +65,7 @@ export default function Sidebar({ onNavigate }) {
           <NavItem to="/alquileres/contratos"   icon={FileText}       label="Contratos" />
           <NavItem to="/alquileres/cobranza"       icon={CreditCard}     label="Cobros" />
           <NavItem to="/alquileres/liquidaciones"  icon={Receipt}        label="Liquidaciones" />
+          <NavItem to="/alquileres/caja"           icon={Wallet}         label="Caja" />
           <NavItem to="/alquileres/tasas"          icon={Landmark}       label="Tasas municipales" />
           <NavItem to="/alquileres/refacciones"    icon={Wrench}         label="Refacciones" />
           <NavItem to="/alquileres/clientes"       icon={Users}          label="Clientes" />

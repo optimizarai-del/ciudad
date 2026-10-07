@@ -21,6 +21,7 @@ import DashboardVentas    from './pages/DashboardVentas'
 import PropiedadesVenta   from './pages/PropiedadesVenta'
 import Propietarios       from './pages/Propietarios'
 import Liquidaciones      from './pages/Liquidaciones'
+import Caja               from './pages/Caja'
 import Recordatorios      from './pages/Recordatorios'
 import ActualizarTasas    from './pages/ActualizarTasas'
 import Refacciones        from './pages/Refacciones'
@@ -65,6 +66,9 @@ export default function App() {
         } />
         <Route path="/alquileres/liquidaciones" element={
           <ProtectedRoute requireAlquileres><Liquidaciones /></ProtectedRoute>
+        } />
+        <Route path="/alquileres/caja" element={
+          <ProtectedRoute requireAlquileres><Caja /></ProtectedRoute>
         } />
         <Route path="/alquileres/tasas" element={
           <ProtectedRoute requireAlquileres><ActualizarTasas /></ProtectedRoute>

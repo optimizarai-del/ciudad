@@ -25,7 +25,7 @@ export default function Calculadora() {
     if (!busqueda && !propId) { setErr('Ingresá una dirección o seleccioná una propiedad.'); return }
     setLoading(true); setErr(''); setResultado(null)
     try {
-      const r = await api.post('/api/calculadora', {
+      const r = await api.post('/api/calculadora/', {
         direccion: busqueda || null,
         propiedad_id: propId ? Number(propId) : null,
         fecha,

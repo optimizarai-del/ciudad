@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import Logo from './Logo'
 import NotificacionesPanel from './NotificacionesPanel'
+import GlobalSearch from './GlobalSearch'
 import api from '../utils/api'
 
 export default function HUD({ onToggleSidebar, drawerOpen }) {
@@ -14,7 +15,19 @@ export default function HUD({ onToggleSidebar, drawerOpen }) {
   const [stats, setStats]   = useState(null)
   const [resumen, setResumen] = useState({ total: 0, criticos: 0 })
   const [panelOpen, setPanelOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const bellRef = useRef(null)
+
+  // Atajo de teclado: Ctrl/Cmd+K abre la búsqueda global.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault(); setSearchOpen(o => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   useEffect(() => {
     const fetchAll = () => {
@@ -62,7 +75,7 @@ export default function HUD({ onToggleSidebar, drawerOpen }) {
         <div className="ml-auto flex items-center gap-0.5 sm:gap-1">
           {/* Buscar sólo en sm+ */}
           <div className="hidden sm:block">
-            <IconBtn><Search size={15} /></IconBtn>
+            <IconBtn onClick={() => setSearchOpen(true)} title="Buscar (Ctrl+K)"><Search size={15} /></IconBtn>
           </div>
 
           {/* Bell con badge + panel dropdown */}
@@ -104,6 +117,8 @@ export default function HUD({ onToggleSidebar, drawerOpen }) {
           <IconBtn onClick={logout}><LogOut size={15} /></IconBtn>
         </div>
       </div>
+
+      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   )
 }
