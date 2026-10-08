@@ -28,10 +28,17 @@ if IS_POSTGRES:
     # `options=-c search_path=...` se envía en el startup packet de Postgres,
     # así que vale TANTO para conexiones nuevas como para las reusadas por
     # Supavisor (event listener `connect` no es 100% fiable con el pooler).
+    # pool_size + max_overflow: los defaults de SQLAlchemy (5 + 10) permiten
+    # hasta 15 conexiones POR PROCESO, que es exactamente el techo del pooler
+    # de Supabase en session mode. Un solo worker podia agotarlo, y durante un
+    # deploy (replica vieja + nueva conviviendo) la nueva no conseguia conexion
+    # y moria al arrancar. Con 2 + 3 = 5 por proceso entran varias replicas.
     engine = create_engine(
         DATABASE_URL,
         pool_pre_ping=True,
         pool_recycle=1800,
+        pool_size=2,
+        max_overflow=3,
         connect_args={
             "options": f"-c search_path={CIUDAD_SCHEMA},public",
         },
