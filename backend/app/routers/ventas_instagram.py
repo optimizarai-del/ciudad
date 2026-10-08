@@ -54,6 +54,7 @@ class CuentaUpdate(BaseModel):
 
 class PublicacionUpdate(BaseModel):
     notas: Optional[str] = None
+    guardada: Optional[bool] = None
 
 
 def _cuenta_dict(c: mv.IgCuenta) -> dict:
@@ -85,6 +86,9 @@ def _pub_dict(p: mv.IgPublicacion) -> dict:
         "autor_foto": p.autor_foto,
         "operacion": p.operacion,
         "precio_texto": p.precio_texto,
+        "dormitorios": p.dormitorios,
+        "superficie_m2": p.superficie_m2,
+        "guardada": bool(p.guardada),
         "notas": p.notas,
         "scraped_at": p.scraped_at.isoformat() if p.scraped_at else None,
     }
@@ -154,15 +158,18 @@ def borrar_cuenta(cuenta_id: int, db: Session = Depends(get_db), user=Depends(ge
 @router.post("/cuentas/{cuenta_id}/scrapear")
 def scrapear_una(cuenta_id: int, limite: Optional[int] = None,
                  operacion: Optional[str] = None, q: Optional[str] = None,
+                 zona: Optional[str] = None, dorm_min: Optional[int] = None,
+                 m2_min: Optional[float] = None,
                  db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Corre el scraper de una cuenta. `operacion` ('venta'|'alquiler') y `q`
-    (palabra clave) filtran los posts ANTES de guardarlos."""
+    """Corre el scraper de una cuenta. Los filtros (operacion, q, zona,
+    dorm_min, m2_min) se leen del caption y filtran los posts ANTES de guardar."""
     v = get_vendedor(db, user)
     _solo_admin(v)
     c = _demo(db.query(mv.IgCuenta), mv.IgCuenta, v).filter(mv.IgCuenta.id == cuenta_id).first()
     if not c:
         raise HTTPException(404, "Cuenta no encontrada")
-    resumen = ig.correr_scrape(db, [c], limite, operacion=operacion, q=q)
+    resumen = ig.correr_scrape(db, [c], limite, operacion=operacion, q=q,
+                               zona=zona, dorm_min=dorm_min, m2_min=m2_min)
     db.commit()
     return resumen
 
@@ -170,15 +177,18 @@ def scrapear_una(cuenta_id: int, limite: Optional[int] = None,
 @router.post("/scrapear")
 def scrapear_todas(limite: Optional[int] = None,
                    operacion: Optional[str] = None, q: Optional[str] = None,
+                   zona: Optional[str] = None, dorm_min: Optional[int] = None,
+                   m2_min: Optional[float] = None,
                    db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """Corre el scraper de todas las cuentas activas. `operacion` y `q` filtran
-    los posts ANTES de guardarlos (solo se traen los que matchean)."""
+    """Corre el scraper de todas las cuentas activas. Los filtros se aplican
+    ANTES de guardar (solo se traen los posts que matchean)."""
     v = get_vendedor(db, user)
     _solo_admin(v)
     cuentas = _demo(db.query(mv.IgCuenta), mv.IgCuenta, v).filter(mv.IgCuenta.activa.is_(True)).all()
     if not cuentas:
         return {"cuentas": 0, "nuevas": 0, "usando_mock": True, "detalle": []}
-    resumen = ig.correr_scrape(db, cuentas, limite, operacion=operacion, q=q)
+    resumen = ig.correr_scrape(db, cuentas, limite, operacion=operacion, q=q,
+                               zona=zona, dorm_min=dorm_min, m2_min=m2_min)
     db.commit()
     return resumen
 
@@ -187,7 +197,9 @@ def scrapear_todas(limite: Optional[int] = None,
 
 @router.get("/publicaciones")
 def listar_publicaciones(cuenta_id: Optional[int] = None, operacion: Optional[str] = None,
-                         q: Optional[str] = None, skip: int = 0,
+                         q: Optional[str] = None, zona: Optional[str] = None,
+                         dorm_min: Optional[int] = None, m2_min: Optional[float] = None,
+                         guardada: Optional[bool] = None, skip: int = 0,
                          limit: int = Query(60, le=200),
                          db: Session = Depends(get_db), user=Depends(get_current_user)):
     v = get_vendedor(db, user)
@@ -196,12 +208,20 @@ def listar_publicaciones(cuenta_id: Optional[int] = None, operacion: Optional[st
         query = query.filter(mv.IgPublicacion.cuenta_id == cuenta_id)
     if operacion:
         query = query.filter(mv.IgPublicacion.operacion == operacion)
+    if guardada is not None:
+        query = query.filter(mv.IgPublicacion.guardada.is_(bool(guardada)))
+    if dorm_min:
+        query = query.filter(mv.IgPublicacion.dormitorios >= dorm_min)
+    if m2_min:
+        query = query.filter(mv.IgPublicacion.superficie_m2 >= m2_min)
     if q and q.strip():
         like = f"%{q.strip()}%"
         query = query.filter(
             (mv.IgPublicacion.caption.ilike(like))
             | (mv.IgPublicacion.autor_username.ilike(like))
         )
+    if zona and zona.strip():
+        query = query.filter(mv.IgPublicacion.caption.ilike(f"%{zona.strip()}%"))
     total = query.count()
     rows = (
         query.order_by(mv.IgPublicacion.fecha_post.desc(), mv.IgPublicacion.id.desc())

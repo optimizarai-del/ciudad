@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Instagram, Plus, Trash2, RefreshCw, ExternalLink, Search,
   Heart, MessageCircle, AlertTriangle, Loader2, Power,
-  Filter, StickyNote, X,
+  Filter, StickyNote, X, Bookmark, BedDouble, Ruler,
 } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
 import AsociarCliente from '../../components/ventas/AsociarCliente'
@@ -25,13 +25,22 @@ export default function RadarInstagram() {
   const [filtroCuenta, setFiltroCuenta] = useState('')
   const [filtroOper, setFiltroOper] = useState('')
   const [busqueda, setBusqueda] = useState('')
+  // Filtros de listado adicionales (zona / dormitorios / m²) + ver guardadas
+  const [filtroZona, setFiltroZona] = useState('')
+  const [filtroDorm, setFiltroDorm] = useState('')
+  const [filtroM2, setFiltroM2] = useState('')
+  const [verGuardadas, setVerGuardadas] = useState(false)
   const [corriendo, setCorriendo] = useState(false)
   const [cargando, setCargando] = useState(true)
   const [toast, setToast] = useState(null)   // {kind, text}
   const [usandoMock, setUsandoMock] = useState(false)
-  // Filtros de búsqueda del scraping (se aplican antes de guardar)
-  const [scrOper, setScrOper] = useState('')
+  // Filtros de búsqueda del scraping (se aplican antes de guardar).
+  // Por defecto SOLO VENTA (el radar es para prospectar propiedades en venta).
+  const [scrOper, setScrOper] = useState('venta')
   const [scrQ, setScrQ] = useState('')
+  const [scrZona, setScrZona] = useState('')
+  const [scrDorm, setScrDorm] = useState('')
+  const [scrM2, setScrM2] = useState('')
   const [scrLimite, setScrLimite] = useState(12)
   // Ficha de una publicación
   const [ficha, setFicha] = useState(null)
@@ -54,6 +63,10 @@ export default function RadarInstagram() {
       if (filtroCuenta) params.set('cuenta_id', filtroCuenta)
       if (filtroOper) params.set('operacion', filtroOper)
       if (busqueda.trim()) params.set('q', busqueda.trim())
+      if (filtroZona.trim()) params.set('zona', filtroZona.trim())
+      if (filtroDorm) params.set('dorm_min', filtroDorm)
+      if (filtroM2) params.set('m2_min', filtroM2)
+      if (verGuardadas) params.set('guardada', 'true')
       const { data } = await api.get(`/api/ventas-instagram/publicaciones?${params}`)
       setPubs(data.publicaciones || [])
       setTotalPubs(data.total || 0)
@@ -61,7 +74,7 @@ export default function RadarInstagram() {
   }
 
   useEffect(() => { cargarCuentas() }, [])
-  useEffect(() => { cargarPubs() }, [filtroCuenta, filtroOper])
+  useEffect(() => { cargarPubs() }, [filtroCuenta, filtroOper, verGuardadas])
 
   const agregar = async () => {
     const u = nuevoUser.trim().replace(/^@/, '').toLowerCase()
@@ -96,6 +109,9 @@ export default function RadarInstagram() {
       const params = new URLSearchParams()
       if (scrOper) params.set('operacion', scrOper)
       if (scrQ.trim()) params.set('q', scrQ.trim())
+      if (scrZona.trim()) params.set('zona', scrZona.trim())
+      if (scrDorm) params.set('dorm_min', scrDorm)
+      if (scrM2) params.set('m2_min', scrM2)
       if (scrLimite) params.set('limite', scrLimite)
       const base = cuentaId
         ? `/api/ventas-instagram/cuentas/${cuentaId}/scrapear`
@@ -110,6 +126,19 @@ export default function RadarInstagram() {
     } catch (e) {
       aviso('error', e?.response?.data?.detail || 'Error al correr el scraper.')
     } finally { setCorriendo(false) }
+  }
+
+  const toggleGuardar = async (p, ev) => {
+    if (ev) ev.stopPropagation()
+    try {
+      const { data } = await api.patch(`/api/ventas-instagram/publicaciones/${p.id}`, { guardada: !p.guardada })
+      // Si estamos viendo SOLO guardadas y la acabo de quitar, la saco de la lista.
+      if (verGuardadas && !data.guardada) setPubs(ps => ps.filter(x => x.id !== p.id))
+      else setPubs(ps => ps.map(x => (x.id === data.id ? data : x)))
+      if (ficha && ficha.id === data.id) setFicha(data)
+    } catch (e) {
+      aviso('error', e?.response?.data?.detail || 'No se pudo actualizar guardadas.')
+    }
   }
 
   const guardarNotas = async () => {
@@ -158,18 +187,33 @@ export default function RadarInstagram() {
             <p className="font-semibold text-[13px] tracking-tight">Qué traer</p>
             <span className="text-[11px] text-muted">— se aplica al correr el scraper: solo se guardan las publicaciones que matcheen</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             <div>
               <label className="label">Operación</label>
               <select className="input" value={scrOper} onChange={e => setScrOper(e.target.value)}>
-                <option value="">Todas</option>
                 <option value="venta">Solo Venta</option>
                 <option value="alquiler">Solo Alquiler</option>
+                <option value="">Todas</option>
               </select>
             </div>
             <div>
-              <label className="label">Palabra clave (opcional)</label>
-              <input className="input" placeholder="ej: Toay, dormitorios, USD…"
+              <label className="label">Zona</label>
+              <input className="input" placeholder="ej: Toay"
+                value={scrZona} onChange={e => setScrZona(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Dorm. mín</label>
+              <input className="input" type="number" min="0" placeholder="—"
+                value={scrDorm} onChange={e => setScrDorm(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">m² mín</label>
+              <input className="input" type="number" min="0" placeholder="—"
+                value={scrM2} onChange={e => setScrM2(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Palabra clave</label>
+              <input className="input" placeholder="ej: USD, pileta…"
                 value={scrQ} onChange={e => setScrQ(e.target.value)} />
             </div>
             <div>
@@ -179,6 +223,10 @@ export default function RadarInstagram() {
                 onChange={e => setScrLimite(Math.max(1, Math.min(50, Number(e.target.value) || 12)))} />
             </div>
           </div>
+          <p className="text-[11px] text-muted mt-2">
+            La operación, dormitorios y m² se leen de la descripción de cada
+            publicación. Si un post no declara el dato, no pasa el filtro.
+          </p>
         </div>
 
         {/* Cuentas seguidas */}
@@ -238,12 +286,22 @@ export default function RadarInstagram() {
         </div>
 
         {/* Publicaciones */}
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <p className="font-semibold text-[14px] tracking-tight">Publicaciones <span className="text-muted font-normal">({totalPubs})</span></p>
+          <div className="flex rounded-xl border border-border overflow-hidden text-[12px]">
+            <button onClick={() => setVerGuardadas(false)}
+              className={`px-3 py-1.5 transition ${!verGuardadas ? 'bg-[#B8893A] text-white' : 'text-muted hover:text-[#B8893A]'}`}>
+              Todas
+            </button>
+            <button onClick={() => setVerGuardadas(true)}
+              className={`px-3 py-1.5 flex items-center gap-1 transition ${verGuardadas ? 'bg-[#B8893A] text-white' : 'text-muted hover:text-[#B8893A]'}`}>
+              <Bookmark size={12} /> Guardadas
+            </button>
+          </div>
         </div>
 
-        {/* Filtros */}
-        <div className="card p-3 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+        {/* Filtros del listado */}
+        <div className="card p-3 mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 items-end">
           <div>
             <label className="label">Cuenta</label>
             <select className="input" value={filtroCuenta} onChange={e => setFiltroCuenta(e.target.value)}>
@@ -258,6 +316,24 @@ export default function RadarInstagram() {
             </select>
           </div>
           <div>
+            <label className="label">Zona</label>
+            <input className="input" placeholder="ej: Toay"
+              value={filtroZona} onChange={e => setFiltroZona(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && cargarPubs()} />
+          </div>
+          <div>
+            <label className="label">Dorm. mín</label>
+            <input className="input" type="number" min="0" placeholder="—"
+              value={filtroDorm} onChange={e => setFiltroDorm(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && cargarPubs()} />
+          </div>
+          <div>
+            <label className="label">m² mín</label>
+            <input className="input" type="number" min="0" placeholder="—"
+              value={filtroM2} onChange={e => setFiltroM2(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && cargarPubs()} />
+          </div>
+          <div>
             <label className="label">Buscar</label>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -267,6 +343,9 @@ export default function RadarInstagram() {
                 onKeyDown={e => e.key === 'Enter' && cargarPubs()} />
             </div>
           </div>
+          <button className="btn-secondary !py-2 text-[13px] col-span-2 sm:col-span-1" onClick={cargarPubs} disabled={cargando}>
+            <Filter size={13} /> Aplicar filtros
+          </button>
         </div>
 
         {cargando ? (
@@ -274,7 +353,11 @@ export default function RadarInstagram() {
         ) : pubs.length === 0 ? (
           <div className="card text-center py-20">
             <Instagram size={34} className="mx-auto text-muted/30 mb-3" />
-            <p className="text-muted text-[14px]">No hay publicaciones todavía. Agregá cuentas y tocá «Correr todas».</p>
+            <p className="text-muted text-[14px]">
+              {verGuardadas
+                ? 'No guardaste ninguna publicación todavía. Tocá el marcador en una publicación para guardarla acá.'
+                : 'No hay publicaciones todavía. Agregá cuentas y tocá «Correr todas».'}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -288,6 +371,11 @@ export default function RadarInstagram() {
                     {p.operacion && (
                       <span className="absolute top-2 left-2 chip-success capitalize text-[11px]">{p.operacion}</span>
                     )}
+                    <button onClick={e => toggleGuardar(p, e)} title={p.guardada ? 'Quitar de guardadas' : 'Guardar'}
+                      className={`absolute top-2 right-2 grid place-items-center w-7 h-7 rounded-full backdrop-blur transition ${
+                        p.guardada ? 'bg-[#B8893A] text-white' : 'bg-black/35 text-white hover:bg-[#B8893A]'}`}>
+                      <Bookmark size={13} fill={p.guardada ? 'currentColor' : 'none'} />
+                    </button>
                     {p.precio_texto && (
                       <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-black/70 text-white">{p.precio_texto}</span>
                     )}
@@ -305,6 +393,12 @@ export default function RadarInstagram() {
                     <span className="text-[10px] text-muted ml-auto shrink-0">{fechaCorta(p.fecha_post)}</span>
                   </div>
                   <p className="text-[12px] text-muted line-clamp-3 whitespace-pre-wrap">{p.caption}</p>
+                  {(p.dormitorios || p.superficie_m2) && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {p.dormitorios ? <span className="chip-muted text-[10px] flex items-center gap-1"><BedDouble size={10} /> {p.dormitorios} dorm</span> : null}
+                      {p.superficie_m2 ? <span className="chip-muted text-[10px] flex items-center gap-1"><Ruler size={10} /> {Math.round(p.superficie_m2)} m²</span> : null}
+                    </div>
+                  )}
                   <div className="flex items-center gap-3 text-[11px] text-muted mt-auto pt-1">
                     <span className="flex items-center gap-1"><Heart size={11} /> {p.likes}</span>
                     <span className="flex items-center gap-1"><MessageCircle size={11} /> {p.comentarios}</span>
@@ -360,10 +454,16 @@ export default function RadarInstagram() {
                 </div>
               )}
               <div className="p-4 flex flex-col gap-3 min-w-0">
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 items-center">
                   {ficha.operacion && <span className="chip-success capitalize">{ficha.operacion}</span>}
                   {ficha.precio_texto && <span className="chip-dark">{ficha.precio_texto}</span>}
-                  {ficha.tipo && <span className="chip-muted capitalize">{ficha.tipo}</span>}
+                  {ficha.dormitorios ? <span className="chip-muted flex items-center gap-1"><BedDouble size={11} /> {ficha.dormitorios} dorm</span> : null}
+                  {ficha.superficie_m2 ? <span className="chip-muted flex items-center gap-1"><Ruler size={11} /> {Math.round(ficha.superficie_m2)} m²</span> : null}
+                  <button onClick={() => toggleGuardar(ficha)} title={ficha.guardada ? 'Quitar de guardadas' : 'Guardar'}
+                    className={`ml-auto flex items-center gap-1 text-[12px] px-2.5 py-1 rounded-full border transition ${
+                      ficha.guardada ? 'bg-[#B8893A] text-white border-[#B8893A]' : 'border-border text-muted hover:border-[#B8893A]'}`}>
+                    <Bookmark size={12} fill={ficha.guardada ? 'currentColor' : 'none'} /> {ficha.guardada ? 'Guardada' : 'Guardar'}
+                  </button>
                 </div>
 
                 <div className="text-[12px] text-muted flex flex-wrap gap-x-4 gap-y-1">

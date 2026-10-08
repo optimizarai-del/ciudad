@@ -597,6 +597,43 @@ def _migrar_ig_publicaciones_notas():
 
 
 @app.on_event("startup")
+def _migrar_ig_publicaciones_extra():
+    """Agrega a ventas_ig_publicaciones las columnas de datos duros leídos del
+    caption (dormitorios, superficie_m2) y el flag de guardada (favorito).
+    Idempotente."""
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine, IS_POSTGRES, CIUDAD_SCHEMA
+    schema = CIUDAD_SCHEMA if IS_POSTGRES else None
+    qual = f"{CIUDAD_SCHEMA}." if IS_POSTGRES else ""
+    cols_nuevas = {
+        "dormitorios": "INTEGER",
+        "superficie_m2": "FLOAT",
+        "guardada": "BOOLEAN DEFAULT FALSE" if IS_POSTGRES else "BOOLEAN DEFAULT 0",
+    }
+    db = SessionLocal()
+    try:
+        ins = inspect(engine)
+        if "ventas_ig_publicaciones" not in ins.get_table_names(schema=schema):
+            return
+        existentes = {c["name"] for c in ins.get_columns("ventas_ig_publicaciones", schema=schema)}
+        for col, tipo in cols_nuevas.items():
+            if col in existentes:
+                continue
+            try:
+                db.execute(text(
+                    f"ALTER TABLE {qual}ventas_ig_publicaciones ADD COLUMN {col} {tipo}"))
+                db.commit()
+                print(f"[migrar] ventas_ig_publicaciones.{col} agregada")
+            except Exception:
+                db.rollback()
+                logger.exception("[migrar] ventas_ig_publicaciones.%s falló; se continúa", col)
+    except Exception:
+        logger.exception("[migrar] _migrar_ig_publicaciones_extra falló; se continúa el arranque")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
 def _migrar_tokko_conexiones():
     """Agrega a ventas_tokko_config las columnas de la sección Conexiones
     (credenciales web + estado de la última prueba). Idempotente."""

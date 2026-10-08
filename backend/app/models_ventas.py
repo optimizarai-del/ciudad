@@ -904,6 +904,12 @@ class IgPublicacion(Base):
     # Parseo liviano del caption (para análisis)
     operacion = Column(String)                   # venta | alquiler | None
     precio_texto = Column(String)                # ej "USD 120.000" si se detecta
+    # Datos duros leídos del caption (para filtrar sin abrir el post).
+    dormitorios = Column(Integer)                # dormitorios/ambientes detectados
+    superficie_m2 = Column(Float)                # m² detectados
+
+    # Guardada por el equipo (favorito) — alimenta la sección "Guardadas".
+    guardada = Column(Boolean, default=False, index=True)
 
     # Notas del equipo sobre esta publicación (se editan desde la ficha).
     notas = Column(Text)

@@ -72,9 +72,16 @@ _RE_PRECIO = re.compile(
 
 
 def _parse_operacion(caption: str) -> str | None:
+    """Lee el caption (texto + hashtags) para decidir si es venta o alquiler.
+    Es la señal confiable y gratuita (no hay OCR de la imagen): la mayoría de
+    las inmobiliarias escriben 'VENTA'/'ALQUILER' en la descripción."""
     t = (caption or "").lower()
-    venta = any(k in t for k in ("venta", "vende", "en venta", "se vende", "vendo"))
-    alq = any(k in t for k in ("alquiler", "alquila", "renta", "alquilo", "en alquiler"))
+    venta = any(k in t for k in (
+        "venta", "vende", "en venta", "se vende", "vendo", "a la venta",
+        "#venta", "#enventa", "oportunidad de venta"))
+    alq = any(k in t for k in (
+        "alquiler", "alquila", "alquilo", "en alquiler", "renta", "rento",
+        "#alquiler", "#enalquiler", "alquiler temporario", "alquiler anual"))
     if venta and not alq:
         return "venta"
     if alq and not venta:
@@ -91,6 +98,47 @@ def _parse_precio(caption: str) -> str | None:
     simbolo = m.group(1).upper().replace("U$S", "USD").replace("US$", "USD")
     numero = m.group(2).strip().rstrip(".,")   # sin puntuación final ("120.000." → "120.000")
     return f"{simbolo} {numero}".strip()
+
+
+# Dormitorios / ambientes: "3 dormitorios", "2 dorm", "monoambiente",
+# "4 ambientes" (ambientes = dormitorios + 1 estar; lo guardamos como pista).
+_RE_DORM = re.compile(r"(\d+)\s*(?:dormitorios?|dorm\.?|hab\.?|habitaciones?|cuartos?)", re.IGNORECASE)
+_RE_AMB = re.compile(r"(\d+)\s*(?:ambientes?|amb\.?)", re.IGNORECASE)
+# m²: "120 m2", "120 m²", "120 mts2", "120 metros cuadrados".
+_RE_M2 = re.compile(r"([\d][\d\.\,]*)\s*(?:m2|m²|mts2?|metros\s*(?:cuadrados)?)", re.IGNORECASE)
+
+
+def _parse_dormitorios(caption: str) -> int | None:
+    t = caption or ""
+    m = _RE_DORM.search(t)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return None
+    if re.search(r"monoambiente|mono\s*amb", t, re.IGNORECASE):
+        return 1
+    # Fallback: "N ambientes" → aprox N-1 dormitorios (mínimo 1).
+    m = _RE_AMB.search(t)
+    if m:
+        try:
+            return max(1, int(m.group(1)) - 1)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_m2(caption: str) -> float | None:
+    m = _RE_M2.search(caption or "")
+    if not m:
+        return None
+    raw = m.group(1).replace(".", "").replace(",", ".")
+    try:
+        val = float(raw)
+    except ValueError:
+        return None
+    # Descartar valores absurdos (ruido tipo años o teléfonos).
+    return val if 5 <= val <= 100000 else None
 
 
 # ── Normalización de un item de Apify a nuestro contrato común ───────────────
@@ -127,6 +175,8 @@ def _normalizar(item: dict, cuenta_username: str) -> dict[str, Any]:
         "autor_foto": item.get("ownerProfilePicUrl") or "",
         "operacion": _parse_operacion(caption),
         "precio_texto": _parse_precio(caption),
+        "dormitorios": _parse_dormitorios(caption),
+        "superficie_m2": _parse_m2(caption),
     }
 
 
@@ -235,36 +285,50 @@ def _upsert_publicaciones(db, cuenta: mv.IgCuenta, posts: list[dict]) -> int:
             autor_foto=p.get("autor_foto"),
             operacion=p.get("operacion"),
             precio_texto=p.get("precio_texto"),
+            dormitorios=p.get("dormitorios"),
+            superficie_m2=p.get("superficie_m2"),
         ))
         nuevas += 1
     return nuevas
 
 
 def filtrar_posts(posts: list[dict], operacion: str | None = None,
-                  q: str | None = None) -> list[dict]:
-    """Filtra los posts traídos ANTES de guardarlos.
+                  q: str | None = None, zona: str | None = None,
+                  dorm_min: int | None = None, m2_min: float | None = None) -> list[dict]:
+    """Filtra los posts traídos ANTES de guardarlos (se descartan los que no
+    matchean, así no se gasta DB ni se ensucia la lista).
 
-    - operacion: 'venta' | 'alquiler' → deja solo los que matchean (los posts
-      que mencionan ambas cosas cuentan para las dos).
-    - q: palabra clave → el caption la tiene que contener (case-insensitive).
+    - operacion: 'venta' | 'alquiler' → deja solo los que matchean. En 'venta'
+      descarta los de alquiler puro (los que no se pudieron clasificar también
+      se descartan, para asegurar que sean ventas).
+    - q / zona: el caption tiene que CONTENER esa palabra/localidad.
+    - dorm_min / m2_min: mínimo de dormitorios / m² leídos del caption. Si el
+      post no declara el dato, no pasa el filtro (no podemos asegurarlo).
     """
     out = posts
     if operacion:
         op = operacion.strip().lower()
         if op in ("venta", "alquiler"):
             out = [p for p in out if (p.get("operacion") or "") in (op, "venta/alquiler")]
-    if q and q.strip():
-        needle = q.strip().lower()
-        out = [p for p in out if needle in (p.get("caption") or "").lower()]
+    for needle in (q, zona):
+        if needle and needle.strip():
+            n = needle.strip().lower()
+            out = [p for p in out if n in (p.get("caption") or "").lower()]
+    if dorm_min:
+        out = [p for p in out if (p.get("dormitorios") or 0) >= dorm_min]
+    if m2_min:
+        out = [p for p in out if (p.get("superficie_m2") or 0) >= m2_min]
     return out
 
 
 def correr_scrape(db, cuentas: Iterable[mv.IgCuenta], limite: int | None = None,
-                  operacion: str | None = None, q: str | None = None) -> dict:
-    """Scrapea cada cuenta y hace upsert de sus posts. Si se pasan `operacion`
-    o `q`, solo se guardan los posts que matchean (se descartan antes de tocar
-    la DB). Actualiza el estado de la cuenta. NO hace commit — lo decide el
-    caller. Devuelve un resumen."""
+                  operacion: str | None = None, q: str | None = None,
+                  zona: str | None = None, dorm_min: int | None = None,
+                  m2_min: float | None = None) -> dict:
+    """Scrapea cada cuenta y hace upsert de sus posts. Los filtros (operacion,
+    q, zona, dorm_min, m2_min) se aplican ANTES de tocar la DB: solo se guardan
+    los posts que matchean. Actualiza el estado de la cuenta. NO hace commit —
+    lo decide el caller. Devuelve un resumen."""
     total_nuevas = 0
     total_descartados = 0
     detalle = []
@@ -273,7 +337,7 @@ def correr_scrape(db, cuentas: Iterable[mv.IgCuenta], limite: int | None = None,
         try:
             posts = scrapear_cuenta(c.username, limite)
             traidos = len(posts)
-            posts = filtrar_posts(posts, operacion, q)
+            posts = filtrar_posts(posts, operacion, q, zona, dorm_min, m2_min)
             total_descartados += traidos - len(posts)
             nuevas = _upsert_publicaciones(db, c, posts)
             c.ultima_corrida = ahora
