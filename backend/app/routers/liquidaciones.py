@@ -261,7 +261,15 @@ def listar(
               joinedload(models.Pago.contrato).joinedload(models.Contrato.inquilino),
               # Co-propietarios (pivote) + su cliente, en lote: sin esto, el split
               # lazy-loadea por cada pago y "Todas" se vuelve O(N) queries → timeout.
-              selectinload(models.Pago.contrato).selectinload(models.Contrato.propiedad)
+              #
+              # OJO con la estrategia del primer tramo: SQLAlchemy no admite dos
+              # estrategias distintas para el MISMO path. Las dos options de arriba
+              # ya declaran Pago.contrato (y Contrato.propiedad) como joinedload, así
+              # que este tramo tiene que empezar igual — si arranca con selectinload
+              # tira "Loader strategies for ORM Path[...] conflict" y el endpoint
+              # devuelve 500. El selectinload se usa recién en la colección
+              # (propietarios), que es donde realmente evita el N+1.
+              joinedload(models.Pago.contrato).joinedload(models.Contrato.propiedad)
                 .selectinload(models.Propiedad.propietarios).selectinload(models.PropiedadPropietario.cliente),
           )
           .filter(models.Pago.estado == models.PagoEstado.pagado)
