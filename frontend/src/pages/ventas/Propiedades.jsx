@@ -7,6 +7,24 @@ import api from '../../utils/api'
 
 const TIPOS = ['casa', 'departamento', 'lote', 'local', 'oficina', 'galpon', 'campo', 'otro']
 const ESTADOS = ['disponible', 'reservada', 'vendida', 'inactiva']
+
+// Filtros por ORIGEN de la propiedad (reemplazan al viejo toggle venta/alquiler).
+const FUENTES = [
+  ['', 'Todas'],
+  ['propia', 'Propias'],
+  ['tokko', 'Colegas Tokko'],
+  ['instagram', 'Colegas Instagram'],
+  ['scraping', 'Colegas Web'],
+]
+// Etiqueta + color del chip de origen (chiquito, para identificar de un vistazo).
+const FUENTE_META = {
+  propia:    { label: 'Cargada',   cls: 'bg-slate-500/15 text-slate-600 dark:text-slate-300', dot: '#64748b' },
+  tokko:     { label: 'Red Tokko', cls: 'bg-[#B8893A]/15 text-[#B8893A]',                      dot: '#B8893A' },
+  instagram: { label: 'Instagram', cls: 'bg-pink-500/15 text-pink-600 dark:text-pink-400',     dot: '#ec4899' },
+  scraping:  { label: 'Web',       cls: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',        dot: '#0ea5e9' },
+}
+const fuenteMeta = f => FUENTE_META[f] || { label: f || '—', cls: 'chip-muted', dot: '#9ca3af' }
+
 const empty = {
   titulo: '', tipo: 'casa', estado: 'disponible', fuente: 'propia', operacion: 'venta', direccion: '', ciudad: '',
   precio_usd: '', superficie_m2: '', dormitorios: '', banos: '', antiguedad_anios: '',
@@ -14,6 +32,27 @@ const empty = {
 }
 const num = v => v === '' || v == null ? null : Number(v)
 const fmtUSD = n => n ? 'USD ' + n.toLocaleString('es-AR') : '—'
+
+// Lee los datos duros de un texto libre (descripción / ficha) para completar el
+// formulario. Mismo criterio que el parser del Radar Instagram del backend.
+function parseDesc(texto) {
+  const t = texto || ''
+  const out = {}
+  let m = t.match(/(\d+)\s*(?:dormitorios?|dorm\.?|hab\.?|habitaciones?|cuartos?)/i)
+  if (m) out.dormitorios = parseInt(m[1], 10)
+  else if (/monoambiente|mono\s*amb/i.test(t)) out.dormitorios = 1
+  else if ((m = t.match(/(\d+)\s*(?:ambientes?|amb\.?)/i))) out.dormitorios = Math.max(1, parseInt(m[1], 10) - 1)
+  if ((m = t.match(/(\d+)\s*(?:baños?|banos?|toilette)/i))) out.banos = parseInt(m[1], 10)
+  if ((m = t.match(/([\d][\d.,]*)\s*(?:m2|m²|mts2?|metros\s*(?:cuadrados)?)/i))) {
+    const v = parseFloat(m[1].replace(/\./g, '').replace(',', '.'))
+    if (v >= 5 && v <= 100000) out.superficie_m2 = v
+  }
+  if ((m = t.match(/(?:u\$s|us\$|usd|\$)\s*\.?\s*([\d][\d.,]{2,})/i))) {
+    const v = parseInt(m[1].replace(/[.,]/g, ''), 10)
+    if (v >= 1000) out.precio_usd = v
+  }
+  return out
+}
 
 export default function Propiedades() {
   const [list, setList] = useState([])
@@ -23,15 +62,25 @@ export default function Propiedades() {
   const [tasarOpen, setTasarOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [busqueda, setBusqueda] = useState('')
-  const [modalidad, setModalidad] = useState('')   // '' | venta | alquiler
+  const [fuenteFiltro, setFuenteFiltro] = useState('')   // '' | propia | tokko | instagram | scraping
+  const [attr, setAttr] = useState({ tipo: '', dorm: '', m2: '', usd_min: '', usd_max: '' })
+  const setA = k => e => setAttr(a => ({ ...a, [k]: e.target.value }))
 
-  const load = () => api.get(`/api/ventas-crm/propiedades${modalidad ? `?operacion=${modalidad}` : ''}`).then(r => setList(r.data || []))
-  useEffect(() => { load() }, [modalidad])
+  const load = () => api.get('/api/ventas-crm/propiedades?limit=500').then(r => setList(r.data || []))
+  useEffect(() => { load() }, [])
 
   const filtrados = list.filter(p => {
-    if (!busqueda.trim()) return true
-    const b = busqueda.toLowerCase()
-    return [p.titulo, p.direccion, p.ciudad, p.descripcion, p.inmobiliaria].some(v => (v || '').toLowerCase().includes(b))
+    if (fuenteFiltro && p.fuente !== fuenteFiltro) return false
+    if (attr.tipo && p.tipo !== attr.tipo) return false
+    if (attr.dorm && (p.dormitorios || 0) < Number(attr.dorm)) return false
+    if (attr.m2 && (p.superficie_m2 || 0) < Number(attr.m2)) return false
+    if (attr.usd_min && (!p.precio_usd || p.precio_usd < Number(attr.usd_min))) return false
+    if (attr.usd_max && (!p.precio_usd || p.precio_usd > Number(attr.usd_max))) return false
+    if (busqueda.trim()) {
+      const b = busqueda.toLowerCase()
+      if (![p.titulo, p.direccion, p.ciudad, p.descripcion, p.inmobiliaria].some(v => (v || '').toLowerCase().includes(b))) return false
+    }
+    return true
   })
 
   const del = async (p) => { if (!confirm('¿Eliminar propiedad?')) return; await api.delete(`/api/ventas-crm/propiedades/${p.id}`); load() }
@@ -54,18 +103,34 @@ export default function Propiedades() {
           </div>
         </header>
 
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+        {/* Buscador + filtros por ORIGEN */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="max-w-md flex-1 min-w-[220px]">
             <SearchBar value={busqueda} onChange={setBusqueda} placeholder="Buscar por dirección, ciudad, inmobiliaria…" />
           </div>
-          <div className="flex gap-1">
-            {[['', 'Todas'], ['venta', 'Venta'], ['alquiler', 'Alquiler']].map(([v, l]) => (
-              <button key={v} onClick={() => setModalidad(v)}
-                className={`text-[12px] rounded-xl px-3 py-1.5 border transition ${modalidad === v ? 'bg-[#B8893A] text-white border-[#B8893A]' : 'border-border text-muted hover:border-[#B8893A]'}`}>
+          <div className="flex flex-wrap gap-1">
+            {FUENTES.map(([v, l]) => (
+              <button key={v} onClick={() => setFuenteFiltro(v)}
+                className={`text-[12px] rounded-xl px-3 py-1.5 border transition ${fuenteFiltro === v ? 'bg-[#B8893A] text-white border-[#B8893A]' : 'border-border text-muted hover:border-[#B8893A]'}`}>
                 {l}
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Filtros por atributos (habitaciones, tipo, m², valor) */}
+        <div className="card p-3 mb-4 grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
+          <div>
+            <label className="label">Tipo</label>
+            <select className="input !py-2 text-[13px]" value={attr.tipo} onChange={setA('tipo')}>
+              <option value="">Todos</option>
+              {TIPOS.map(t => <option key={t} value={t} className="capitalize">{t}</option>)}
+            </select>
+          </div>
+          <div><label className="label">Dorm. mín</label><input className="input !py-2 text-[13px]" type="number" min="0" value={attr.dorm} onChange={setA('dorm')} /></div>
+          <div><label className="label">m² mín</label><input className="input !py-2 text-[13px]" type="number" min="0" value={attr.m2} onChange={setA('m2')} /></div>
+          <div><label className="label">USD mín</label><input className="input !py-2 text-[13px]" type="number" min="0" value={attr.usd_min} onChange={setA('usd_min')} /></div>
+          <div><label className="label">USD máx</label><input className="input !py-2 text-[13px]" type="number" min="0" value={attr.usd_max} onChange={setA('usd_max')} /></div>
         </div>
 
         {filtrados.length === 0 ? (
@@ -81,14 +146,19 @@ export default function Propiedades() {
                   <p className="font-medium text-[14px] truncate">{p.titulo || p.direccion || `Propiedad #${p.id}`}</p>
                   <span className="chip-muted capitalize">{p.estado}</span>
                 </div>
-                <p className="text-[12px] text-muted capitalize mt-0.5">{p.tipo}{p.operacion ? ` · ${p.operacion}` : ''} · {p.ciudad || 's/ciudad'}</p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium ${fuenteMeta(p.fuente).cls}`}>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: fuenteMeta(p.fuente).dot }} />
+                    {fuenteMeta(p.fuente).label}
+                  </span>
+                  <p className="text-[12px] text-muted capitalize truncate">{p.tipo}{p.operacion ? ` · ${p.operacion}` : ''} · {p.ciudad || 's/ciudad'}</p>
+                </div>
                 <p className="stat-value text-xl mt-2">{fmtUSD(p.precio_usd)}</p>
                 <div className="flex flex-wrap gap-x-3 text-[11px] text-muted mt-1">
                   {p.superficie_m2 && <span>{p.superficie_m2} m²</span>}
                   {p.dormitorios && <span>{p.dormitorios} dorm</span>}
                   {p.banos && <span>{p.banos} baños</span>}
                 </div>
-                {p.fuente !== 'propia' && <span className="chip-muted mt-2 w-fit capitalize">{p.fuente}</span>}
                 <div className="flex gap-1 mt-3 pt-3 border-t border-border">
                   <button onClick={() => setOfertasDe(p)} className="flex-1 flex items-center justify-center gap-1 text-[12px] text-[#B8893A]"><Handshake size={13} /> Negociación</button>
                   <AsociarCliente propiedad={{
@@ -117,7 +187,19 @@ export default function Propiedades() {
 function PropModal({ initial, onClose, onSaved }) {
   const [form, setForm] = useState(initial ? { ...empty, ...initial } : { ...empty })
   const [err, setErr] = useState(''); const [loading, setLoading] = useState(false)
+  const [parseInfo, setParseInfo] = useState('')
   const set = k => e => setForm({ ...form, [k]: e.target.value })
+
+  // Lee la descripción y completa SOLO los campos vacíos (no pisa lo cargado).
+  const completarDesde = () => {
+    const d = parseDesc(form.descripcion)
+    const campos = ['dormitorios', 'banos', 'superficie_m2', 'precio_usd']
+    const aplicados = campos.filter(k => !form[k] && d[k] != null)
+    setForm(f => ({ ...f, ...Object.fromEntries(aplicados.map(k => [k, d[k]])) }))
+    setParseInfo(aplicados.length
+      ? `Completé: ${aplicados.join(', ')}.`
+      : 'No encontré datos nuevos en la descripción (o ya estaban cargados).')
+  }
   const submit = async e => {
     e.preventDefault(); setErr(''); setLoading(true)
     const payload = {
@@ -165,7 +247,17 @@ function PropModal({ initial, onClose, onSaved }) {
             <div><label className="label">Link externo</label><input className="input" value={form.link_externo || ''} onChange={set('link_externo')} /></div>
             <div><label className="label">Inmobiliaria (quién la tiene)</label><input className="input" value={form.inmobiliaria || ''} onChange={set('inmobiliaria')} /></div>
           </div>
-          <div><label className="label">Descripción</label><textarea className="input resize-none" rows={2} value={form.descripcion || ''} onChange={set('descripcion')} /></div>
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="label">Descripción</label>
+              <button type="button" onClick={completarDesde}
+                className="text-[11px] text-[#B8893A] hover:underline flex items-center gap-1">
+                <Sparkles size={12} /> Completar datos desde la descripción
+              </button>
+            </div>
+            <textarea className="input resize-none" rows={2} value={form.descripcion || ''} onChange={set('descripcion')} />
+            {parseInfo && <p className="text-[11px] text-muted mt-1">{parseInfo}</p>}
+          </div>
           <div><label className="label">Apreciación personal</label><textarea className="input resize-none" rows={2} value={form.apreciacion || ''} onChange={set('apreciacion')} /></div>
           {err && <p className="text-[13px] text-danger bg-danger/5 px-4 py-2 rounded-xl">{err}</p>}
           <div className="flex gap-3 pt-1">
