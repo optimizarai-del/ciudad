@@ -1852,13 +1852,36 @@ def propiedad_importar_confirmar(payload: dict,
 _RED_COLS = ("referencia, direccion, ubicacion, tipo, operacion, precio_num, moneda, "
              "precio_display, m2_cubierta_num, m2_total_num, ambientes_num, "
              "dormitorios_num, banos_num, lat, lng, detalles, publicado_por, "
-             "ficha_url, foto")
+             "network_company_code, ficha_url, foto")
+
+
+def _guardadas_set(db: Session, vendedor_id: int) -> set:
+    """Referencias de la Red Tokko que ESTE vendedor guardó (favoritos). Se usa
+    para marcar `guardada` en los listados. Tolera que la tabla no exista aún."""
+    try:
+        rows = db.execute(
+            text("select referencia from red_tokko_guardadas where vendedor_id = :v"),
+            {"v": vendedor_id})
+        return {r[0] for r in rows}
+    except Exception:
+        db.rollback()
+        return set()
+
+
+def _marcar_propia_guardada(rows: list, guardadas: set):
+    """Agrega los flags `propia` (no vino por la red de un colega) y `guardada`
+    a cada fila para que la UI pueda separar en pestañas Propias/Colegas/Guardadas."""
+    for r in rows:
+        ncc = (r.get("network_company_code") or "").strip() if isinstance(r.get("network_company_code"), str) else r.get("network_company_code")
+        r["propia"] = not ncc
+        r["guardada"] = r.get("referencia") in guardadas
 
 
 @router.get("/red-tokko")
 def red_tokko_listar(
     zona: Optional[str] = Query(None),
     operacion: Optional[str] = Query(None),
+    tipo: Optional[str] = Query(None),
     precio_min: Optional[int] = Query(None),
     precio_max: Optional[int] = Query(None),
     dorm_min: Optional[int] = Query(None),
@@ -1866,12 +1889,13 @@ def red_tokko_listar(
     db: Session = Depends(get_db), user=Depends(get_current_user),
 ):
     """Lista propiedades de la red Tokko guardadas en la base (con filtros)."""
-    get_vendedor(db, user)  # auth/scope
+    v = get_vendedor(db, user)  # auth/scope
     where, params = ["1=1"], {}
     # `ilike` es Postgres; en SQLite usamos `like` (case-insensitive por default).
     like_op = "ilike" if IS_POSTGRES else "like"
     if operacion:  where.append("operacion = :op");                 params["op"] = operacion
     if zona:       where.append(f"ubicacion {like_op} :z");         params["z"] = f"%{zona}%"
+    if tipo:       where.append(f"tipo {like_op} :t");              params["t"] = f"%{tipo}%"
     if precio_min: where.append("precio_num >= :pmin");             params["pmin"] = precio_min
     if precio_max: where.append("precio_num <= :pmax");             params["pmax"] = precio_max
     if dorm_min:   where.append("dormitorios_num >= :dmin");        params["dmin"] = dorm_min
@@ -1881,6 +1905,7 @@ def red_tokko_listar(
     try:
         rows = [dict(r._mapping) for r in db.execute(sql, params)]
     except Exception:
+        db.rollback()
         # Tabla aún no creada / sin datos en esta base.
         return {"total": 0, "propiedades": [],
                 "nota": "Todavía no trajiste propiedades de la red. Usá «Traer de la red en vivo por zona» (arriba) para poblar el catálogo."}
@@ -1894,6 +1919,7 @@ def red_tokko_listar(
         importadas = {x[0] for x in q}
     for r in rows:
         r["ya_importada"] = r.get("ficha_url") in importadas
+    _marcar_propia_guardada(rows, _guardadas_set(db, v.id))
     return {"total": len(rows), "propiedades": rows}
 
 
@@ -1975,7 +2001,7 @@ def red_tokko_buscar(payload: dict,
         raise HTTPException(400, "Elegí una zona (loc_id) del autocomplete.")
     from app.services import ventas_red_tokko
     try:
-        return ventas_red_tokko.buscar_en_vivo(
+        res = ventas_red_tokko.buscar_en_vivo(
             db, loc_id=loc_id, loc_type=loc_type or "division",
             operacion=payload.get("operacion") or "venta",
             precio_min=payload.get("precio_min"), precio_max=payload.get("precio_max"),
@@ -1983,7 +2009,89 @@ def red_tokko_buscar(payload: dict,
             zona_nombre=payload.get("zona_nombre") or "",
             geocodificar=payload.get("geocodificar", True),
         )
+        # `propia` ya lo trae el normalizador; acá sumamos `guardada` del vendedor.
+        _marcar_propia_guardada(res.get("propiedades") or [], _guardadas_set(db, v.id))
+        return res
     except RuntimeError as e:
         raise HTTPException(503, str(e))
     except Exception as e:
         raise HTTPException(502, f"No se pudo traer de la red: {str(e)[:200]}")
+
+
+# ── Red Tokko: GUARDADAS (favoritos por vendedor) ──
+
+@router.get("/red-tokko/guardadas")
+def red_tokko_guardadas_listar(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Propiedades de la red que el vendedor guardó (join contra la tabla de la
+    red para traer los datos completos). Las que perdieron el snapshot en la red
+    se devuelven con lo mínimo para poder quitarlas."""
+    v = get_vendedor(db, user)
+    try:
+        sql = text(
+            f"select g.referencia as referencia, g.guardada_at as guardada_at, {_RED_COLS} "
+            "from red_tokko_guardadas g "
+            "left join red_tokko_propiedades p on p.referencia = g.referencia "
+            "where g.vendedor_id = :v order by g.guardada_at desc")
+        rows = [dict(r._mapping) for r in db.execute(sql, {"v": v.id})]
+    except Exception:
+        db.rollback()
+        # Fallback sin join (tabla de red inexistente): solo referencias.
+        try:
+            rows = [{"referencia": r[0]} for r in db.execute(
+                text("select referencia from red_tokko_guardadas where vendedor_id = :v "
+                     "order by guardada_at desc"), {"v": v.id})]
+        except Exception:
+            db.rollback()
+            return {"total": 0, "propiedades": []}
+    urls = [r["ficha_url"] for r in rows if r.get("ficha_url")]
+    importadas = set()
+    if urls:
+        importadas = {x[0] for x in db.query(mv.VentasPropiedad.link_externo)
+                      .filter(mv.VentasPropiedad.link_externo.in_(urls))}
+    for r in rows:
+        r["ya_importada"] = r.get("ficha_url") in importadas
+        r["guardada"] = True
+        ncc = r.get("network_company_code")
+        r["propia"] = not ((ncc or "").strip() if isinstance(ncc, str) else ncc)
+    return {"total": len(rows), "propiedades": rows}
+
+
+@router.post("/red-tokko/guardar")
+def red_tokko_guardar(payload: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Guarda (marca como favorita) una propiedad de la red para este vendedor."""
+    v = get_vendedor(db, user)
+    ref = (payload or {}).get("referencia")
+    if not ref:
+        raise HTTPException(400, "Falta 'referencia'.")
+    from datetime import datetime
+    from app.services import ventas_red_tokko
+    ventas_red_tokko._ensure_tabla(db)  # asegura red_tokko_guardadas
+    ahora = datetime.utcnow().isoformat()
+    try:
+        if IS_POSTGRES:
+            db.execute(text(
+                "insert into red_tokko_guardadas (vendedor_id, referencia, guardada_at) "
+                "values (:v, :r, :t) on conflict (vendedor_id, referencia) do nothing"),
+                {"v": v.id, "r": str(ref), "t": ahora})
+        else:
+            db.execute(text(
+                "insert or ignore into red_tokko_guardadas (vendedor_id, referencia, guardada_at) "
+                "values (:v, :r, :t)"), {"v": v.id, "r": str(ref), "t": ahora})
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"No se pudo guardar: {str(e)[:120]}")
+    return {"ok": True, "referencia": str(ref), "guardada": True}
+
+
+@router.delete("/red-tokko/guardar/{referencia}")
+def red_tokko_desguardar(referencia: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Quita una propiedad de las guardadas del vendedor."""
+    v = get_vendedor(db, user)
+    try:
+        db.execute(text("delete from red_tokko_guardadas where vendedor_id = :v and referencia = :r"),
+                   {"v": v.id, "r": str(referencia)})
+        db.commit()
+    except Exception:
+        db.rollback()
+    return {"ok": True, "referencia": str(referencia), "guardada": False}

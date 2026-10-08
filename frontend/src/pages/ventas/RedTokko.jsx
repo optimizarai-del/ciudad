@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Globe, Download, Check, MapPin, Building2, RefreshCw, ExternalLink, Search, Radar, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Globe, Download, Check, MapPin, Building2, RefreshCw, ExternalLink, Search, Radar, X, Bookmark, Home, Users } from 'lucide-react'
 import Layout from '../../components/Layout/Layout'
 import { useRole } from '../../context/RoleContext'
 import AsociarCliente from '../../components/ventas/AsociarCliente'
@@ -7,6 +7,39 @@ import api from '../../utils/api'
 
 const OPERACIONES = [['', 'Todas'], ['venta', 'Venta'], ['alquiler', 'Alquiler']]
 const OPER_VIVO = [['venta', 'Venta'], ['alquiler', 'Alquiler']]
+
+// Tipos de propiedad para filtrar. El valor es la "pista" que buscamos dentro
+// del tipo crudo que manda Tokko (ej. "Casa Quinta", "Local comercial"), porque
+// Tokko usa textos libres que no calzan con nuestro enum interno.
+const TIPOS = [
+  ['', 'Todos los tipos'],
+  ['departamento', 'Departamento'],
+  ['casa', 'Casa'],
+  ['casa quinta', 'Casa quinta'],
+  ['campo', 'Campo'],
+  ['terreno', 'Terreno'],
+  ['local', 'Local comercial'],
+]
+
+const DORMS = [['', 'Cualquiera'], ['1', '1+'], ['2', '2+'], ['3', '3+'], ['4', '4+']]
+
+const norm = (s) => (s ?? '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+
+// ¿El tipo crudo de Tokko coincide con el filtro elegido? "casa" excluye
+// "casa quinta" para que cada filtro sea específico.
+function coincideTipo(raw, filtro) {
+  if (!filtro) return true
+  const t = norm(raw)
+  switch (filtro) {
+    case 'casa quinta': return t.includes('quinta')
+    case 'casa':        return t.includes('casa') && !t.includes('quinta')
+    case 'departamento': return t.includes('depart') || t.includes('depto') || t.includes('ph')
+    case 'terreno':     return t.includes('terreno') || t.includes('lote')
+    case 'local':       return t.includes('local')
+    case 'campo':       return t.includes('campo') || t.includes('chacra')
+    default:            return t.includes(norm(filtro))
+  }
+}
 
 // Localidades de La Pampa — palabras clave exactas para resolver la zona en
 // Tokko. El usuario elige de la lista (o escribe) y Tokko la desambigua.
@@ -56,13 +89,18 @@ export default function RedTokko() {
   const { isAdmin, role } = useRole()
   const esAdmin = isAdmin || role === 'ventas_admin' || role === 'gerencia'
 
-  const [filtros, setFiltros] = useState({ zona: '', operacion: 'venta', precio_min: '', precio_max: '', dorm_min: '' })
+  const [filtros, setFiltros] = useState({ zona: '', operacion: 'venta', tipo: '', precio_min: '', precio_max: '', dorm_min: '' })
   const [props, setProps] = useState([])
   const [nota, setNota] = useState('')
   const [loading, setLoading] = useState(false)
   const [sel, setSel] = useState(new Set())
   const [importando, setImportando] = useState(false)
   const [msg, setMsg] = useState('')
+
+  // Pestañas: colegas (de la red) · propias (de nuestra cuenta Tokko) · guardadas
+  const [tab, setTab] = useState('colegas')
+  const [guardadasList, setGuardadasList] = useState([])
+  const guardadasRefs = useMemo(() => new Set(guardadasList.map(x => String(x.referencia))), [guardadasList])
 
   // Búsqueda EN VIVO por zona (con desambiguación)
   const [zonaQuery, setZonaQuery] = useState('')
@@ -102,7 +140,9 @@ export default function RedTokko() {
       })
       setProps(data.propiedades || [])
       setNota('')
-      setMsg(`✓ Traídas ${data.trajo} de ${data.total_red ?? '?'} en la zona · ${data.geocodificadas || 0} geolocalizadas`)
+      setTab('colegas')
+      const nprop = (data.propiedades || []).filter(p => p.propia).length
+      setMsg(`✓ Traídas ${data.trajo} de ${data.total_red ?? '?'} en la zona · ${data.geocodificadas || 0} geolocalizadas · ${nprop} propias / ${(data.trajo || 0) - nprop} de colegas`)
     } catch (e) {
       setMsg(e?.response?.data?.detail || 'No se pudo traer de la red en vivo.')
     } finally { setTrayendo(false) }
@@ -124,12 +164,36 @@ export default function RedTokko() {
       setProps([])
     } finally { setLoading(false) }
   }
-  useEffect(() => { buscar() }, [])  // carga inicial
+
+  const cargarGuardadas = async () => {
+    try {
+      const { data } = await api.get('/api/ventas-crm/red-tokko/guardadas')
+      setGuardadasList(data.propiedades || [])
+    } catch { setGuardadasList([]) }
+  }
+
+  useEffect(() => { buscar(); cargarGuardadas() }, [])  // carga inicial
 
   const toggle = (ref) => setSel(s => {
     const n = new Set(s); n.has(ref) ? n.delete(ref) : n.add(ref); return n
   })
-  const importables = props.filter(p => !p.ya_importada)
+
+  // Filtros LOCALES (tipo + dormitorios) sobre la lista visible — aplican
+  // siempre, venga de la búsqueda en vivo o de lo guardado.
+  const filtroLocal = (lista) => lista.filter(p => {
+    if (!coincideTipo(p.tipo, filtros.tipo)) return false
+    const min = parseInt(filtros.dorm_min, 10)
+    if (min && (p.dormitorios_num || 0) < min) return false
+    return true
+  })
+
+  const propsFiltradas = useMemo(() => filtroLocal(props), [props, filtros.tipo, filtros.dorm_min])
+  const guardadasFiltradas = useMemo(() => filtroLocal(guardadasList), [guardadasList, filtros.tipo, filtros.dorm_min])
+  const colegas = propsFiltradas.filter(p => !p.propia)
+  const propias = propsFiltradas.filter(p => p.propia)
+
+  const visibles = tab === 'guardadas' ? guardadasFiltradas : tab === 'propias' ? propias : colegas
+  const importables = visibles.filter(p => !p.ya_importada)
   const todosSel = importables.length > 0 && importables.every(p => sel.has(p.referencia))
   const toggleTodos = () => setSel(todosSel ? new Set() : new Set(importables.map(p => p.referencia)))
 
@@ -139,7 +203,7 @@ export default function RedTokko() {
     try {
       const { data } = await api.post('/api/ventas-crm/red-tokko/importar', { referencias: refs })
       const mt = data.matches_generados ? ` · ${data.matches_generados} match${data.matches_generados > 1 ? 'es' : ''} nuevo${data.matches_generados > 1 ? 's' : ''}` : ''
-      setMsg(`✓ Importadas ${data.creadas} · ya existían ${data.saltadas_ya_existentes}${mt} · ya están en el mapa`)
+      setMsg(`✓ Importadas ${data.creadas} · ya existían ${data.saltadas_ya_existentes}${mt}`)
       setSel(new Set())
       buscar()
     } catch (e) {
@@ -147,7 +211,28 @@ export default function RedTokko() {
     } finally { setImportando(false) }
   }
 
+  const toggleGuardar = async (p) => {
+    const ref = String(p.referencia)
+    try {
+      if (guardadasRefs.has(ref)) {
+        await api.delete(`/api/ventas-crm/red-tokko/guardar/${encodeURIComponent(ref)}`)
+        setGuardadasList(l => l.filter(x => String(x.referencia) !== ref))
+      } else {
+        await api.post('/api/ventas-crm/red-tokko/guardar', { referencia: ref })
+        setGuardadasList(l => [{ ...p, guardada: true }, ...l.filter(x => String(x.referencia) !== ref)])
+      }
+    } catch {
+      setMsg('No se pudo actualizar guardadas.')
+    }
+  }
+
   const set = k => e => setFiltros(f => ({ ...f, [k]: e.target.value }))
+
+  const TABS = [
+    { id: 'colegas', label: 'De colegas', icon: Users, count: colegas.length },
+    { id: 'propias', label: 'Propias', icon: Home, count: propias.length },
+    { id: 'guardadas', label: 'Guardadas', icon: Bookmark, count: guardadasFiltradas.length },
+  ]
 
   return (
     <Layout>
@@ -232,13 +317,19 @@ export default function RedTokko() {
           </div>
         )}
 
-        {/* Filtros (sobre lo ya guardado) */}
-        <div className="card p-3 mb-4 grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
+        {/* Filtros (sobre lo ya guardado / lo que estás viendo) */}
+        <div className="card p-3 mb-4 grid grid-cols-2 sm:grid-cols-7 gap-2 items-end">
           <div className="col-span-2 sm:col-span-1">
             <label className="label">Zona</label>
             <ComboZona value={filtros.zona}
               onChange={z => setFiltros(f => ({ ...f, zona: z }))}
               onPick={z => setFiltros(f => ({ ...f, zona: z }))} />
+          </div>
+          <div>
+            <label className="label">Tipo</label>
+            <select className="input !py-2 text-[13px]" value={filtros.tipo} onChange={set('tipo')}>
+              {TIPOS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
           </div>
           <div>
             <label className="label">Operación</label>
@@ -248,17 +339,37 @@ export default function RedTokko() {
           </div>
           <div><label className="label">USD mín</label><input className="input !py-2 text-[13px]" type="number" value={filtros.precio_min} onChange={set('precio_min')} /></div>
           <div><label className="label">USD máx</label><input className="input !py-2 text-[13px]" type="number" value={filtros.precio_max} onChange={set('precio_max')} /></div>
-          <div><label className="label">Dorm. mín</label><input className="input !py-2 text-[13px]" type="number" value={filtros.dorm_min} onChange={set('dorm_min')} /></div>
+          <div>
+            <label className="label">Dormitorios</label>
+            <select className="input !py-2 text-[13px]" value={filtros.dorm_min} onChange={set('dorm_min')}>
+              {DORMS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
           <button className="btn-secondary !py-2 text-[13px]" onClick={buscar} disabled={loading}>
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Buscar
           </button>
         </div>
 
+        {/* Pestañas Propias / Colegas / Guardadas */}
+        <div className="flex gap-1 mb-4 border-b border-border">
+          {TABS.map(t => {
+            const activa = tab === t.id
+            return (
+              <button key={t.id} onClick={() => { setTab(t.id); setSel(new Set()); if (t.id === 'guardadas') cargarGuardadas() }}
+                className={`flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium border-b-2 -mb-px transition ${
+                  activa ? 'border-[#B8893A] text-[#B8893A]' : 'border-transparent text-muted hover:text-[#B8893A]'}`}>
+                <t.icon size={14} /> {t.label}
+                <span className={`chip-muted text-[10px] ${activa ? '!bg-[#B8893A]/15 !text-[#B8893A]' : ''}`}>{t.count}</span>
+              </button>
+            )
+          })}
+        </div>
+
         {msg && <div className="mb-3 px-4 py-2 rounded-xl bg-[#B8893A]/10 border border-[#B8893A]/30 text-[13px] text-[#B8893A]">{msg}</div>}
 
-        {props.length > 0 && (
+        {visibles.length > 0 && (
           <div className="flex items-center justify-between mb-2 px-1">
-            <p className="text-[12px] text-muted">{props.length} propiedades · {importables.length} importables</p>
+            <p className="text-[12px] text-muted">{visibles.length} propiedades · {importables.length} importables</p>
             {importables.length > 0 && (
               <button className="text-[12px] text-[#B8893A] hover:underline" onClick={toggleTodos}>
                 {todosSel ? 'Deseleccionar todo' : 'Seleccionar todas las importables'}
@@ -267,17 +378,24 @@ export default function RedTokko() {
           </div>
         )}
 
-        {loading ? (
+        {loading && tab !== 'guardadas' ? (
           <div className="card text-center py-20 text-muted text-[14px]">Consultando la red…</div>
-        ) : props.length === 0 ? (
+        ) : visibles.length === 0 ? (
           <div className="card text-center py-20">
             <Building2 size={36} className="mx-auto text-muted/30 mb-3" />
-            <p className="text-muted text-[14px]">{nota || 'Sin resultados. Ajustá los filtros.'}</p>
+            <p className="text-muted text-[14px]">
+              {tab === 'guardadas'
+                ? 'No guardaste ninguna propiedad todavía. Tocá el marcador en una tarjeta para guardarla acá.'
+                : tab === 'propias'
+                ? 'No hay propiedades propias en esta búsqueda. Las propias son las de tu cuenta de Tokko (no vinieron compartidas por un colega).'
+                : (nota || 'Sin resultados. Ajustá los filtros.')}
+            </p>
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {props.map(p => {
+            {visibles.map(p => {
               const elegida = sel.has(p.referencia)
+              const guardada = guardadasRefs.has(String(p.referencia))
               return (
                 <div key={p.referencia}
                   className={`card p-0 overflow-hidden flex flex-col transition ${elegida ? 'ring-2 ring-[#B8893A]' : ''}`}>
@@ -285,9 +403,21 @@ export default function RedTokko() {
                     {p.foto
                       ? <img src={p.foto} alt="" className="w-full h-full object-cover" loading="lazy" />
                       : <div className="grid place-items-center h-full"><Building2 size={28} className="text-muted/30" /></div>}
-                    {p.ya_importada && (
-                      <span className="absolute top-2 right-2 chip-success flex items-center gap-1 text-[11px]"><Check size={11} /> Importada</span>
-                    )}
+                    <div className="absolute top-2 left-2 flex gap-1">
+                      {p.propia
+                        ? <span className="chip-success flex items-center gap-1 text-[10px]"><Home size={10} /> Propia</span>
+                        : <span className="chip-muted flex items-center gap-1 text-[10px]"><Users size={10} /> Colega</span>}
+                    </div>
+                    <div className="absolute top-2 right-2 flex gap-1 items-center">
+                      {p.ya_importada && (
+                        <span className="chip-success flex items-center gap-1 text-[11px]"><Check size={11} /> Importada</span>
+                      )}
+                      <button onClick={() => toggleGuardar(p)} title={guardada ? 'Quitar de guardadas' : 'Guardar'}
+                        className={`grid place-items-center w-7 h-7 rounded-full backdrop-blur transition ${
+                          guardada ? 'bg-[#B8893A] text-white' : 'bg-black/35 text-white hover:bg-[#B8893A]'}`}>
+                        <Bookmark size={13} fill={guardada ? 'currentColor' : 'none'} />
+                      </button>
+                    </div>
                   </div>
                   <div className="p-3 flex-1 flex flex-col">
                     <div className="flex items-start justify-between gap-2">
@@ -301,8 +431,8 @@ export default function RedTokko() {
                       {p.dormitorios_num ? <span>{p.dormitorios_num} dorm</span> : null}
                       {p.banos_num ? <span>{p.banos_num} baños</span> : null}
                     </div>
+                    {p.detalles && <p className="text-[11px] text-muted mt-1.5 leading-snug">{p.detalles}</p>}
                     {p.publicado_por && <p className="text-[11px] text-muted mt-1 truncate">por {p.publicado_por}</p>}
-                    {p.detalles && <p className="text-[11px] text-muted mt-1 line-clamp-2">{p.detalles}</p>}
 
                     <div className="flex gap-1.5 mt-3 pt-2.5 border-t border-border">
                       {p.ficha_url && (

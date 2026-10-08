@@ -270,6 +270,35 @@ def _moneda(*vals):
     return "USD"
 
 
+def _detalles(p: dict, tipo, m2_cub, m2_tot, amb, dorm, banos) -> str:
+    """Arma una descripción de DATOS DUROS legible a partir de lo que Tokko
+    expone (tipo, superficies, ambientes, dormitorios, baños, cocheras,
+    antigüedad). El vendedor ve de un vistazo lo importante sin abrir la ficha.
+    Los campos ausentes simplemente se omiten."""
+    bits = []
+    if tipo:
+        bits.append(str(tipo).strip())
+    if dorm:
+        bits.append(f"{int(dorm)} dorm.")
+    if banos:
+        bits.append(f"{int(banos)} baño{'s' if int(banos) != 1 else ''}")
+    if amb:
+        bits.append(f"{int(amb)} amb.")
+    if m2_cub:
+        bits.append(f"{int(m2_cub)} m² cub.")
+    if m2_tot and m2_tot != m2_cub:
+        bits.append(f"{int(m2_tot)} m² tot.")
+    coch = _num(p.get("parking_lot_amount") or p.get("parking") or p.get("garages"))
+    if coch:
+        bits.append(f"{int(coch)} cochera{'s' if int(coch) != 1 else ''}")
+    age = p.get("age")
+    if isinstance(age, (int, float)) and age > 0:
+        bits.append(f"{int(age)} años" if age >= 1 else "a estrenar")
+    elif isinstance(age, str) and age.strip() and age.strip() not in ("0", "None"):
+        bits.append(age.strip())
+    return " · ".join(bits)
+
+
 def _normalizar(p: dict) -> dict:
     def g(*keys):
         for k in keys:
@@ -292,23 +321,36 @@ def _normalizar(p: dict) -> dict:
         lat = -lat
     if lng is not None and lng > 0:
         lng = -lng
+    tipo = p.get("type")
+    m2_cub = _num(p.get("roofed_surface"))
+    m2_tot = _num(p.get("surface") or p.get("total_surface"))
+    amb = _num(p.get("rooms"))
+    dorm = _num(p.get("suits"))
+    banos = _num(p.get("bathroom_amount"))
+    # Señal de propiedad PROPIA vs COLEGA: una propiedad que entra por la red
+    # compartida desde OTRA inmobiliaria trae el código de esa empresa en
+    # `network_company_code`. Las nuestras no lo traen. Es la señal más fiable
+    # que expone el pre_search para separar "nuestras" de "de colegas".
+    net_code = (p.get("network_company_code") or "").strip() or None
     return {
         "referencia": p.get("reference") or str(p.get("id") or ""),
         "tokko_id": p.get("id"),
         "direccion": p.get("address") or p.get("fake_address") or p.get("location"),
         "ubicacion": p.get("location"),
-        "tipo": p.get("type"),
+        "tipo": tipo,
         "precio_display": precio_disp,
         "precio_num": _num(precio_disp),
         "moneda": _moneda(precio_disp),
-        "m2_cubierta_num": _num(p.get("roofed_surface")),
-        "m2_total_num": _num(p.get("surface") or p.get("total_surface")),
-        "ambientes_num": _num(p.get("rooms")),
-        "dormitorios_num": _num(p.get("suits")),
-        "banos_num": _num(p.get("bathroom_amount")),
+        "m2_cubierta_num": m2_cub,
+        "m2_total_num": m2_tot,
+        "ambientes_num": amb,
+        "dormitorios_num": dorm,
+        "banos_num": banos,
         "lat": lat, "lng": lng,
-        "detalles": None,
-        "publicado_por": p.get("company_name") or p.get("network_company_code"),
+        "detalles": _detalles(p, tipo, m2_cub, m2_tot, amb, dorm, banos) or None,
+        "publicado_por": p.get("company_name") or net_code,
+        "network_company_code": net_code,
+        "propia": net_code is None,
         "ficha_url": p.get("info_url"),
         "foto": p.get("cover_table") or p.get("cover"),
     }
@@ -317,7 +359,8 @@ def _normalizar(p: dict) -> dict:
 _RED_COLS = ["referencia", "tokko_id", "direccion", "ubicacion", "tipo", "operacion",
              "precio_num", "moneda", "precio_display", "m2_cubierta_num", "m2_total_num",
              "ambientes_num", "dormitorios_num", "banos_num", "lat", "lng", "detalles",
-             "publicado_por", "ficha_url", "foto", "zona_consulta", "actualizado_at"]
+             "publicado_por", "network_company_code", "ficha_url", "foto",
+             "zona_consulta", "actualizado_at"]
 
 
 _DDL_RED_TOKKO = """
@@ -340,6 +383,7 @@ CREATE TABLE IF NOT EXISTS red_tokko_propiedades (
     lng              DOUBLE PRECISION,
     detalles         TEXT,
     publicado_por    VARCHAR,
+    network_company_code VARCHAR,
     ficha_url        TEXT,
     foto             TEXT,
     zona_consulta    VARCHAR,
@@ -347,16 +391,41 @@ CREATE TABLE IF NOT EXISTS red_tokko_propiedades (
 )
 """
 
+# Tabla de GUARDADAS (favoritos de la Red Tokko) por vendedor. Liviana y
+# portable, mismo criterio que red_tokko_propiedades (no es ORM). Guarda solo
+# la referencia; los datos se leen por JOIN contra red_tokko_propiedades.
+_DDL_RED_GUARDADAS = """
+CREATE TABLE IF NOT EXISTS red_tokko_guardadas (
+    vendedor_id   INTEGER NOT NULL,
+    referencia    VARCHAR NOT NULL,
+    guardada_at   TIMESTAMP,
+    PRIMARY KEY (vendedor_id, referencia)
+)
+"""
+
+# Columnas agregadas después de la creación original de la tabla. En deploys
+# viejos la tabla existe sin ellas, así que las sumamos con ALTER idempotente
+# (se traga el error si ya están, portable SQLite/Postgres).
+_RED_TOKKO_COLS_NUEVAS = [("network_company_code", "VARCHAR")]
+
 
 def _ensure_tabla(db: Session):
-    """Crea red_tokko_propiedades si no existe. La tabla NO es del ORM (la
-    poblaba la CLI); en un deploy sin CLI hay que crearla para poder traer en
-    vivo. Idempotente y portable (SQLite + Postgres)."""
+    """Crea red_tokko_propiedades + red_tokko_guardadas si no existen y agrega
+    las columnas nuevas en tablas viejas. La tabla NO es del ORM (la poblaba la
+    CLI); en un deploy sin CLI hay que crearla para poder traer en vivo.
+    Idempotente y portable (SQLite + Postgres)."""
     try:
         db.execute(text(_DDL_RED_TOKKO))
+        db.execute(text(_DDL_RED_GUARDADAS))
         db.commit()
     except Exception:
         db.rollback()
+    for col, tipo in _RED_TOKKO_COLS_NUEVAS:
+        try:
+            db.execute(text(f"ALTER TABLE red_tokko_propiedades ADD COLUMN {col} {tipo}"))
+            db.commit()
+        except Exception:
+            db.rollback()  # ya existe → ok
 
 
 def _upsert(db: Session, rows: list[dict]):
