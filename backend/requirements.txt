@@ -11,14 +11,14 @@ python-multipart==0.0.9
 python-dotenv==1.0.1
 email-validator==2.3.0
 httpx==0.27.0
-anthropic>=0.40.0
-reportlab>=4.0.0
+anthropic>=0.40.0,<2.0.0
+reportlab>=4.0.0,<5.0.0
 # Driver Postgres para producción (Supabase). Binary wheel para evitar
 # compilar libpq en el contenedor.
 psycopg2-binary==2.9.9
 # Generación de contratos en .docx editables.
 python-docx==1.1.2
 # Importación de contratos desde DOC binario viejo (Word 97-2003).
-olefile>=0.46
+olefile>=0.46,<1.0.0
 # Cálculo de relativedelta para generar pagos mensuales.
-python-dateutil>=2.8.0
+python-dateutil>=2.8.0,<3.0.0

@@ -15,13 +15,28 @@ from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storag
 from app.routers import historial as historial_router
 from app.security import get_current_user
 
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="CIUDAD — Negocios Inmobiliarios",
     description="#VIVIRMEJOR — plataforma de gestión inmobiliaria",
     version="0.1.0",
 )
+
+
+# create_all vivia a nivel de modulo. Si Supabase no daba conexion al importar
+# (p.ej. pooler lleno durante un deploy), la excepcion impedia que la app
+# EXISTIERA: uvicorn no podia cargarla, el proceso moria y Swarm reintentaba en
+# loop sin poder liberar las replicas viejas que tenian el pool tomado.
+# Acá corre en el startup y un fallo se loguea sin tumbar el proceso: /health
+# responde igual (no toca la DB) y la replica converge en vez de morir.
+# Va primero porque FastAPI ejecuta los on_event("startup") en orden de registro.
+@app.on_event("startup")
+def _crear_tablas():
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"[startup] create_all fallo ({type(e).__name__}: {e}) — "
+              "la app arranca igual; revisar conectividad con la DB")
 
 # CORS: permitir el dominio productivo de Easypanel + cualquier subdominio
 # de optimizar-ia.com (api.*, www.*, ciudad.*, etc.) + dev local.
