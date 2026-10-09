@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, FileText, Users, Calculator,
   BarChart2, Bot, TrendingUp, Settings, DollarSign,
-  Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History, Wallet
+  Home, CreditCard, Store, ChevronRight, KeyRound, Bell, Receipt, Landmark, Wrench, HardDrive, History, Wallet, FlaskConical
 } from 'lucide-react'
 import { useRole } from '../../context/RoleContext'
 
@@ -32,7 +32,7 @@ const Section = ({ label, children }) => (
 )
 
 export default function Sidebar({ onNavigate }) {
-  const { hasAlquileres, hasVentas, isAdmin, isGerencia, isAdminDemo, role } = useRole()
+  const { hasAlquileres, hasVentas, isAdmin, isGerencia, isAdminDemo, isSuperadmin, role } = useRole()
 
   // Cuando es drawer mobile, queremos que al tocar un item se cierre el drawer.
   // El padre (Layout) nos pasa onNavigate para eso. NavLink + click handler
@@ -105,6 +105,13 @@ export default function Sidebar({ onNavigate }) {
       {isGerencia && !isAdmin && (
         <Section label="Gerencia">
           <NavItem to="/dashboard"   icon={LayoutDashboard} label="Dashboard Maestro" />
+        </Section>
+      )}
+
+      {/* Pruebas (solo super admin) */}
+      {isSuperadmin && (
+        <Section label="Super Admin">
+          <NavItem to="/pruebas"   icon={FlaskConical}   label="Pruebas" />
         </Section>
       )}
 

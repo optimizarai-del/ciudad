@@ -25,10 +25,11 @@ export function RoleProvider({ children }) {
   const isGerencia = ['admin', 'gerencia', 'admin_demo'].includes(role)
   const hasAlquileres = AREA_ROLES.alquileres.includes(role)
   const hasVentas = AREA_ROLES.ventas.includes(role)
+  const isSuperadmin = !!user?.is_superadmin
 
   return (
     <RoleContext.Provider value={{
-      role, can, isAdmin, isAdminDemo, isGerencia, hasAlquileres, hasVentas,
+      role, can, isAdmin, isAdminDemo, isGerencia, hasAlquileres, hasVentas, isSuperadmin,
     }}>
       {children}
     </RoleContext.Provider>

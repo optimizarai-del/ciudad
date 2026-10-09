@@ -11,7 +11,7 @@ load_dotenv(override=True)
 from app.database import Base, engine
 from app.routers import auth, users, propiedades, clientes, contratos, calculadora, dashboard, agente, alertas, indices, tokko, pagos, agente_router
 from app.routers import cobranza, ventas_router, comprobantes
-from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr, tasas_mensuales, refacciones, versiones, ajustes, caja
+from app.routers import liquidaciones, finanzas, adjuntos, recordatorios, storage_migracion, demo_fixture, tasas_msr, tasas_mensuales, refacciones, versiones, ajustes, caja, pruebas
 from app.routers import historial as historial_router
 from app.security import get_current_user
 
@@ -96,6 +96,7 @@ app.include_router(versiones.router)
 app.include_router(historial_router.router)
 app.include_router(ajustes.router)
 app.include_router(caja.router)
+app.include_router(pruebas.router)
 
 
 @app.get("/health")
@@ -279,6 +280,57 @@ def _migrar_schema():
             db.commit()
     except Exception:
         db.rollback()
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def _migrar_y_seed_superadmin():
+    """Agrega users.is_superadmin (idempotente, SQLite + Postgres) y siembra el
+    usuario 'super admin' si no existe. El super admin tiene rol admin (acceso
+    total) + el flag de la sección Pruebas. Credenciales por env:
+      SUPERADMIN_EMAIL (default superadmin@ciudad.com)
+      SUPERADMIN_PASSWORD (default CiudadSuper2026!)
+    Si el usuario ya existe, solo se asegura el flag is_superadmin=True.
+    """
+    from sqlalchemy import text, inspect
+    from app.database import SessionLocal, engine
+    from app import models
+    from app.security import hash_pw
+    db = SessionLocal()
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns("users")}
+        if "is_superadmin" not in cols:
+            try:
+                db.execute(text(
+                    "ALTER TABLE users ADD COLUMN is_superadmin BOOLEAN NOT NULL DEFAULT FALSE"))
+                db.commit()
+                print("[migrar] users.is_superadmin agregada")
+            except Exception:
+                db.rollback()
+                logger.exception("[migrar] users.is_superadmin: falló el ALTER; se continúa")
+        email = os.getenv("SUPERADMIN_EMAIL", "superadmin@ciudad.com").strip().lower()
+        password = os.getenv("SUPERADMIN_PASSWORD", "CiudadSuper2026!")
+        u = db.query(models.User).filter(models.User.email == email).first()
+        if u:
+            if not u.is_superadmin:
+                u.is_superadmin = True
+                db.commit()
+                print(f"[seed] super admin promovido: {email}")
+        else:
+            db.add(models.User(
+                nombre="Super Admin",
+                email=email,
+                password_hash=hash_pw(password),
+                role=models.UserRole.admin,
+                is_active=True,
+                is_superadmin=True,
+            ))
+            db.commit()
+            print(f"[seed] super admin creado: {email}")
+    except Exception:
+        db.rollback()
+        logger.exception("[migrar] _migrar_y_seed_superadmin falló; se continúa el arranque")
     finally:
         db.close()
 

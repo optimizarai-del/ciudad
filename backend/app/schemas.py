@@ -19,6 +19,7 @@ class UserOut(BaseModel):
     telefono: Optional[str] = None
     role: str
     is_active: bool
+    is_superadmin: bool = False
 
     class Config:
         from_attributes = True

@@ -28,6 +28,7 @@ import Refacciones        from './pages/Refacciones'
 import ClientesVentas     from './pages/ClientesVentas'
 import VersionesLocal     from './pages/VersionesLocal'
 import HistorialAcciones  from './pages/HistorialAcciones'
+import Pruebas             from './pages/Pruebas'
 
 export default function App() {
   return (
@@ -133,6 +134,11 @@ export default function App() {
         {/* Herramientas */}
         <Route path="/herramientas/versiones-local" element={
           <ProtectedRoute><VersionesLocal /></ProtectedRoute>
+        } />
+
+        {/* Pruebas (solo super admin) */}
+        <Route path="/pruebas" element={
+          <ProtectedRoute requireSuperadmin><Pruebas /></ProtectedRoute>
         } />
 
         {/* Redirects */}

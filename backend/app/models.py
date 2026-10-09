@@ -110,6 +110,10 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     role = Column(SQLEnum(UserRole), default=UserRole.alquileres)
     is_active = Column(Boolean, default=True)
+    # Super admin: acceso a la sección "Pruebas" (banco de pruebas de
+    # herramientas sin tocar producción). Es un flag aparte del rol para no
+    # tener que migrar el enum nativo de Postgres.
+    is_superadmin = Column(Boolean, default=False, nullable=False)
     # Vinculación a Telegram para el agente administrativo: si un mensaje llega
     # desde este chat_id, se ejecutan acciones con los permisos del usuario.
     telegram_chat_id = Column(String, unique=True, index=True)

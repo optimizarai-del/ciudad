@@ -37,9 +37,10 @@ export function AuthProvider({ children }) {
   // no podría entrar a Equipo, Finanzas, etc. y vería redirecciones silenciosas.
   const isAdmin    = user?.role === 'admin' || user?.role === 'admin_demo'
   const isFinanzas = ['finanzas', 'admin', 'admin_demo'].includes(user?.role)
+  const isSuperadmin = !!user?.is_superadmin
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading, isAdmin, isFinanzas }}>
+    <AuthContext.Provider value={{ user, login, logout, loading, isAdmin, isFinanzas, isSuperadmin }}>
       {children}
     </AuthContext.Provider>
   )

@@ -10,8 +10,9 @@ export default function ProtectedRoute({
   requireFinanzas = false,
   requireAlquileres = false,
   requireVentas = false,
+  requireSuperadmin = false,
 }) {
-  const { user, loading, isAdmin, isFinanzas } = useAuth()
+  const { user, loading, isAdmin, isFinanzas, isSuperadmin } = useAuth()
 
   if (loading) return (
     <div className="min-h-screen bg-bg flex items-center justify-center">
@@ -19,6 +20,7 @@ export default function ProtectedRoute({
     </div>
   )
   if (!user) return <Navigate to="/login" replace />
+  if (requireSuperadmin && !isSuperadmin) return <Navigate to="/dashboard" replace />
   if (requireAdmin && !isAdmin) return <Navigate to="/dashboard" replace />
   if (requireFinanzas && !isFinanzas) return <Navigate to="/dashboard" replace />
 
