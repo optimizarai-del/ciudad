@@ -40,11 +40,23 @@ function DisparoEmails() {
   const [conPdf, setConPdf] = useState(true)
   const [enviando, setEnviando] = useState(false)
   const [res, setRes] = useState(null)   // {ok, mensaje}
+  const [diag, setDiag] = useState(null)       // {ok, paso, detalle}
+  const [diagLoading, setDiagLoading] = useState(false)
 
   useEffect(() => {
     api.get('/api/pruebas/email/estado').then(r => setEstado(r.data)).catch(() => setEstado(null))
     if (user?.email) setDestinatario(user.email)
   }, [user])
+
+  const diagnosticar = async () => {
+    setDiagLoading(true); setDiag(null); setRes(null)
+    try {
+      const { data } = await api.get('/api/pruebas/email/diagnostico')
+      setDiag(data)
+    } catch (e) {
+      setDiag({ ok: false, paso: 'error', detalle: e?.response?.data?.detail || 'No se pudo diagnosticar.' })
+    } finally { setDiagLoading(false) }
+  }
 
   const disparar = async () => {
     setEnviando(true); setRes(null)
@@ -108,10 +120,28 @@ function DisparoEmails() {
         Adjuntar un PDF de ejemplo (como en un comprobante real)
       </label>
 
-      <button className="btn-primary" disabled={enviando || !destinatario.trim()} onClick={disparar}>
-        {enviando ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-        {enviando ? 'Enviando…' : 'Disparar email de prueba'}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button className="btn-primary" disabled={enviando || !destinatario.trim()} onClick={disparar}>
+          {enviando ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+          {enviando ? 'Enviando…' : 'Disparar email de prueba'}
+        </button>
+        <button className="btn-secondary" disabled={diagLoading} onClick={diagnosticar} title="Prueba la conexión SMTP sin enviar">
+          {diagLoading ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+          {diagLoading ? 'Probando…' : 'Probar conexión (diagnóstico)'}
+        </button>
+      </div>
+
+      {diag && (
+        <div className={`mt-4 rounded-xl px-4 py-3 text-[13px] flex items-start gap-2 border ${
+          diag.ok ? 'bg-emerald-500/5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400'
+                  : 'bg-amber-500/5 border-amber-500/40 text-amber-700 dark:text-amber-400'}`}>
+          {diag.ok ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
+          <div>
+            <p className="font-medium">Diagnóstico SMTP — paso: {diag.paso}</p>
+            <p className="text-[12px] opacity-90 mt-0.5">{diag.detalle}</p>
+          </div>
+        </div>
+      )}
 
       {res && (
         <div className={`mt-4 rounded-xl px-4 py-3 text-[13px] flex items-start gap-2 border ${

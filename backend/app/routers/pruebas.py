@@ -11,6 +11,9 @@ confirmar que el SMTP quedó bien configurado en el entorno.
 from __future__ import annotations
 
 import os
+import smtplib
+import socket
+import ssl
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -55,6 +58,58 @@ def email_estado(user=Depends(get_superadmin)):
         "tls": (os.getenv("SMTP_TLS", "true").lower() in ("1", "true", "yes")),
         "tiene_pass": bool(os.getenv("SMTP_PASS")),
     }
+
+
+@router.get("/email/diagnostico")
+def email_diagnostico(user=Depends(get_superadmin)):
+    """Prueba el handshake SMTP SIN enviar nada e informa el paso exacto que
+    falla. Sirve para distinguir los 3 problemas típicos en producción:
+      - faltan variables (config),
+      - la credencial es rechazada (auth → revisar App Password),
+      - el servidor no puede salir al puerto SMTP (egress bloqueado por el host).
+    """
+    host = os.getenv("SMTP_HOST") or os.getenv("EMAIL_SMTP")
+    port = int(os.getenv("SMTP_PORT", "587") or 587)
+    usr = os.getenv("SMTP_USER")
+    pwd = os.getenv("SMTP_PASS", "")
+    use_tls = os.getenv("SMTP_TLS", "true").lower() in ("1", "true", "yes")
+
+    def _fin(paso, ok, detalle):
+        return {"ok": ok, "paso": paso, "detalle": detalle,
+                "host": host or None, "port": port,
+                "user": _mask(usr), "tiene_pass": bool(pwd), "tls": use_tls}
+
+    faltan = [n for n, v in (("SMTP_HOST", host), ("SMTP_USER", usr), ("SMTP_PASS", pwd)) if not v]
+    if faltan:
+        return _fin("config", False, f"Faltan variables en el entorno: {', '.join(faltan)}. "
+                    "Cargalas en EasyPanel (servicio de Alquileres) y redeploy.")
+    try:
+        if port == 465:
+            s = smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=12)
+        else:
+            s = smtplib.SMTP(host, port, timeout=12)
+    except (socket.timeout, TimeoutError):
+        return _fin("conexion", False, f"No se pudo conectar a {host}:{port} (timeout). "
+                    "El servidor de EasyPanel probablemente tiene bloqueada la salida SMTP. "
+                    "Habría que habilitar el puerto o usar un proveedor por HTTPS (ej. API de email).")
+    except OSError as e:
+        return _fin("conexion", False, f"No se pudo conectar a {host}:{port}: {type(e).__name__}: {e}. "
+                    "Probable bloqueo de salida SMTP en el host.")
+    try:
+        with s:
+            s.ehlo()
+            if port != 465 and use_tls:
+                s.starttls(context=ssl.create_default_context())
+                s.ehlo()
+            try:
+                s.login(usr, pwd)
+            except smtplib.SMTPAuthenticationError as e:
+                return _fin("login", False, "La credencial fue rechazada por el servidor SMTP "
+                            f"(código {e.smtp_code}). Revisá SMTP_USER y que SMTP_PASS sea un "
+                            "App Password válido de esa cuenta de Gmail (sin espacios).")
+    except Exception as e:
+        return _fin("handshake", False, f"{type(e).__name__}: {str(e)[:200]}")
+    return _fin("login", True, "Conexión y autenticación SMTP OK. El envío debería funcionar.")
 
 
 class EmailPruebaIn(BaseModel):
