@@ -6,8 +6,11 @@ name: Ajustes diarios de alquiler (respaldo)
 # garantizar que los índices se refresquen y los ajustes se apliquen.
 #
 # Requiere dos secrets en el repo (Settings → Secrets and variables → Actions):
-#   AJUSTES_ENDPOINT  → URL del backend, ej. https://ciudad.optimizar-ia.com
-#                       (sin barra final; se le agrega /api/ajustes/correr)
+#   AJUSTES_ENDPOINT  → URL del BACKEND/API (NO la del frontend), sin barra
+#                       final; se le agrega /api/ajustes/correr. En producción es
+#                       https://api.ciudad.optimizar-ia.com
+#                       (ojo: https://ciudad.optimizar-ia.com es solo el SPA y
+#                        devuelve el HTML, no ejecuta la corrida).
 #   AJUSTES_CRON_TOKEN → el mismo valor que la env var AJUSTES_CRON_TOKEN del
 #                        servidor en Easypanel.
 
