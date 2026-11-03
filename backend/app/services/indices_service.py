@@ -2,6 +2,7 @@
 Servicio de índices económicos en vivo.
 Cachea las consultas en memoria para evitar pegarle a INDEC/BCRA en cada cálculo.
 """
+import os
 import time
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
@@ -124,8 +125,68 @@ _SERIE_CACHE: dict = {"ipc": None, "ipc_ts": 0, "icl": None, "icl_ts": 0}
 _SERIE_TTL = 6 * 3600
 
 
+# Plan B del IPC: espejo de INDEC que suele estar MÁS al día que la serie de
+# datos.gob.ar (que a veces tarda semanas en sincronizar el último mes). Da la
+# variación mensual (%), que coincide exacto con los niveles del INDEC. Se usa
+# SOLO para extender la serie oficial cuando ésta se atrasa; nunca pisa un dato
+# oficial. Configurable por env para poder apuntar a otra fuente sin tocar código.
+IPC_FALLBACK_URL = os.getenv(
+    "IPC_FALLBACK_URL", "https://api.argentinadatos.com/v1/finanzas/indices/inflacion")
+
+
+def _ipc_var_mensual_fallback() -> dict:
+    """{ 'YYYY-MM': variacion_pct } de inflación mensual desde la fuente alterna.
+    Devuelve {} si falla (nunca rompe: el Plan A sigue siendo la serie oficial)."""
+    out: dict = {}
+    if not IPC_FALLBACK_URL:
+        return out
+    try:
+        with httpx.Client(timeout=8.0, verify=False) as c:
+            r = c.get(IPC_FALLBACK_URL)
+            for row in r.json():
+                f = str(row.get("fecha"))[:7]
+                v = row.get("valor")
+                if f and v is not None:
+                    out[f] = float(v)
+    except Exception as e:
+        print(f"[indices] fallback IPC ({IPC_FALLBACK_URL}) falló: {e}")
+    return out
+
+
+def _extender_ipc_con_fallback(serie: dict) -> dict:
+    """Extiende la serie oficial con los meses que todavía no sincronizó
+    datos.gob.ar, componiendo la variación mensual del fallback a partir del
+    último nivel OFICIAL. No modifica ningún nivel oficial ya presente, así que
+    cuando datos.gob.ar se pone al día el valor sintético se reemplaza solo por
+    el oficial (idénticos, porque la variación coincide)."""
+    if not serie:
+        return serie
+    var = _ipc_var_mensual_fallback()
+    if not var:
+        return serie
+
+    def _ym(k):
+        y, m = str(k).split("-")[:2]
+        return (int(y), int(m))
+
+    ultimo = max(serie.keys(), key=_ym)
+    nivel = serie[ultimo]
+    posteriores = sorted([k for k in var if _ym(k) > _ym(ultimo)], key=_ym)
+    for k in posteriores:
+        nivel = round(nivel * (1 + var[k] / 100.0), 6)
+        serie[k] = nivel
+    if posteriores:
+        print(f"[indices] IPC extendido con fallback: +{posteriores} (ancla {ultimo})")
+    return serie
+
+
 def _serie_ipc_sync() -> dict:
-    """{ 'YYYY-MM': nivel_indice } del IPC nacional (INDEC). Cacheado."""
+    """{ 'YYYY-MM': nivel_indice } del IPC nacional (INDEC). Cacheado.
+
+    Plan A: niveles oficiales de datos.gob.ar. Plan B: si la serie oficial se
+    atrasa, se extiende con la variación mensual de una fuente espejo (ver
+    _extender_ipc_con_fallback), para que el ajuste no quede trabado esperando
+    que datos.gob.ar sincronice un mes ya publicado por INDEC."""
     ahora = time.time()
     if _SERIE_CACHE["ipc"] and (ahora - _SERIE_CACHE["ipc_ts"]) < _SERIE_TTL:
         return _SERIE_CACHE["ipc"]
@@ -140,6 +201,8 @@ def _serie_ipc_sync() -> dict:
                     serie[str(fecha)[:7]] = float(valor)
     except Exception as e:
         print(f"[indices] serie IPC falló: {e}")
+    # Extender con el Plan B los meses que la serie oficial todavía no trae.
+    serie = _extender_ipc_con_fallback(serie)
     if serie:
         _SERIE_CACHE["ipc"] = serie
         _SERIE_CACHE["ipc_ts"] = ahora
