@@ -3,6 +3,7 @@ import { Plus, Users, Pencil, Trash2, X, Phone, Mail, History, Home, Calendar } 
 import Layout from '../components/Layout/Layout'
 import SearchBar, { match } from '../components/SearchBar'
 import api from '../utils/api'
+import { toLocalDate } from '../utils/fecha'
 
 const ROLES = ['propietario','inquilino','comprador','vendedor']
 const ROL_CHIP = {
@@ -21,7 +22,7 @@ const FILTRO_DEFAULT = 'inquilino'
 
 function fmtFecha(s) {
   if (!s) return '—'
-  try { return new Date(s).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) }
+  try { const d = toLocalDate(s); return d ? d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) : s }
   catch { return s }
 }
 

@@ -6,6 +6,7 @@ import {
 import Layout from '../components/Layout/Layout'
 import SearchBar, { match } from '../components/SearchBar'
 import api from '../utils/api'
+import { toLocalDate } from '../utils/fecha'
 
 const PAGADOR = { inquilino: 'Inquilino paga', propietario: 'Propietario paga' }
 const ESTADO_CHIP = {
@@ -179,7 +180,7 @@ export default function Refacciones() {
                   {filtradas.map(r => (
                     <tr key={r.id} className="hover:bg-neutral-50 dark:hover:bg-[#1A1A1A] transition">
                       <td className="td text-[12px] text-muted">
-                        {r.fecha ? new Date(r.fecha).toLocaleDateString('es-AR') : '—'}
+                        {r.fecha ? (toLocalDate(r.fecha)?.toLocaleDateString('es-AR') || '—') : '—'}
                       </td>
                       <td className="td">
                         <p className="font-medium text-[13px]">{r.descripcion}</p>

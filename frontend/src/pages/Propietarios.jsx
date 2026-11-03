@@ -3,6 +3,7 @@ import { Plus, KeyRound, Mail, Phone, Building2, Search, X, Pencil, Trash2, File
 import Layout from '../components/Layout/Layout'
 import { match } from '../components/SearchBar'
 import api from '../utils/api'
+import { toLocalDate } from '../utils/fecha'
 
 const empty = {
   nombre:'', apellido:'', razon_social:'', documento:'',
@@ -311,7 +312,7 @@ function ModalContratosPropietario({ propietario, onClose }) {
     }
   }
 
-  const fmtFecha = s => s ? new Date(s).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+  const fmtFecha = s => { const d = s && toLocalDate(s); return d ? d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' }
   const nombre = propietario.razon_social || `${propietario.nombre} ${propietario.apellido || ''}`.trim()
 
   const activos = contratos.filter(c => !c.archivado)
@@ -376,7 +377,7 @@ function ModalContratosPropietario({ propietario, onClose }) {
 
 
 function ContratoCard({ contrato, onVerPDF, onArchivar }) {
-  const fmtFecha = s => s ? new Date(s).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+  const fmtFecha = s => { const d = s && toLocalDate(s); return d ? d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' }
   const ESTADO_CHIP = {
     vigente: 'chip-dark', borrador: 'chip-gray', vencido: 'chip-warn',
     rescindido: 'chip-danger', reservado: 'chip-muted',

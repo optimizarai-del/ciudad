@@ -5,12 +5,13 @@ import {
 } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import api from '../utils/api'
+import { toLocalDate } from '../utils/fecha'
 
 
 const fmt = (n) => '$ ' + Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 })
 const fmtFecha = (s) => {
   if (!s) return '—'
-  try { return new Date(s).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) }
+  try { const d = toLocalDate(s); return d ? d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) : s }
   catch { return s }
 }
 

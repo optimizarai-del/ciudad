@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Layout from '../components/Layout/Layout'
 import SearchBar, { match } from '../components/SearchBar'
 import api from '../utils/api'
+import { toLocalDate } from '../utils/fecha'
 import ModalTasaMSR from '../components/ModalTasaMSR'
 import {
   CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight,
@@ -193,7 +194,7 @@ export default function Cobranza() {
                       <td className="td text-center">
                         {p.estado === 'pagado' ? (
                           <span className="text-xs text-green-600 dark:text-green-400">
-                            ✓ {p.fecha_pago ? new Date(p.fecha_pago).toLocaleDateString('es-AR') : ''}
+                            ✓ {p.fecha_pago ? (toLocalDate(p.fecha_pago)?.toLocaleDateString('es-AR') || '') : ''}
                           </span>
                         ) : (
                           <button onClick={() => setRegistroOpen(p)}
@@ -688,7 +689,7 @@ function RegistrarPagoModal({ item, mes, onClose, onSaved }) {
                     <span className="flex-1 truncate">
                       {r.descripcion}
                       <span className="text-muted ml-1">
-                        · {r.fecha ? new Date(r.fecha).toLocaleDateString('es-AR') : ''}
+                        · {r.fecha ? (toLocalDate(r.fecha)?.toLocaleDateString('es-AR') || '') : ''}
                       </span>
                     </span>
                     <span className="font-semibold tabular-nums">− {fmtMoney(r.monto)}</span>

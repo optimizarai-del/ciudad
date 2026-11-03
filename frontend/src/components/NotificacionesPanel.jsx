@@ -4,6 +4,7 @@ import {
   Bell, AlertTriangle, Clock, FileText, DollarSign, Calendar, X, RefreshCw,
 } from 'lucide-react'
 import api from '../utils/api'
+import { toLocalDate } from '../utils/fecha'
 
 
 const TIPO_ICONO = {
@@ -174,7 +175,7 @@ export default function NotificacionesPanel({ anchorRef, onClose }) {
                     <div className="flex items-center gap-1.5 mt-1 text-[10px] text-muted dark:text-gray-500">
                       <Clock size={9} />
                       {item.fecha
-                        ? new Date(item.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })
+                        ? (toLocalDate(item.fecha)?.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) || 'sin fecha')
                         : 'sin fecha'}
                     </div>
                   </div>

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import Layout from '../components/Layout/Layout'
 import api from '../utils/api'
+import { toLocalDate } from '../utils/fecha'
 
 
 /**
@@ -106,7 +107,8 @@ export default function ActualizarTasas() {
   const fmt = v => v == null ? '—' : `$ ${Number(v).toLocaleString('es-AR', { maximumFractionDigits: 0 })}`
   const fmtFecha = s => {
     if (!s) return 'Nunca'
-    return new Date(s).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })
+    const d = toLocalDate(s)
+    return d ? d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Nunca'
   }
 
   // Solo cuentan los drafts que realmente difieren del valor actual de

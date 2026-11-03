@@ -13,7 +13,7 @@ export default function Calculadora() {
   const [err, setErr] = useState('')
 
   useEffect(() => {
-    api.get('/api/propiedades').then(r => setProp(r.data.filter(p => p.modalidad !== 'venta')))
+    api.get('/api/propiedades/').then(r => setProp((r.data || []).filter(p => p.modalidad !== 'venta')))
   }, [])
 
   const sugerencias = propiedades.filter(p =>
